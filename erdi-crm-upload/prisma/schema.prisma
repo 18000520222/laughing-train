@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+model Company {
+  id             String         @id @default(cuid())
+  name           String
+  website        String?
+  country        String?
+  industry       String?
+  companyType    String         @default("PROSPECT")
+  source         String         @default("EMAIL")
+  contacts       Contact[]
+  opportunities  Opportunity[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+model Contact {
+  id             String         @id @default(cuid())
+  firstName      String
+  lastName       String?
+  email          String         @unique
+  title          String?
+  companyId      String
+  company        Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+}
+model Product {
+  id             String         @id @default(cuid())
+  sku            String         @unique
+  name           String
+  category       String
+  wavelength     String?
+  maxRange       Int?
+  blindZone      Int?
+  basePrice      Float?
+}
+model Opportunity {
+  id             String         @id @default(cuid())
+  title          String
+  amount         Float?
+  stage          String         @default("SPEC_CONFIRMING")
+  expectedClose  DateTime?
+  companyId      String
+  company        Company        @relation(fields: [companyId], references: [id])
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
