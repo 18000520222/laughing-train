@@ -14,7 +14,11 @@ export default async function PIDocument(props: any) {
       where: { id: String(oppId) }
     });
 
-    if (!opp) return <div className="p-10 text-red-500 font-bold">❌ 错误：在数据库中找不到该商机，可能已被删除。</div>;
+    if (!opp) return <div className="p-10 text-red-500 font-bold">❌ 错误：在数据库中找不到该商机。</div>;
+
+    const safeTitle = opp.title || '';
+    const shortId = String(oppId).substring(0, 4).toUpperCase();
+    const email = safeTitle.replace('New Inquiry from ', '');
 
     return (
       <div className="min-h-screen bg-gray-100 p-8 print:p-0 print:bg-white flex justify-center">
@@ -27,7 +31,7 @@ export default async function PIDocument(props: any) {
             </div>
             <div className="text-right">
               <h2 className="text-3xl font-light text-blue-800 tracking-widest">PROFORMA INVOICE</h2>
-              <p className="text-gray-600 mt-2 font-mono">No. PI-{new Date().getFullYear()}{new Date().getMonth()+1}-{oppId.substring(0,4).toUpperCase()}</p>
+              <p className="text-gray-600 mt-2 font-mono">No. PI-{new Date().getFullYear()}{new Date().getMonth()+1}-{shortId}</p>
               <p className="text-gray-500 text-sm">Date: {new Date().toLocaleDateString()}</p>
             </div>
           </header>
@@ -36,7 +40,7 @@ export default async function PIDocument(props: any) {
             <div className="w-1/2 pr-4">
               <h3 className="font-bold text-gray-800 mb-2 border-b border-gray-200 pb-1">BILL TO:</h3>
               <p className="font-bold text-gray-700">{opp.companyId || 'Client Company Name'}</p>
-              <p className="text-gray-600 mt-1">Email: {opp.title.replace('New Inquiry from ', '')}</p>
+              <p className="text-gray-600 mt-1">Email: {email}</p>
             </div>
             <div className="w-1/2 pl-4">
               <h3 className="font-bold text-gray-800 mb-2 border-b border-gray-200 pb-1">FROM:</h3>
@@ -92,9 +96,10 @@ export default async function PIDocument(props: any) {
             </div>
           </div>
 
-          <button onClick={() => window.print()} className="fixed bottom-8 right-8 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-full shadow-lg print:hidden flex items-center gap-2">
-            🖨️ 打印 / 存为 PDF
-          </button>
+          {/* 把会引起崩溃的点击按钮，换成了纯静态的提示语 */}
+          <div className="fixed bottom-8 right-8 bg-gray-800 text-white py-3 px-6 rounded shadow-lg print:hidden flex items-center gap-2">
+            🖨️ 打印或导出 PDF：请按键盘 <kbd className="bg-gray-600 px-2 py-1 rounded mx-1">⌘ + P</kbd>
+          </div>
         </div>
       </div>
     );
