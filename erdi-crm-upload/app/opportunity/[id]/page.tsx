@@ -5,43 +5,43 @@ import Link from 'next/link';
 export const dynamic = 'force-dynamic';
 const prisma = new PrismaClient();
 
+// 必须把服务器动作单独拆到组件外面，Vercel 编译器才会放行
+async function updateOpportunity(formData: FormData) {
+  'use server';
+  
+  const oppId = String(formData.get('oppId'));
+  const amount = Number(formData.get('amount')) || 0;
+  const companyId = String(formData.get('companyId')) || '';
+  const stage = String(formData.get('stage'));
+
+  if (!oppId) return;
+
+  await prisma.opportunity.update({
+    where: { id: oppId },
+    data: { amount, companyId, stage }
+  });
+
+  redirect('/dashboard');
+}
+
 export default async function OpportunityDetail(props: any) {
   const resolvedParams = await props.params;
   const oppId = resolvedParams?.id;
 
   if (!oppId) return <div className="p-10">缺少商机 ID</div>;
 
-  // 查询当前商机
   const opp = await prisma.opportunity.findUnique({
     where: { id: String(oppId) }
   });
 
   if (!opp) return <div className="p-10">找不到该商机</div>;
 
-  // 定义保存修改的“服务器动作 (Server Action)”
-  async function updateOpportunity(formData: FormData) {
-    'use server';
-    const amount = Number(formData.get('amount'));
-    const companyId = String(formData.get('companyId'));
-    const stage = String(formData.get('stage'));
-
-    // 更新数据库
-    await prisma.opportunity.update({
-      where: { id: String(oppId) },
-      data: { amount, companyId, stage }
-    });
-
-    // 更新完自动跳回看板
-    redirect('/dashboard');
-  }
-
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-5xl mx-auto">
         
-        {/* 顶部导航 */}
         <div className="mb-6 flex justify-between items-center">
-          <Link href="/dashboard" className="text-gray-500 hover:text-gray-800 flex items-center gap-2">
+          <Link href="/dashboard" className="text-gray-500 hover:text-gray-800 flex items-center gap-2 font-medium">
             ← 返回看板
           </Link>
           <h1 className="text-2xl font-bold text-gray-800">商机处理中心</h1>
@@ -49,7 +49,6 @@ export default async function OpportunityDetail(props: any) {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           
-          {/* 左侧：原始邮件/询盘信息阅读区 */}
           <div className="md:col-span-2 bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <h2 className="text-lg font-bold text-gray-800 border-b pb-3 mb-4">📧 原始邮件内容</h2>
             <div className="mb-4">
@@ -61,17 +60,18 @@ export default async function OpportunityDetail(props: any) {
               <p className="text-gray-800">{opp.createdAt.toLocaleString()}</p>
             </div>
             <div className="bg-gray-50 p-4 rounded-lg border border-gray-100 min-h-[300px] whitespace-pre-wrap text-gray-700">
-              {opp.description || '（这封邮件暂时没有正文内容，或者机器人只抓取了标题）'}
+              {opp.description || '（邮件暂无正文）'}
             </div>
           </div>
 
-          {/* 右侧：业务处理与报价控制台 */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <h2 className="text-lg font-bold text-blue-700 border-b pb-3 mb-4">⚙️ 业务处理台</h2>
             
             <form action={updateOpportunity} className="space-y-5">
               
-              {/* 客户公司名 */}
+              {/* 隐藏的 ID 输入框，传给后端 */}
+              <input type="hidden" name="oppId" value={opp.id} />
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">真实客户/公司名</label>
                 <input 
@@ -83,7 +83,6 @@ export default async function OpportunityDetail(props: any) {
                 />
               </div>
 
-              {/* 报价金额 */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">PI 报价总金额 (USD)</label>
                 <div className="relative">
@@ -97,7 +96,6 @@ export default async function OpportunityDetail(props: any) {
                 </div>
               </div>
 
-              {/* 漏斗阶段 */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">推进漏斗阶段</label>
                 <select 
@@ -111,7 +109,6 @@ export default async function OpportunityDetail(props: any) {
                 </select>
               </div>
 
-              {/* 提交按钮 */}
               <div className="pt-4 mt-6 border-t border-gray-100">
                 <button 
                   type="submit" 
@@ -120,7 +117,6 @@ export default async function OpportunityDetail(props: any) {
                   💾 保存修改并更新看板
                 </button>
               </div>
-              
             </form>
           </div>
 
