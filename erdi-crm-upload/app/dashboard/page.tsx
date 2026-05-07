@@ -1,104 +1,96 @@
-import React from 'react';
 import { PrismaClient } from '@prisma/client';
-import { LogOut, FileText } from 'lucide-react';
+import Link from 'next/link';
 
 const prisma = new PrismaClient();
 
-// 去 Supabase 拉取真实数据
-async function getOpportunities() {
-  return await prisma.opportunity.findMany({
-    include: { company: true },
-    orderBy: { updatedAt: 'desc' }
-  });
-}
+// 强制动态渲染
+export const dynamic = 'force-dynamic';
 
-// 接收登录用户的邮箱参数
-export default async function DashboardPage({ searchParams }: { searchParams: { user?: string } }) {
-  const opps = await getOpportunities();
-  
-  // 识别身份
-  const currentUser = searchParams.user || 'sales@erdicn.com';
-  const isFinance = currentUser === '18628970297@163.com';
+export default async function Dashboard() {
+  const opps = await prisma.opportunity.findMany({
+    orderBy: { createdAt: 'desc' }
+  });
 
   const totalAmount = opps.reduce((sum, opp) => sum + (opp.amount || 0), 0);
 
   return (
-    <div className="min-h-screen bg-slate-50 p-8 font-sans">
-      <header className="mb-8 flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+    <div className="min-h-screen bg-gray-50 p-8">
+      {/* 顶部导航 */}
+      <header className="mb-8 flex justify-between items-center bg-white p-6 rounded-xl shadow-sm border border-gray-100">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">ERDI {isFinance ? '财务审核看板' : '业务与商机看板'}</h1>
-          <p className="text-sm text-blue-600 mt-1 flex items-center">
-            当前登录: <b>{currentUser}</b> 
-            <span className="ml-2 px-2 py-0.5 bg-blue-100 rounded text-xs">{isFinance ? '财务专员' : '主理人'}</span>
+          <h1 className="text-2xl font-bold text-gray-800 tracking-tight">ERDI 业务与商机看板</h1>
+          <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-green-500"></span>
+            当前登录: sales@erdicn.com <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-medium">主理人</span>
           </p>
         </div>
-        <div className="flex items-center space-x-6 text-slate-600">
-          <div className="text-right">
-            <p className="text-xs text-slate-400">系统总漏斗金额</p>
-            <p className="text-lg font-bold text-emerald-600">${totalAmount.toLocaleString()}</p>
-          </div>
-          <a href="/login" className="p-2 hover:bg-red-50 rounded-lg text-red-500 transition-colors" title="退出">
-            <LogOut className="w-5 h-5" />
-          </a>
+        <div className="text-right">
+          <p className="text-sm text-gray-500">系统总漏斗金额</p>
+          <p className="text-3xl font-bold text-green-600">${totalAmount.toLocaleString()}</p>
         </div>
       </header>
 
-      {isFinance ? (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 border-b border-gray-200 text-slate-500">
-              <tr>
-                <th className="p-4">客户公司</th>
-                <th className="p-4">项目名称</th>
-                <th className="p-4">预计金额</th>
-                <th className="p-4">当前阶段</th>
-              </tr>
-            </thead>
-            <tbody>
-              {opps.map(opp => (
-                <tr key={opp.id} className="border-b border-gray-100 hover:bg-slate-50">
-                  <td className="p-4 font-semibold text-slate-800">{opp.company?.name || '未知公司'}</td>
-                  <td className="p-4">{opp.title}</td>
-                  <td className="p-4 font-bold text-emerald-600">${opp.amount?.toLocaleString()}</td>
-                  <td className="p-4"><span className="px-2 py-1 bg-gray-100 rounded-full text-xs">{opp.stage}</span></td>
-                </tr>
-              ))}
-              {opps.length === 0 && (
-                <tr><td colSpan={4} className="p-8 text-center text-gray-400">数据库暂无真实商机，等待邮件抓取</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-6">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-            <h3 className="font-bold text-slate-800 mb-4">全部真实商机 (来自 Supabase)</h3>
-            <div className="space-y-3">
-              {opps.map(opp => (
-                <div key={opp.id} className="flex justify-between items-center p-4 border border-gray-100 rounded-lg hover:border-blue-300">
-                  <div>
-                    <h4 className="font-bold text-slate-900">{opp.title}</h4>
-                    <p className="text-xs text-gray-500 mt-1">客户: {opp.company?.name || '未知公司'} | 阶段: {opp.stage}</p>
-                  </div>
-                  <div className="flex items-center space-x-4">
-                    <div className="font-bold text-emerald-600">${opp.amount?.toLocaleString()}</div>
-                    {/* 一键生成 PI 的按钮 */}
-                    <a href={`/pi/${opp.id}`} target="_blank" className="flex items-center text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded hover:bg-blue-100 transition-colors">
-                      <FileText className="w-3 h-3 mr-1" /> 生成 PI
-                    </a>
-                  </div>
+      {/* 看板区域 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        {/* 第一列：新询盘 / SPEC_CONFIRMING */}
+        <div className="bg-gray-100/50 rounded-xl p-4 border border-gray-200">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="font-semibold text-gray-700">新询盘确认 (Spec Confirming)</h2>
+            <span className="bg-gray-200 text-gray-600 text-xs px-2 py-1 rounded-full">{opps.filter(o => o.stage === 'SPEC_CONFIRMING').length}</span>
+          </div>
+          
+          <div className="space-y-4">
+            {opps.filter(o => o.stage === 'SPEC_CONFIRMING').map(opp => (
+              <div key={opp.id} className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow group relative">
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="font-bold text-gray-800 text-lg">{opp.title}</h3>
+                  <span className="text-green-600 font-semibold">${opp.amount || 0}</span>
                 </div>
-              ))}
-              {opps.length === 0 && (
-                <div className="text-center py-10 bg-blue-50 rounded-lg border border-blue-100">
-                  <p className="text-blue-600 font-medium">✨ 系统连接成功！</p>
-                  <p className="text-sm text-blue-400 mt-1">数据库已准备就绪，目前为空。等待邮件自动抓取...</p>
+                <p className="text-sm text-gray-500 mb-4 line-clamp-2">客户: {opp.companyId || '未匹配公司'}</p>
+                
+                <div className="flex justify-between items-center pt-3 border-t border-gray-100">
+                  <Link 
+                    href={`/opportunity/${opp.id}`}
+                    className="text-sm text-blue-600 hover:text-blue-800 font-medium px-3 py-1.5 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
+                  >
+                    处理邮件 & 详情
+                  </Link>
+                  <Link 
+                    href={`/pi/${opp.id}`}
+                    className="text-sm text-gray-600 hover:text-gray-900 border border-gray-200 px-3 py-1.5 rounded-md hover:bg-gray-50 transition-colors"
+                  >
+                    📄 生成 PI
+                  </Link>
                 </div>
-              )}
-            </div>
+              </div>
+            ))}
           </div>
         </div>
-      )}
+
+        {/* 预留第二列：样品测试 */}
+        <div className="bg-gray-100/50 rounded-xl p-4 border border-gray-200">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="font-semibold text-gray-700">样品测试 (Sample Testing)</h2>
+            <span className="bg-gray-200 text-gray-600 text-xs px-2 py-1 rounded-full">0</span>
+          </div>
+          <div className="text-center py-10 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-lg">
+            暂无商机拖拽至此
+          </div>
+        </div>
+
+        {/* 预留第三列：已赢单 */}
+        <div className="bg-gray-100/50 rounded-xl p-4 border border-gray-200">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="font-semibold text-gray-700">已成单 (Closed Won)</h2>
+            <span className="bg-gray-200 text-gray-600 text-xs px-2 py-1 rounded-full">0</span>
+          </div>
+          <div className="text-center py-10 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-lg">
+            暂无成交记录
+          </div>
+        </div>
+
+      </div>
     </div>
   );
 }
