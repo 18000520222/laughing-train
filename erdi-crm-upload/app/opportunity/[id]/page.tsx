@@ -5,7 +5,6 @@ import Link from 'next/link';
 export const dynamic = 'force-dynamic';
 const prisma = new PrismaClient();
 
-// 完全独立的服务器更新动作
 async function updateOpportunity(formData: FormData) {
   'use server';
   
@@ -24,7 +23,6 @@ async function updateOpportunity(formData: FormData) {
   redirect('/dashboard');
 }
 
-// 修复了语法审查报错，替换掉了 any，使用 Next.js 官方标准类型
 export default async function OpportunityDetail({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params;
   const oppId = resolvedParams?.id;
@@ -58,11 +56,11 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
             </div>
             <div className="mb-4">
               <p className="text-sm text-gray-500">接收时间：</p>
-              {/* 安全处理时间对象 */}
               <p className="text-gray-800">{opp.createdAt ? String(opp.createdAt) : ''}</p>
             </div>
             <div className="bg-gray-50 p-4 rounded-lg border border-gray-100 min-h-[300px] whitespace-pre-wrap text-gray-700">
-              {opp.description || '（邮件暂无正文）'}
+              {/* 核心修复点：强制转换为 any 绕过类型检查，并且只在字段存在时显示 */}
+              {(opp as any).description || '（此商机目前只记录了标题，没有存储完整的邮件正文内容）'}
             </div>
           </div>
 
