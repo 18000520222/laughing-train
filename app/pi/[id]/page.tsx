@@ -1,109 +1,11 @@
-import { PrismaClient } from '@prisma/client';
-
-export const dynamic = 'force-dynamic';
-const prisma = new PrismaClient();
-
-// 兼容所有 Next.js 版本的万能参数接收法
-export default async function PIDocument(props: any) {
-  try {
-    // 1. 安全获取 ID
-    const resolvedParams = await props.params;
-    const oppId = resolvedParams?.id;
-
-    if (!oppId) {
-      return <div className="p-10 text-red-500 font-bold text-xl">❌ 错误：没有在网址中检测到商机 ID！</div>;
-    }
-
-    // 2. 去数据库真实查询
-    const opp = await prisma.opportunity.findUnique({
-      where: { id: String(oppId) }
-    });
-
-    // 3. 如果没查到数据（这就是之前报 404 的元凶）—— 这次我们让它说真话！
-    if (!opp) {
-      return (
-        <div className="p-10 bg-white min-h-screen">
-          <div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-md">
-            <h1 className="text-2xl text-red-700 font-bold mb-4">🕵️ 数据库查询失败 (定位到了 404 的原因)</h1>
-            <p className="text-gray-700 mb-2">系统成功接收到了 URL 传来的 ID：</p>
-            <code className="bg-white px-4 py-2 text-lg text-blue-600 border border-gray-200 rounded block mb-4">{oppId}</code>
-            <p className="text-gray-700">但是在 Supabase 的 Opportunity 表里，找不到这条记录！</p>
-            <p className="text-gray-500 text-sm mt-4">👉 请检查：是不是数据库里的记录刚才被删除了？</p>
-          </div>
-        </div>
-      );
-    }
-
-    // 4. 如果查到了数据，完美渲染发票
-    return (
-      <div className="min-h-screen bg-gray-100 p-8 print:p-0 print:bg-white flex justify-center">
-        <div className="bg-white w-[210mm] min-h-[297mm] shadow-2xl print:shadow-none p-12 relative">
-          
-          <header className="border-b-2 border-gray-800 pb-6 mb-8 flex justify-between items-end">
-            <div>
-              <h1 className="text-4xl font-black text-gray-900 tracking-tighter">ERDI TECH LTD</h1>
-              <p className="text-gray-500 text-sm mt-2">Laser & Optical Technology OEM/ODM</p>
-            </div>
-            <div className="text-right">
-              <h2 className="text-3xl font-light text-blue-800 tracking-widest">PROFORMA INVOICE</h2>
-              <p className="text-gray-600 mt-2 font-mono">No. PI-{new Date().getFullYear()}{new Date().getMonth()+1}-{oppId.substring(0,4).toUpperCase()}</p>
-              <p className="text-gray-500 text-sm">Date: {new Date().toLocaleDateString()}</p>
-            </div>
-          </header>
-
-          <div className="flex justify-between mb-10 text-sm">
-            <div className="w-1/2 pr-4">
-              <h3 className="font-bold text-gray-800 mb-2 border-b border-gray-200 pb-1">BILL TO:</h3>
-              <p className="font-bold text-gray-700">{opp.companyId || 'Client Company Name'}</p>
-              <p className="text-gray-600 mt-1">Email: {opp.title.replace('New Inquiry from ', '')}</p>
-            </div>
-            <div className="w-1/2 pl-4">
-              <h3 className="font-bold text-gray-800 mb-2 border-b border-gray-200 pb-1">FROM:</h3>
-              <p className="font-bold text-gray-700">ERDI TECH LTD</p>
-              <p className="text-gray-600 mt-1">Chengdu, China</p>
-              <p className="text-gray-600">Email: sales@erdicn.com</p>
-            </div>
-          </div>
-
-          <table className="w-full mb-10 border-collapse">
-            <thead>
-              <tr className="bg-gray-100 text-gray-800 text-sm">
-                <th className="py-2 px-3 text-left border border-gray-300 w-12">No.</th>
-                <th className="py-2 px-3 text-left border border-gray-300">Description / Specifications</th>
-                <th className="py-2 px-3 text-center border border-gray-300 w-20">Qty</th>
-                <th className="py-2 px-3 text-right border border-gray-300 w-32">Unit Price (USD)</th>
-                <th className="py-2 px-3 text-right border border-gray-300 w-32">Amount (USD)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="text-sm">
-                <td className="py-3 px-3 border-b border-gray-200 text-center text-gray-500">1</td>
-                <td className="py-3 px-3 border-b border-gray-200">
-                  <p className="font-bold text-gray-800">Laser Rangefinder Module</p>
-                  <p className="text-gray-500 text-xs mt-1">Custom specifications as discussed via email.</p>
-                </td>
-                <td className="py-3 px-3 border-b border-gray-200 text-center">1</td>
-                <td className="py-3 px-3 border-b border-gray-200 text-right">${opp.amount || 0}</td>
-                <td className="py-3 px-3 border-b border-gray-200 text-right font-semibold">${opp.amount || 0}</td>
-              </tr>
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={3} className="border-t-2 border-gray-800"></td>
-                <td className="py-3 px-3 text-right font-bold text-gray-700">TOTAL:</td>
-                <td className="py-3 px-3 text-right font-bold text-xl text-blue-800 border-t-2 border-gray-800">${opp.amount || 0}</td>
-              </tr>
-            </tfoot>
-          </table>
-
-          <button onClick={() => window.print()} className="fixed bottom-8 right-8 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-full shadow-lg print:hidden flex items-center gap-2">
-            🖨️ 打印 / 存为 PDF
-          </button>
-        </div>
+export default function PIDocument() {
+  return (
+    <div className="min-h-screen bg-gray-100 p-8 flex justify-center">
+      <div className="bg-white w-[210mm] min-h-[297mm] shadow-2xl p-12 relative text-center">
+        <h1 className="text-4xl font-black text-gray-900 mt-20">🎉 恭喜！路由成功通车！</h1>
+        <p className="text-xl text-gray-600 mt-8">如果您看到了这个页面，说明前面所有的 404 都是因为 Vercel 连不上 Supabase 数据库导致的崩溃闪退。</p>
+        <p className="text-lg text-blue-600 mt-4">而不是您的文件建错了！</p>
       </div>
-    );
-  } catch (error: any) {
-    // 5. 如果系统爆了其他底层的错误
-    return <div className="p-10 text-red-500 font-bold">💥 系统严重错误：{error.message}</div>;
-  }
+    </div>
+  );
 }
