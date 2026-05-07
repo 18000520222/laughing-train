@@ -5,7 +5,7 @@ import Link from 'next/link';
 export const dynamic = 'force-dynamic';
 const prisma = new PrismaClient();
 
-// 必须把服务器动作单独拆到组件外面，Vercel 编译器才会放行
+// 完全独立的服务器更新动作
 async function updateOpportunity(formData: FormData) {
   'use server';
   
@@ -24,8 +24,9 @@ async function updateOpportunity(formData: FormData) {
   redirect('/dashboard');
 }
 
-export default async function OpportunityDetail(props: any) {
-  const resolvedParams = await props.params;
+// 修复了语法审查报错，替换掉了 any，使用 Next.js 官方标准类型
+export default async function OpportunityDetail({ params }: { params: Promise<{ id: string }> }) {
+  const resolvedParams = await params;
   const oppId = resolvedParams?.id;
 
   if (!oppId) return <div className="p-10">缺少商机 ID</div>;
@@ -57,7 +58,8 @@ export default async function OpportunityDetail(props: any) {
             </div>
             <div className="mb-4">
               <p className="text-sm text-gray-500">接收时间：</p>
-              <p className="text-gray-800">{opp.createdAt.toLocaleString()}</p>
+              {/* 安全处理时间对象 */}
+              <p className="text-gray-800">{opp.createdAt ? String(opp.createdAt) : ''}</p>
             </div>
             <div className="bg-gray-50 p-4 rounded-lg border border-gray-100 min-h-[300px] whitespace-pre-wrap text-gray-700">
               {opp.description || '（邮件暂无正文）'}
@@ -69,7 +71,6 @@ export default async function OpportunityDetail(props: any) {
             
             <form action={updateOpportunity} className="space-y-5">
               
-              {/* 隐藏的 ID 输入框，传给后端 */}
               <input type="hidden" name="oppId" value={opp.id} />
 
               <div>
