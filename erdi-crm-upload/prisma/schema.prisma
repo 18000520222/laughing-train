@@ -42,6 +42,7 @@ model Product {
 model Opportunity {
   id             String         @id @default(cuid())
   title          String
+  description    String?
   amount         Float?
   stage          String         @default("SPEC_CONFIRMING")
   expectedClose  DateTime?
