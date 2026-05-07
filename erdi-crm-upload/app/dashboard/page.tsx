@@ -1,6 +1,6 @@
 import React from 'react';
 import { PrismaClient } from '@prisma/client';
-import { LogOut } from 'lucide-react';
+import { LogOut, FileText } from 'lucide-react';
 
 const prisma = new PrismaClient();
 
@@ -80,7 +80,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: { 
                     <h4 className="font-bold text-slate-900">{opp.title}</h4>
                     <p className="text-xs text-gray-500 mt-1">客户: {opp.company?.name || '未知公司'} | 阶段: {opp.stage}</p>
                   </div>
-                  <div className="font-bold text-emerald-600">${opp.amount?.toLocaleString()}</div>
+                  <div className="flex items-center space-x-4">
+                    <div className="font-bold text-emerald-600">${opp.amount?.toLocaleString()}</div>
+                    {/* 一键生成 PI 的按钮 */}
+                    <a href={`/pi/${opp.id}`} target="_blank" className="flex items-center text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded hover:bg-blue-100 transition-colors">
+                      <FileText className="w-3 h-3 mr-1" /> 生成 PI
+                    </a>
+                  </div>
                 </div>
               ))}
               {opps.length === 0 && (
