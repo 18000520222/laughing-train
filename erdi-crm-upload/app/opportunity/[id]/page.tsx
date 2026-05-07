@@ -73,13 +73,11 @@ async function sendEmailReply(formData: FormData) {
 
   } catch (error) {
     console.error("邮件发送失败:", error);
-    // 这里如果发信失败其实可以做个错误页面，但为了保证主流程我们记录日志
   }
 
   // 刷新当前页面以展示最新记录
   redirect(`/opportunity/${oppId}`);
 }
-
 
 export default async function OpportunityDetail({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params;
@@ -125,35 +123,29 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
               </div>
             </div>
 
-            {/* 一键回复客户控制台 */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 border-l-4 border-l-blue-500 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full blur-3xl -mr-10 -mt-10 opacity-50"></div>
-              
-              <h2 className="text-lg font-bold text-blue-800 mb-4 relative z-10">✉️ 快捷回复客户</h2>
-              <form action={sendEmailReply} className="space-y-4 relative z-10">
+            {/* 一键回复客户控制台 (已修复按钮丢失问题) */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 border-l-4 border-l-blue-500 mt-2">
+              <h2 className="text-lg font-bold text-blue-800 mb-4">✉️ 快捷回复客户</h2>
+              <form action={sendEmailReply} className="flex flex-col gap-4">
                 <input type="hidden" name="oppId" value={opp.id} />
                 <input type="hidden" name="customerEmail" value={rawSender} />
                 <input type="hidden" name="oldDescription" value={(opp as any).description || ''} />
                 <input type="hidden" name="oppTitle" value={opp.title} />
                 
-                <div>
-                  <textarea 
-                    name="replyContent" 
-                    rows={5} 
-                    required
-                    placeholder={`在此输入要回复给 ${rawSender} 的内容...\n系统将以 sales@erdicn.com 的身份发出，并永久追加到上方历史记录中。`}
-                    className="w-full border border-gray-200 rounded-xl p-4 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm text-sm resize-none bg-white/80 backdrop-blur-sm"
-                  ></textarea>
-                </div>
+                <textarea 
+                  name="replyContent" 
+                  rows={5} 
+                  required
+                  placeholder={`在此输入要回复给 ${rawSender} 的内容...\n系统将以 sales@erdicn.com 的身份发出，并永久追加到上方历史记录中。`}
+                  className="w-full border border-gray-300 rounded-xl p-4 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm text-sm resize-none"
+                ></textarea>
                 
-                <div className="text-right">
-                  <button 
-                    type="submit" 
-                    className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-bold py-2.5 px-8 rounded-lg transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-                  >
-                    🚀 发送邮件并留档
-                  </button>
-                </div>
+                <button 
+                  type="submit" 
+                  className="self-end bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg shadow-md transition-colors"
+                >
+                  🚀 发送邮件并留档
+                </button>
               </form>
             </div>
 
