@@ -1,101 +1,123 @@
-export const dynamic = 'force-dynamic';
-import React from 'react';
 import { PrismaClient } from '@prisma/client';
 import { notFound } from 'next/navigation';
 
+export const dynamic = 'force-dynamic';
+
 const prisma = new PrismaClient();
 
-export default async function PIDocumentPage({ params }: { params: { id: string } }) {
-  // 从数据库查出这个商机的详细信息
+// Next.js 最新版要求 params 必须是 Promise 结构
+export default async function PIDocument({ params }: { params: Promise<{ id: string }> }) {
+  // 正确解析 ID 的方式
+  const resolvedParams = await params;
+  const oppId = resolvedParams.id;
+
+  if (!oppId) {
+    notFound();
+  }
+
+  // 去数据库查询真实的商机数据
   const opp = await prisma.opportunity.findUnique({
-    where: { id: params.id },
-    include: { company: true }
+    where: { id: oppId }
   });
 
-  if (!opp) return notFound();
+  if (!opp) {
+    notFound();
+  }
 
-  const invoiceNo = `PI-${new Date().getFullYear()}${new Date().getMonth()+1}-${opp.id.substring(0,4).toUpperCase()}`;
-  const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-  const amount = opp.amount || 0; // 默认金额
+  // 计算一个过期时间 (30天后)
+  const validUntil = new Date();
+  validUntil.setDate(validUntil.getDate() + 30);
 
   return (
-    <div className="min-h-screen bg-gray-200 p-8 flex justify-center">
-      {/* 这块白板模拟一张 A4 纸 */}
-      <div className="bg-white w-full max-w-[800px] shadow-xl p-12 text-slate-800 font-sans">
+    <div className="min-h-screen bg-gray-100 p-8 print:p-0 print:bg-white flex justify-center">
+      {/* A4 纸张容器 */}
+      <div className="bg-white w-[210mm] min-h-[297mm] shadow-2xl print:shadow-none p-12 relative">
         
-        {/* 头部：Logo 和 抬头 */}
-        <div className="flex justify-between items-start border-b-2 border-slate-900 pb-6 mb-8">
+        {/* 顶部：公司抬头 */}
+        <header className="border-b-2 border-gray-800 pb-6 mb-8 flex justify-between items-end">
           <div>
-            <h1 className="text-4xl font-extrabold text-slate-900 tracking-tighter">ERDI TECH</h1>
-            <p className="text-sm font-semibold text-blue-600 tracking-widest mt-1">LASER & OPTICS EXPERTS</p>
+            <h1 className="text-4xl font-black text-gray-900 tracking-tighter">ERDI TECH LTD</h1>
+            <p className="text-gray-500 text-sm mt-2">Laser & Optical Technology OEM/ODM</p>
           </div>
-          <div className="text-right text-sm text-slate-500">
-            <h2 className="text-2xl font-bold text-slate-300 mb-2">PROFORMA INVOICE</h2>
-            <p>Chengdu, Sichuan, China</p>
-            <p>Email: sales@erdicn.com</p>
-            <p>Tel: +86-28-81076698</p>
+          <div className="text-right">
+            <h2 className="text-3xl font-light text-blue-800 tracking-widest">PROFORMA INVOICE</h2>
+            <p className="text-gray-600 mt-2 font-mono">No. PI-{new Date().getFullYear()}{new Date().getMonth()+1}-{oppId.substring(0,4).toUpperCase()}</p>
+            <p className="text-gray-500 text-sm">Date: {new Date().toLocaleDateString()}</p>
           </div>
-        </div>
+        </header>
 
-        {/* 客户与发票信息 */}
+        {/* 客户与卖方信息 */}
         <div className="flex justify-between mb-10 text-sm">
-          <div className="bg-slate-50 p-4 rounded-lg w-1/2 mr-4 border border-slate-100">
-            <p className="font-bold text-slate-400 mb-1 text-xs">BILL TO (买方):</p>
-            <p className="font-bold text-lg text-slate-800">{opp.company?.name || 'Customer'}</p>
-            <p className="text-slate-600 mt-1">Source: {opp.company?.source}</p>
+          <div className="w-1/2 pr-4">
+            <h3 className="font-bold text-gray-800 mb-2 border-b border-gray-200 pb-1">BILL TO:</h3>
+            <p className="font-bold text-gray-700">{opp.companyId || 'Client Company Name'}</p>
+            <p className="text-gray-600 mt-1">Email: {opp.title.replace('New Inquiry from ', '')}</p>
           </div>
-          <div className="w-1/3 text-right flex flex-col justify-center">
-            <p><span className="font-bold text-slate-600">PI No:</span> {invoiceNo}</p>
-            <p><span className="font-bold text-slate-600">Date:</span> {dateStr}</p>
-            <p><span className="font-bold text-slate-600">Validity:</span> 30 Days</p>
+          <div className="w-1/2 pl-4">
+            <h3 className="font-bold text-gray-800 mb-2 border-b border-gray-200 pb-1">FROM:</h3>
+            <p className="font-bold text-gray-700">ERDI TECH LTD</p>
+            <p className="text-gray-600 mt-1">Chengdu, China</p>
+            <p className="text-gray-600">Email: sales@erdicn.com</p>
           </div>
         </div>
 
-        {/* 订单表格 */}
-        <table className="w-full mb-8 text-sm border-collapse">
+        {/* 商品列表 (占位演示，后续可从数据库读 Product) */}
+        <table className="w-full mb-10 border-collapse">
           <thead>
-            <tr className="bg-slate-900 text-white">
-              <th className="p-3 text-left w-1/2">Description (产品描述)</th>
-              <th className="p-3 text-center">Qty (数量)</th>
-              <th className="p-3 text-right">Unit Price (单价)</th>
-              <th className="p-3 text-right">Total (总价)</th>
+            <tr className="bg-gray-100 text-gray-800 text-sm">
+              <th className="py-2 px-3 text-left border border-gray-300 w-12">No.</th>
+              <th className="py-2 px-3 text-left border border-gray-300">Description / Specifications</th>
+              <th className="py-2 px-3 text-center border border-gray-300 w-20">Qty</th>
+              <th className="py-2 px-3 text-right border border-gray-300 w-32">Unit Price (USD)</th>
+              <th className="py-2 px-3 text-right border border-gray-300 w-32">Amount (USD)</th>
             </tr>
           </thead>
           <tbody>
-            <tr className="border-b border-slate-200">
-              <td className="p-4 font-medium">{opp.title}</td>
-              <td className="p-4 text-center">1</td>
-              <td className="p-4 text-right">${amount.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-              <td className="p-4 text-right font-bold">${amount.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+            <tr className="text-sm">
+              <td className="py-3 px-3 border-b border-gray-200 text-center text-gray-500">1</td>
+              <td className="py-3 px-3 border-b border-gray-200">
+                <p className="font-bold text-gray-800">Laser Rangefinder Module</p>
+                <p className="text-gray-500 text-xs mt-1">Custom specifications as discussed via email.</p>
+              </td>
+              <td className="py-3 px-3 border-b border-gray-200 text-center">1</td>
+              <td className="py-3 px-3 border-b border-gray-200 text-right">${opp.amount || 0}</td>
+              <td className="py-3 px-3 border-b border-gray-200 text-right font-semibold">${opp.amount || 0}</td>
             </tr>
           </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={3} className="border-t-2 border-gray-800"></td>
+              <td className="py-3 px-3 text-right font-bold text-gray-700">TOTAL:</td>
+              <td className="py-3 px-3 text-right font-bold text-xl text-blue-800 border-t-2 border-gray-800">${opp.amount || 0}</td>
+            </tr>
+          </tfoot>
         </table>
 
-        {/* 总价区域 */}
-        <div className="flex justify-end mb-12">
-          <div className="w-1/2 bg-slate-50 p-4 rounded-lg border border-slate-200">
-            <div className="flex justify-between items-center text-lg font-bold text-slate-900">
-              <span>TOTAL DUE:</span>
-              <span className="text-blue-600">${amount.toLocaleString(undefined, {minimumFractionDigits: 2})} USD</span>
-            </div>
+        {/* 银行信息与条款 */}
+        <div className="text-sm text-gray-600 bg-gray-50 p-4 rounded border border-gray-200 mb-8">
+          <h3 className="font-bold text-gray-800 mb-2">BANKING DETAILS (T/T in Advance)</h3>
+          <p>Bank Name: [Your Bank Name]</p>
+          <p>Swift Code: [Your Swift Code]</p>
+          <p>A/C No.: [Your Account Number]</p>
+          <p>Beneficiary: ERDI TECH LTD</p>
+        </div>
+
+        {/* 底部盖章签名区 */}
+        <div className="absolute bottom-12 right-12 w-48 text-center">
+          <p className="mb-16 text-sm text-gray-500">Authorized Signature</p>
+          <div className="border-t border-gray-800 pt-2">
+            <p className="font-bold text-gray-800 text-sm">ERDI TECH LTD</p>
           </div>
         </div>
 
-        {/* 银行信息与签名 */}
-        <div className="border-t border-slate-200 pt-8 text-sm text-slate-600 flex justify-between">
-          <div className="w-2/3">
-            <p className="font-bold text-slate-800 mb-2">Payment Terms (T/T or PayPal):</p>
-            <p>Bank Name: Bank of China (Chengdu Branch)</p>
-            <p>Account No: XXXX-XXXX-XXXX-XXXX</p>
-            <p>SWIFT Code: BKCHCNXXXX</p>
-            <p className="mt-4 italic">Delivery: 5-7 working days after payment received.</p>
-          </div>
-          <div className="w-1/3 text-center mt-10">
-            <div className="border-b border-slate-400 mb-2 h-10"></div>
-            <p>Authorized Signature</p>
-            <p className="text-xs text-slate-400">(ERDI Sales Team)</p>
-          </div>
-        </div>
+        {/* 悬浮打印按钮 (打印时自动隐藏) */}
+        <button 
+          onClick={() => window.print()}
+          className="fixed bottom-8 right-8 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-full shadow-lg print:hidden transition-transform transform hover:scale-105 flex items-center gap-2"
+        >
+          🖨️ 打印 / 存为 PDF
+        </button>
+
       </div>
     </div>
   );
