@@ -56,22 +56,29 @@ export default async function Dashboard() {
           <h1 className="text-2xl font-bold text-gray-800 tracking-tight">ERDI 业务与商机看板</h1>
           <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-green-500"></span>
-            {/* 这里不再是写死的代码，而是变成了谁登录显示谁！ */}
             当前登录: <span className="font-semibold text-gray-700">{currentUser}</span> 
             <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-medium ml-1">{currentTitle}</span>
           </p>
         </div>
-        <div className="flex items-center gap-8">
-          <div className="text-right">
+        
+        {/* 👇 这里就是帮您改好的第四步：新增的物流中心入口按钮 👇 */}
+        <div className="flex items-center gap-6">
+          <Link href="/logistics" className="flex items-center gap-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-4 py-2 rounded-lg font-bold transition-colors border border-indigo-100 shadow-sm">
+            📦 物流发货中心
+          </Link>
+          
+          <div className="text-right border-l border-gray-200 pl-6">
             <p className="text-sm text-gray-500">系统总漏斗金额</p>
             <p className="text-3xl font-bold text-green-600">${totalAmount.toLocaleString()}</p>
           </div>
           <form action={logout}>
             <button type="submit" className="text-sm bg-gray-100 hover:bg-red-50 text-gray-600 hover:text-red-600 border border-gray-200 px-4 py-2 rounded-lg font-medium transition-colors">
-              退出系统
+              退出
             </button>
           </form>
         </div>
+        {/* 👆 第四步修改结束 👆 */}
+
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
