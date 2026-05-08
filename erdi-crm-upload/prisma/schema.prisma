@@ -51,4 +51,6 @@ model Opportunity {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   lockedPiData   Json?
+  carrier        String?
+  trackingNumber  String?
 }
