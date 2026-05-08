@@ -1,13 +1,14 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
-// 🏢 企业员工账号库 (您以后想加人，直接在这里加一行就行)
+// 🏢 企业员工账号库 (新增了 venk@erdicn.com)
 const USERS = [
   { email: 'sales@erdicn.com',     password: 'sales666',   role: 'sales',   title: '业务主账号' },
   { email: 'yilin@erdimail.com',   password: 'erdi123',    role: 'sales',   title: '业务代表' },
   { email: 'niro@erdimail.com',    password: 'erdi123',    role: 'sales',   title: '业务代表' },
   { email: 'lyn@erdimail.com',     password: 'erdi123',    role: 'sales',   title: '业务代表' },
   { email: 'yeva@erdimail.com',    password: 'erdi123',    role: 'sales',   title: '业务代表' },
+  { email: 'venk@erdicn.com',      password: 'erdi123',    role: 'sales',   title: '业务代表' },
   { email: '18628970297@163.com',  password: 'finance888', role: 'finance', title: '财务审计' }
 ];
 
