@@ -50,4 +50,5 @@ model Opportunity {
   company        Company        @relation(fields: [companyId], references: [id])
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
+  lockedPiData   Json?
 }
