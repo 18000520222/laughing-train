@@ -7,8 +7,12 @@ export const dynamic = 'force-dynamic';
 const prisma = new PrismaClient();
 
 export default async function Dashboard() {
-  // 🔒 安全校验：非业务主理人（比如财务或者外人）直接踢回登录页
-  const role = cookies().get('auth_role')?.value;
+  const cookieStore = cookies();
+  const role = cookieStore.get('auth_role')?.value;
+  // 动态读取当前登录者的邮箱和头衔！
+  const currentUser = cookieStore.get('auth_email')?.value || '未知账号';
+  const currentTitle = cookieStore.get('auth_title')?.value || '业务人员';
+
   if (role !== 'sales') {
     redirect('/');
   }
@@ -19,10 +23,11 @@ export default async function Dashboard() {
 
   const totalAmount = opps.reduce((sum, opp) => sum + (opp.amount || 0), 0);
 
-  // 退出登录动作
   async function logout() {
     'use server';
     cookies().delete('auth_role');
+    cookies().delete('auth_email');
+    cookies().delete('auth_title');
     redirect('/');
   }
 
@@ -51,7 +56,9 @@ export default async function Dashboard() {
           <h1 className="text-2xl font-bold text-gray-800 tracking-tight">ERDI 业务与商机看板</h1>
           <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-green-500"></span>
-            当前登录: sales@erdicn.com <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-medium">主理人</span>
+            {/* 这里不再是写死的代码，而是变成了谁登录显示谁！ */}
+            当前登录: <span className="font-semibold text-gray-700">{currentUser}</span> 
+            <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-medium ml-1">{currentTitle}</span>
           </p>
         </div>
         <div className="flex items-center gap-8">
