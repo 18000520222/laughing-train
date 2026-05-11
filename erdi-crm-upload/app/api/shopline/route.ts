@@ -3,6 +3,16 @@ import { NextResponse } from 'next/server';
 
 const prisma = new PrismaClient();
 
+export async function OPTIONS() {
+  return NextResponse.json({}, {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -13,7 +23,7 @@ export async function POST(request: Request) {
     const payload = await request.json();
     console.log("收到 SHOPLINE 推送数据:", JSON.stringify(payload).substring(0, 200));
 
-    const customerEmail = payload.email || payload.customer?.email || '未提供邮箱 // fix build error with as any';
+    const customerEmail = payload.email || payload.customer?.email || '未提供邮箱';
     const customerName = payload.first_name || payload.customer?.first_name || 'SHOPLINE 官网访客';
     const phone = payload.phone || payload.customer?.phone || '未提供电话';
     
@@ -24,13 +34,17 @@ export async function POST(request: Request) {
         title: `官网新询盘 (Shopline)`,
         stage: 'SPEC_CONFIRMING' as any,
         companyId: `${customerName} (${customerEmail})`,
-        description: `🌍 来源平台: SHOPLINE (erdicn.com)\n👤 客户姓名: ${customerName}\n📧 联系邮箱: ${customerEmail}\n📞 联系电话: ${phone}\n\n📝 备注/留言:\n${note}\n\n---\n接收时间: ${new Date().toLocaleString()}`,
+        description: `🌍 来源平台: SHOPLINE (erdicn.com)\\n👤 客户姓名: ${customerName}\\n📧 联系邮箱: ${customerEmail}\\n📞 联系电话: ${phone}\\n\\n📝 备注/留言:\\n${note}\\n\\n---\\n接收时间: ${new Date().toLocaleString()}`,
         amountUSD: 0,
-        ownerId: 'default' // Temporary fix for ownerId
+        ownerId: 'default' // Temporary fix for ownerId requirement
       }
     });
 
-    return NextResponse.json({ success: true, message: 'Shopline data stored', id: newOpp.id });
+    return NextResponse.json({ success: true, message: 'Shopline data stored', id: newOpp.id }, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+      }
+    });
 
   } catch (error: any) {
     console.error('Shopline Webhook Error:', error);
