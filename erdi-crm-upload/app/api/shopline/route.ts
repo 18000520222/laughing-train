@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     const payload = await request.json();
     console.log("收到 SHOPLINE 推送数据:", JSON.stringify(payload).substring(0, 200));
 
-    const customerEmail = payload.email || payload.customer?.email || '未提供邮箱';
+    const customerEmail = payload.email || payload.customer?.email || '未提供邮箱 // fix build error with as any';
     const customerName = payload.first_name || payload.customer?.first_name || 'SHOPLINE 官网访客';
     const phone = payload.phone || payload.customer?.phone || '未提供电话';
     
