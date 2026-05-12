@@ -35,7 +35,7 @@ export default async function PIDocument({ params }: { params: Promise<{ id: str
       date: new Date().toLocaleDateString(),
       companyName: opp.companyId || 'Client Company Name',
       email: email,
-      amount: opp.amount || 0,
+      amountUSD: opp.amountUSD || 0,
       description: "Laser Rangefinder Module (Custom specifications)",
       isFrozen: false
     };
@@ -105,15 +105,15 @@ export default async function PIDocument({ params }: { params: Promise<{ id: str
                 <p className="font-bold text-gray-800">{invoiceData.description}</p>
               </td>
               <td className="py-3 px-3 border-b border-gray-200 text-center">1</td>
-              <td className="py-3 px-3 border-b border-gray-200 text-right">${invoiceData.amount}</td>
-              <td className="py-3 px-3 border-b border-gray-200 text-right font-semibold">${invoiceData.amount}</td>
+              <td className="py-3 px-3 border-b border-gray-200 text-right">${invoiceData.amountUSD}</td>
+              <td className="py-3 px-3 border-b border-gray-200 text-right font-semibold">${invoiceData.amountUSD}</td>
             </tr>
           </tbody>
           <tfoot>
             <tr>
               <td colSpan={3} className="border-t-2 border-gray-800"></td>
               <td className="py-3 px-3 text-right font-bold text-gray-700">TOTAL:</td>
-              <td className="py-3 px-3 text-right font-bold text-xl text-blue-800 border-t-2 border-gray-800">${invoiceData.amount}</td>
+              <td className="py-3 px-3 text-right font-bold text-xl text-blue-800 border-t-2 border-gray-800">${invoiceData.amountUSD}</td>
             </tr>
           </tfoot>
         </table>
