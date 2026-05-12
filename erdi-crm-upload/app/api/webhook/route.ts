@@ -28,7 +28,7 @@ export async function POST(request: Request) {
 
     // 2. 读取外部传进来的数据包
     const data = await request.json();
-    
+
     // 3. 智能解析数据（兼容不同平台传来的格式）
     const customerName = data.name || data.customer || '未知访客';
     const customerEmail = data.email || data.contact || '未留邮箱';
@@ -42,12 +42,16 @@ export async function POST(request: Request) {
         stage: 'SPEC_CONFIRMING', // 默认进入“新询盘确认”阶段
         companyId: `${customerName} (${customerEmail})`,
         description: `🌍 来源平台: ${source}\n👤 客户姓名: ${customerName}\n📧 联系邮箱: ${customerEmail}\n\n📝 留言内容:\n${message}\n\n---\n系统自动接收于: ${new Date().toLocaleString()}`,
-        amount: 0,
+        amountUSD: 0,
       }
     });
 
     // 5. 告诉发送方：接收成功！
-    return NextResponse.json({ success: true, message: '成功存入 CRM', id: newOpp.id }, {
+    return NextResponse.json({
+      success: true,
+      message: '成功存入 CRM',
+      id: newOpp.id
+    }, {
       headers: {
         'Access-Control-Allow-Origin': '*',
       }
