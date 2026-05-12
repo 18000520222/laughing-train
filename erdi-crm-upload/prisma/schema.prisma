@@ -3,66 +3,69 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
 // --- 模块一：账号与权限 ---
+
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  password      String    // 实际应用中应加密存储
-  name          String?
-  role          Role      @default(SALES)
-  isActive      Boolean   @default(true) // 用于离职或禁用
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String   // 实际应用中应加密存储
+  name      String?
+  role      Role     @default(SALES)
+  isActive  Boolean  @default(true) // 用于离职或禁用
 
   // 关联的业务数据 (实现数据隔离)
-  customers     Company[]      // 该员工名下的客户
-  opportunities Opportunity[]  // 该员工的商机
+  customers    Company[]     // 该员工名下的客户
+  opportunities Opportunity[] // 该员工的商机
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 enum Role {
-  SUPER_ADMIN // 超级管理员 (sales@erdicn.com)
-  ADMIN       // 子管理员
-  SALES       // 业务员
-  PURCHASING  // 采购
-  FINANCE     // 财务
-  DOCUMENT    // 单证
-  OPERATIONS  // 运营
+  SUPER_ADMIN  // 超级管理员 (sales@erdicn.com)
+  ADMIN        // 子管理员
+  SALES        // 业务员
+  PURCHASING   // 采购
+  FINANCE      // 财务
+  DOCUMENT     // 单证
+  OPERATIONS   // 运营
 }
 
 // --- 模块八：系统基础配置与汇率 ---
+
 model SystemSettings {
-  id             String   @id @default("default")
-  usdToCnyRate   Float    @default(7.2) // 美元兑人民币汇率
-  companyName    String   @default("ERDI TECH LTD")
-  updatedAt      DateTime @updatedAt
+  id            String   @id @default("default")
+  usdToCnyRate  Float    @default(7.2) // 美元兑人民币汇率
+  companyName   String   @default("ERDI TECH LTD")
+  updatedAt     DateTime @updatedAt
 }
 
 // --- 模块三：客户资源管理 ---
+
 model Company {
-  id            String    @id @default(cuid())
-  customerCode  String    @unique // 自动编号
-  name          String
-  website       String?
-  country       String?
-  industry      String?
-  type          CustomerType @default(PROSPECT)
-  source        String    @default("EMAIL")
-  isPublic      Boolean   @default(false) // 是否在公海池
+  id           String   @id @default(cuid())
+  customerCode String?  @unique // 自动编号
+  name         String
+  website      String?
+  country      String?
+  industry     String?
+  type         CustomerType @default(PROSPECT)
+  source       String   @default("EMAIL")
+  isPublic     Boolean  @default(false) // 是否在公海池
 
-  ownerId       String?   // 归属业务员，为空且isPublic=true时在公海
-  owner         User?     @relation(fields: [ownerId], references: [id])
+  ownerId      String?  // 归属业务员，为空且isPublic=true时在公海
+  owner        User?    @relation(fields: [ownerId], references: [id])
 
-  contacts      Contact[]
+  contacts     Contact[]
   opportunities Opportunity[]
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 enum CustomerType {
@@ -88,62 +91,64 @@ model Contact {
 }
 
 // --- 模块五：报关要素智能生成 (强化产品库) ---
+
 model Product {
-  id                String   @id @default(cuid())
-  sku               String   @unique
-  name              String   // 中文品名
-  enName            String?  // 英文品名
-  category          String   
-  
-  // 基础参数
-  wavelength        String?
-  maxRange          Int?
-  blindZone         Int?
-  basePriceUSD      Float?   // 预设美金单价
-  basePriceCNY      Float?   // 预设人民币单价
+  id           String   @id @default(cuid())
+  sku          String   @unique
+  name         String   // 中文品名
+  enName       String?  // 英文品名
+  category     String   // 基础参数
+
+  wavelength   String?
+  maxRange     Int?
+  blindZone    Int?
+
+  basePriceUSD Float?   // 预设美金单价
+  basePriceCNY Float?   // 预设人民币单价
 
   // 报关要素
-  hsCode            String?  // HS编码
-  specifications    String?  // 规格型号
-  material          String?  // 材质
-  usage             String?  // 用途
-  brand             String?  // 品牌
-  origin            String?  // 产地
-  unit              String?  // 计量单位
-  customsCondition  String?  // 监管条件
+  hsCode       String?  // HS编码
+  specifications String? // 规格型号
+  material     String?  // 材质
+  usage        String?  // 用途
+  brand        String?  // 品牌
+  origin       String?  // 产地
+  unit         String?  // 计量单位
+  customsCondition String? // 监管条件
 
-  isActive          Boolean  @default(true) // 是否停用
+  isActive     Boolean  @default(true) // 是否停用
 }
 
 // --- 模块四：外贸业务与单据 ---
+
 model Opportunity {
-  id              String    @id @default(cuid())
-  opportunityCode String    @unique // 商机/单据编号
+  id              String   @id @default(cuid())
+  opportunityCode String?  @unique // 商机/单据编号
   title           String
-  description     String?   // 留存沟通记录/备注
+  description     String?  // 留存沟通记录/备注
   amountUSD       Float?
   amountCNY       Float?
-  stage           OppStage  @default(UNPROCESSED)
+  stage           OppStage @default(UNPROCESSED)
 
   companyId       String
-  company         Company   @relation(fields: [companyId], references: [id])
-  
+  company         Company  @relation(fields: [companyId], references: [id])
+
   ownerId         String?
-  owner           User?     @relation(fields: [ownerId], references: [id])
+  owner           User?    @relation(fields: [ownerId], references: [id]) // 归属业务员
 
   // 归档单据快照 (JSON格式存储当时生成的单据详细数据)
-  lockedPiData    Json?     // PI快照
-  lockedCiData    Json?     // CI快照
-  lockedPlData    Json?     // PL快照
-  lockedContract  Json?     // 合同快照
-  customsData     Json?     // 报关草单快照
+  lockedPiData    Json?    // PI快照
+  lockedCiData    Json?    // CI快照
+  lockedPlData    Json?    // PL快照
+  lockedContract  Json?    // 合同快照
+  customsData     Json?    // 报关草单快照
 
   // 物流
   carrier         String?
   trackingNumber  String?
 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 enum OppStage {
@@ -157,6 +162,7 @@ enum OppStage {
 }
 
 // --- 模块七：供货商与采购管理 ---
+
 model Supplier {
   id            String   @id @default(cuid())
   name          String
@@ -178,7 +184,6 @@ model PurchaseOrder {
   poNumber      String   @unique
   supplierId    String
   supplier      Supplier @relation(fields: [supplierId], references: [id])
-
   totalAmountCNY Float
   status        String   @default("PENDING") // 等待、已发货、已入库等
   orderDetails  Json     // 采购明细
