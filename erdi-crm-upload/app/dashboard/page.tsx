@@ -21,7 +21,7 @@ export default async function Dashboard() {
     orderBy: { createdAt: 'desc' }
   });
 
-  const totalAmount = opps.reduce((sum, opp) => sum + (opp.amount || 0), 0);
+  const totalAmount = opps.reduce((sum, opp) => sum + (opp.amountUSD || 0), 0);
 
   async function logout() {
     'use server';
@@ -35,7 +35,7 @@ export default async function Dashboard() {
     <div key={opp.id} className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow group relative mb-4">
       <div className="flex justify-between items-start mb-2">
         <h3 className="font-bold text-gray-800 text-lg line-clamp-1" title={opp.title}>{opp.title}</h3>
-        <span className="text-green-600 font-semibold">${opp.amount || 0}</span>
+        <span className="text-green-600 font-semibold">${opp.amountUSD || 0}</span>
       </div>
       <p className="text-sm text-gray-500 mb-4 line-clamp-2">客户: {opp.companyId || '未分配'}</p>
       <div className="flex justify-between items-center pt-3 border-t border-gray-100">
