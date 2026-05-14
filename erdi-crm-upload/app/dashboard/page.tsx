@@ -9,6 +9,7 @@ const prisma = new PrismaClient();
 export default async function Dashboard() {
   const cookieStore = cookies();
   const role = cookieStore.get('auth_role')?.value;
+  // 动态读取当前登录者的邮箱和头衔！
   const currentUser = cookieStore.get('auth_email')?.value || '未知账号';
   const currentTitle = cookieStore.get('auth_title')?.value || '业务人员';
 
@@ -60,7 +61,8 @@ export default async function Dashboard() {
           </p>
         </div>
         
-        <div className="flex items-center gap-4">
+        {/* 👇 这里就是帮您改好的第四步：新增的物流中心入口按钮 👇 */}
+        <div className="flex items-center gap-6">
           <Link href="/logistics" className="flex items-center gap-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-4 py-2 rounded-lg font-bold transition-colors border border-indigo-100 shadow-sm">
             📦 物流发货中心
           </Link>
@@ -70,8 +72,20 @@ export default async function Dashboard() {
           <Link href="/settings" className="flex items-center gap-2 bg-gray-50 text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg font-bold transition-colors border border-gray-200 shadow-sm">
             ⚙️ 设置
           </Link>
+          <Link href="/analytics" className="flex items-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-100 px-4 py-2 rounded-lg font-bold transition-colors border border-blue-100 shadow-sm">
+            📈 数据
+          </Link>
+          <Link href="/suppliers" className="flex items-center gap-2 bg-purple-50 text-purple-700 hover:bg-purple-100 px-4 py-2 rounded-lg font-bold transition-colors border border-purple-100 shadow-sm">
+            🏭 采购
+          </Link>
+          <Link href="/products" className="flex items-center gap-2 bg-amber-50 text-amber-700 hover:bg-amber-100 px-4 py-2 rounded-lg font-bold transition-colors border border-amber-100 shadow-sm">
+            🛒 产品库
+          </Link>
+          <Link href="/settings" className="flex items-center gap-2 bg-gray-50 text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg font-bold transition-colors border border-gray-200 shadow-sm">
+            ⚙️ 设置
+          </Link>
           
-          <div className="text-right border-l border-gray-200 pl-4 ml-2">
+          <div className="text-right border-l border-gray-200 pl-6">
             <p className="text-sm text-gray-500">系统总漏斗金额</p>
             <p className="text-3xl font-bold text-green-600">${totalAmount.toLocaleString()}</p>
           </div>
@@ -81,6 +95,8 @@ export default async function Dashboard() {
             </button>
           </form>
         </div>
+        {/* 👆 第四步修改结束 👆 */}
+
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
