@@ -117,6 +117,8 @@ model Product {
   customsCondition String? // 监管条件
 
   isActive     Boolean  @default(true) // 是否停用
+
+  opportunities Opportunity[]
 }
 
 // --- 模块四：外贸业务与单据 ---
@@ -128,6 +130,8 @@ model Opportunity {
   description     String?  // 留存沟通记录/备注
   amountUSD       Float?
   amountCNY       Float?
+  productId       String?
+  product         Product? @relation(fields: [productId], references: [id])
   stage           OppStage @default(UNPROCESSED)
 
   companyId       String
