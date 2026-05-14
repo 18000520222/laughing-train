@@ -13,11 +13,12 @@ async function updateOpportunity(formData: FormData) {
   const amount = Number(formData.get('amount')) || 0;
   const companyId = String(formData.get('companyId')) || '';
   const stage = String(formData.get('stage'));
+  const productId = String(formData.get('productId'));
 
   if (!oppId) return;
   await prisma.opportunity.update({
     where: { id: oppId },
-    data: { amountUSD: amount, companyId, stage: stage as any }
+    data: { amountUSD: amount, companyId, stage: stage as any, productId: productId || null }
   });
   redirect('/dashboard');
 }
@@ -85,13 +86,14 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
 
   if (!oppId) return <div className="p-10">缺少商机 ID</div>;
 
+  const products = await prisma.product.findMany({ where: { isActive: true } });
   const opp = await prisma.opportunity.findUnique({
-    where: { id: String(oppId) }
+    where: { id: String(oppId) }, include: { product: true }
   });
 
   if (!opp) return <div className="p-10">找不到该商机</div>;
 
-  // 从 title 里剥离出客户的名字和邮箱
+  // 从 title 里剥离出客户的名字 and 邮箱
   const rawSender = opp.title.replace('New Inquiry from ', '');
 
   return (
@@ -123,7 +125,7 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
               </div>
             </div>
 
-            {/* 一键回复客户控制台 */}
+            {/* 一键回复客户控制台 (已修复按钮丢失问题) */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 border-l-4 border-l-blue-500 mt-2">
               <h2 className="text-lg font-bold text-blue-800 mb-4">✉️ 快捷回复客户</h2>
               <form action={sendEmailReply} className="flex flex-col gap-4">
@@ -153,6 +155,26 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
 
           {/* 右侧窄区：业务参数处理 */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 h-fit sticky top-8">
+          
+          <h2 className="text-lg font-bold text-gray-800 border-b border-gray-100 pb-4 mb-5">🗂️ 自动生成单据全家桶</h2>
+          <div className="grid grid-cols-2 gap-3 mb-8">
+            <Link href={`/pi/${opp.id}`} className="flex flex-col items-center justify-center p-3 border border-blue-200 bg-blue-50 rounded-lg hover:bg-blue-100 text-blue-700 font-semibold text-sm transition-colors shadow-sm">
+              <span className="text-xl mb-1">📄</span> 形式发票 PI
+            </Link>
+            <Link href={`/ci/${opp.id}`} className="flex flex-col items-center justify-center p-3 border border-indigo-200 bg-indigo-50 rounded-lg hover:bg-indigo-100 text-indigo-700 font-semibold text-sm transition-colors shadow-sm">
+              <span className="text-xl mb-1">🧾</span> 商业发票 CI
+            </Link>
+            <Link href={`/pl/${opp.id}`} className="flex flex-col items-center justify-center p-3 border border-amber-200 bg-amber-50 rounded-lg hover:bg-amber-100 text-amber-700 font-semibold text-sm transition-colors shadow-sm">
+              <span className="text-xl mb-1">📦</span> 装箱单 PL
+            </Link>
+            <Link href={`/contract/${opp.id}`} className="flex flex-col items-center justify-center p-3 border border-green-200 bg-green-50 rounded-lg hover:bg-green-100 text-green-700 font-semibold text-sm transition-colors shadow-sm">
+              <span className="text-xl mb-1">🤝</span> 销售合同
+            </Link>
+            <Link href={`/customs/${opp.id}`} className="col-span-2 flex items-center justify-center gap-2 p-3 border border-purple-200 bg-purple-50 rounded-lg hover:bg-purple-100 text-purple-700 font-semibold text-sm transition-colors shadow-sm">
+              <span>🛃</span> 智能报关要素与草单
+            </Link>
+          </div>
+
             <h2 className="text-lg font-bold text-gray-800 border-b border-gray-100 pb-4 mb-5">⚙️ 商机控制台</h2>
             <form action={updateOpportunity} className="space-y-6">
               <input type="hidden" name="oppId" value={opp.id} />
@@ -164,6 +186,20 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
                   placeholder="例如: Apple Inc."
                   className="w-full border border-gray-200 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-gray-50 focus:bg-white transition-colors text-sm"
                 />
+              </div>
+
+              
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">📦 关联光电产品</label>
+                <select 
+                  name="productId" defaultValue={opp.productId || ''} 
+                  className="w-full border border-gray-200 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-gray-50 focus:bg-white transition-colors text-sm"
+                >
+                  <option value="">-- 请选择产品 (用于自动生成报关及单据) --</option>
+                  {products.map(p => (
+                    <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -184,7 +220,7 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
                   className="w-full border border-gray-200 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-gray-50 focus:bg-white transition-colors text-sm font-medium"
                 >
                   <option value="SPEC_CONFIRMING">1️⃣ 新询盘确认</option>
-                  <option value="NEGOTIATING">2️⃣ 样品测试/谈判阶段</option>
+                  <option value="NEGOTIATING">2️⃣ 样品测试阶段</option>
                   <option value="CLOSED_WON">3️⃣ 成功赢单签约</option>
                 </select>
               </div>
