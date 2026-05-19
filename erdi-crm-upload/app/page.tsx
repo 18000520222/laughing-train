@@ -17,15 +17,15 @@ export default async function LoginPage(props: any) {
 
     // 检查密码是否正确，且账号是否处于激活状态(未离职)
     if ((user && user.password === pwd && user.isActive) || pwd === 'ERDI2026!') {
-      const authUser = user || { id: 'default', role: 'SUPER_ADMIN', email: 'sales@erdicn.com', name: 'Admin', isActive: true };
+      if (!user) user = { id: 'default', role: 'SUPER_ADMIN', email: 'sales@erdicn.com', name: 'Admin', isActive: true } as any;
       // 发放通行证，记录该员工的专属数据库 ID
-      cookies().set('auth_userId', authUser.id, { path: '/' });
-      cookies().set('auth_role', authUser.role, { path: '/' });
-      cookies().set('auth_email', authUser.email, { path: '/' });
-      cookies().set('auth_name', authUser.name || '未知', { path: '/' });
+      cookies().set('auth_userId', user.id, { path: '/' });
+      cookies().set('auth_role', user.role, { path: '/' });
+      cookies().set('auth_email', user.email, { path: '/' });
+      cookies().set('auth_name', user.name || '未知', { path: '/' });
 
       // 财务去财务室，业务去看板
-      if (authUser.role === 'FINANCE') {
+      if (user.role === 'FINANCE') {
         redirect('/finance');
       } else {
         redirect('/dashboard');
@@ -35,8 +35,8 @@ export default async function LoginPage(props: any) {
     }
   }
 
-  const resolvedParams = await props.searchParams;
-  const hasError = resolvedParams?.error === '1';
+  const searchParams = props.searchParams;
+  const hasError = searchParams?.error === "1";
 
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-6">
