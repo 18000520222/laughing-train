@@ -3,8 +3,8 @@ import { PrismaClient } from '@prisma/client';
 export const dynamic = 'force-dynamic';
 const prisma = new PrismaClient();
 
-export default async function CommercialInvoice({ params }: { params: Promise<{ id: string }> }) {
-  const resolvedParams = await params;
+export default async function CommercialInvoice({ params }: { params: { id: string } }) {
+  const resolvedParams = params;
   const oppId = resolvedParams?.id;
   if (!oppId) return <div className="p-10 text-red-500 font-bold">❌ 错误：缺少商机 ID</div>;
 
