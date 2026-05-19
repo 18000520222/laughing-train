@@ -13,7 +13,7 @@ export default async function CustomsDeclaration({ params }: { params: Promise<{
     include: { product: true }
   });
 
-  if (!opp) return <div className="p-10 text-red-500 font-bold">❌ 错误：找不  到该商机。</div>;
+  if (!opp) return <div className="p-10 text-red-500 font-bold">❌ 错误：找不   到该商机。</div>;
 
   let customsData = null;
   const isClosedWon = opp.stage === 'CLOSED_WON';
