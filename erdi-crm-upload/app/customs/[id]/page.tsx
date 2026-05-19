@@ -13,14 +13,14 @@ export default async function CustomsDeclaration({ params }: { params: Promise<{
     include: { product: true }
   });
 
-  if (!opp) return <div className="p-10 text-red-500 font-bold">❌ 错误：找不   到该商机。</div>;
+  if (!opp) return <div className="p-10 text-red-500 font-bold">❌ 错误：找不到该商机。</div>;
 
   let customsData = null;
   const isClosedWon = opp.stage === 'CLOSED_WON';
-  const hasLockedData = opp.lockedCustomsData && typeof opp.lockedCustomsData === 'object';
+  const hasLockedData = opp.customsData && typeof opp.customsData === 'object';
 
   if (isClosedWon && hasLockedData) {
-    customsData = opp.lockedCustomsData as any;
+    customsData = opp.customsData as any;
   } else {
     const shortId = String(oppId).substring(0, 4).toUpperCase();
     customsData = {
@@ -37,7 +37,7 @@ export default async function CustomsDeclaration({ params }: { params: Promise<{
       customsData.isFrozen = true;
       await prisma.opportunity.update({
         where: { id: opp.id },
-        data: { lockedCustomsData: customsData }
+        data: { customsData: customsData }
       });
     }
   }
