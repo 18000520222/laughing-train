@@ -27,7 +27,7 @@ export default async function SalesContract({ params }: { params: Promise<{ id: 
     const shortId = String(oppId).substring(0, 4).toUpperCase();
     
     contractData = {
-      contractNumber: \`SC-\${new Date().getFullYear()}\${new Date().getMonth()+1}-\${shortId}\`,
+      contractNumber: `SC-${new Date().getFullYear()}${new Date().getMonth()+1}-${shortId}`,
       date: new Date().toLocaleDateString(),
       companyName: opp.companyId || 'Client Company Name',
       email: email,
@@ -98,15 +98,15 @@ export default async function SalesContract({ params }: { params: Promise<{ id: 
               <td className="py-3 px-3 border-b border-gray-200 font-bold text-gray-800">{contractData.description}</td>
               <td className="py-3 px-3 border-b border-gray-200 text-gray-600">{contractData.hsCode || '-'}</td>
               <td className="py-3 px-3 border-b border-gray-200 text-center">1</td>
-              <td className="py-3 px-3 border-b border-gray-200 text-right">\${contractData.amountUSD}</td>
-              <td className="py-3 px-3 border-b border-gray-200 text-right font-semibold">\${contractData.amountUSD}</td>
+              <td className="py-3 px-3 border-b border-gray-200 text-right">${contractData.amountUSD}</td>
+              <td className="py-3 px-3 border-b border-gray-200 text-right font-semibold">${contractData.amountUSD}</td>
             </tr>
           </tbody>
           <tfoot>
             <tr>
               <td colSpan={4} className="border-t-2 border-gray-800"></td>
               <td className="py-3 px-3 text-right font-bold text-gray-700">TOTAL:</td>
-              <td className="py-3 px-3 text-right font-bold text-xl text-indigo-800 border-t-2 border-gray-800">\${contractData.amountUSD}</td>
+              <td className="py-3 px-3 text-right font-bold text-xl text-indigo-800 border-t-2 border-gray-800">${contractData.amountUSD}</td>
             </tr>
           </tfoot>
         </table>
