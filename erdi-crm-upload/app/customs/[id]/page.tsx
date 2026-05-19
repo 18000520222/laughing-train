@@ -97,15 +97,15 @@ export default async function CustomsDeclaration({ params }: { params: { id: str
               <td className="py-3 px-3 border-b border-gray-200 font-bold text-gray-800">{customsData.description}</td>
               <td className="py-3 px-3 border-b border-gray-200 text-gray-600">{customsData.hsCode || '-'}</td>
               <td className="py-3 px-3 border-b border-gray-200 text-center">1</td>
-              <td className="py-3 px-3 border-b border-gray-200 text-right">\${customsData.amountUSD}</td>
-              <td className="py-3 px-3 border-b border-gray-200 text-right font-semibold">\${customsData.amountUSD}</td>
+              <td className="py-3 px-3 border-b border-gray-200 text-right">${customsData.amountUSD}</td>
+              <td className="py-3 px-3 border-b border-gray-200 text-right font-semibold">${customsData.amountUSD}</td>
             </tr>
           </tbody>
           <tfoot>
             <tr>
               <td colSpan={4} className="border-t-2 border-gray-800"></td>
               <td className="py-3 px-3 text-right font-bold text-gray-700">TOTAL:</td>
-              <td className="py-3 px-3 text-right font-bold text-xl text-indigo-800 border-t-2 border-gray-800">\${customsData.amountUSD}</td>
+              <td className="py-3 px-3 text-right font-bold text-xl text-indigo-800 border-t-2 border-gray-800">${customsData.amountUSD}</td>
             </tr>
           </tfoot>
         </table>
