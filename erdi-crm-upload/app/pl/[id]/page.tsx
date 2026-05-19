@@ -88,8 +88,8 @@ export default async function PackingList({ params }: { params: Promise<{ id: st
               <th className="py-2 px-3 text-left border border-gray-300">Description</th>
               <th className="py-2 px-3 text-left border border-gray-300">HS Code</th>
               <th className="py-2 px-3 text-center border border-gray-300 w-16">Qty</th>
-              <th className="py-2 px-3 text-right border border-gray-300 w-24">Net Weight (kg)</th>
-              <th className="py-2 px-3 text-right border border-gray-300 w-24">Gross Weight (kg)</th>
+              <th className="py-2 px-3 text-right border border-gray-300 w-24">Unit Price</th>
+              <th className="py-2 px-3 text-right border border-gray-300 w-24">Amount</th>
             </tr>
           </thead>
           <tbody>
@@ -98,15 +98,15 @@ export default async function PackingList({ params }: { params: Promise<{ id: st
               <td className="py-3 px-3 border-b border-gray-200 font-bold text-gray-800">{plData.description}</td>
               <td className="py-3 px-3 border-b border-gray-200 text-gray-600">{plData.hsCode || '-'}</td>
               <td className="py-3 px-3 border-b border-gray-200 text-center">1</td>
-              <td className="py-3 px-3 border-b border-gray-200 text-right">0.5</td>
-              <td className="py-3 px-3 border-b border-gray-200 text-right font-semibold">1.2</td>
+              <td className="py-3 px-3 border-b border-gray-200 text-right">${plData.amountUSD}</td>
+              <td className="py-3 px-3 border-b border-gray-200 text-right font-semibold">${plData.amountUSD}</td>
             </tr>
           </tbody>
           <tfoot>
             <tr>
               <td colSpan={4} className="border-t-2 border-gray-800"></td>
-              <td className="py-3 px-3 text-right font-bold text-gray-700">TOTAL NW: 0.5 kg</td>
-              <td className="py-3 px-3 text-right font-bold text-gray-700 border-t-2 border-gray-800">TOTAL GW: 1.2 kg</td>
+              <td className="py-3 px-3 text-right font-bold text-gray-700">TOTAL:</td>
+              <td className="py-3 px-3 text-right font-bold text-xl text-indigo-800 border-t-2 border-gray-800">${plData.amountUSD}</td>
             </tr>
           </tfoot>
         </table>
@@ -116,6 +116,10 @@ export default async function PackingList({ params }: { params: Promise<{ id: st
           <div className="border-t border-gray-800 pt-2">
             <p className="font-bold text-gray-800 text-sm">ERDI TECH LTD</p>
           </div>
+        </div>
+
+        <div className="fixed bottom-8 right-8 bg-gray-800 text-white py-3 px-6 rounded shadow-lg print:hidden flex items-center gap-2 z-50">
+          🖨️ 打印或导出 PDF：请按 <kbd className="bg-gray-600 px-2 py-1 rounded mx-1">⌘ + P</kbd>
         </div>
       </div>
     </div>
