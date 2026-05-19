@@ -25,7 +25,7 @@ export default async function LoginPage(props: any) {
       cookies().set('auth_name', authUser.name || '未知', { path: '/' });
 
       // 财务去财务室，业务去看板
-      if (user.role === 'FINANCE') {
+      if (authUser.role === 'FINANCE') {
         redirect('/finance');
       } else {
         redirect('/dashboard');
