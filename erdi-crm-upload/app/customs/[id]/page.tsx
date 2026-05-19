@@ -26,7 +26,7 @@ export default async function CustomsDeclaration({ params }: { params: { id: str
     const shortId = String(oppId).substring(0, 4).toUpperCase();
     
     customsData = {
-      customsNumber: `CD-\${new Date().getFullYear()}\${new Date().getMonth()+1}-\${shortId}`,
+      customsNumber: `CD-${new Date().getFullYear()}${new Date().getMonth()+1}-${shortId}`,
       date: new Date().toLocaleDateString(),
       companyName: opp.companyId || 'Client Company Name',
       email: email,
