@@ -36,7 +36,7 @@ export default async function LoginPage(props: any) {
   }
 
   const searchParams = props.searchParams;
-  const hasError = searchParams?.error === "1";
+  const hasError = searchParams.error === "1";
 
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-6">
