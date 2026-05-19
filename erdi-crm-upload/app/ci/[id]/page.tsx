@@ -27,7 +27,7 @@ export default async function CommercialInvoice({ params }: { params: Promise<{ 
     const shortId = String(oppId).substring(0, 4).toUpperCase();
     
     invoiceData = {
-      ciNumber: \`CI-\${new Date().getFullYear()}\${new Date().getMonth()+1}-\${shortId}\`,
+      ciNumber: `CI-${new Date().getFullYear()}${new Date().getMonth()+1}-${shortId}`,
       date: new Date().toLocaleDateString(),
       companyName: opp.companyId || 'Client Company Name',
       email: email,
