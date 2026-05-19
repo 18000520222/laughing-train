@@ -13,7 +13,7 @@ export default async function LoginPage(props: any) {
     // 真正的企业级做法：去数据库核实账号密码
     let user = await prisma.user.findUnique({
       where: { email: email }
-    });  
+    });
 
     // 检查密码是否正确，且账号是否处于激活状态(未离职)
     if ((user && user.password === pwd && user.isActive) || pwd === 'ERDI2026!') {
