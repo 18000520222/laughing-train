@@ -14,7 +14,7 @@ export default async function Dashboard() {
   const currentTitle = cookieStore.get('auth_title')?.value || '业务人员';
 
   if (role !== 'sales') {
-    redirect('/');
+    redirect('/'); <a></a>
   }
 
   const opps = await prisma.opportunity.findMany({
