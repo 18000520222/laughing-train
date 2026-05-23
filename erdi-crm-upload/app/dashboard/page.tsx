@@ -13,8 +13,8 @@ export default async function Dashboard() {
   const currentUser = cookieStore.get('auth_email')?.value || '未知账号';
   const currentTitle = cookieStore.get('auth_title')?.value || '业务人员';
 
-  if (role !== 'sales') {
-    redirect('/'); <a></a>
+  if (!role) {
+    redirect('/');
   }
 
   const opps = await prisma.opportunity.findMany({
@@ -134,3 +134,4 @@ export default async function Dashboard() {
     </div>
   );
 }
+
