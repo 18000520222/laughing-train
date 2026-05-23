@@ -89,7 +89,7 @@ export default async function Dashboard() {
           
           <div className="text-right border-l border-gray-200 pl-6">
             <p className="text-sm text-gray-500">系统总漏斗金额</p>
-            <p className="text-3xl font-bold text-green-600">${$totalAmount.toLocaleString()}</p>
+            <p className="text-3xl font-bold text-green-600">${totalAmount.toLocaleString()}</p>
           </div>
           <form action={logout}>
             <button type="submit" className="text-sm bg-gray-100 hover:bg-red-50 text-gray-600 hover:text-red-600 border border-gray-200 px-4 py-2 rounded-lg font-medium transition-colors">
