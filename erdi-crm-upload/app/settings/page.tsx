@@ -13,7 +13,7 @@ async function saveSettings(formData: FormData) {
 
   const rate = parseFloat(formData.get('usdToCnyRate') as string);
   const companyName = formData.get('companyName') as string;
-
+ 
   if (rate && companyName) {
     await prisma.systemSettings.upsert({
       where: { id: 'default' },
