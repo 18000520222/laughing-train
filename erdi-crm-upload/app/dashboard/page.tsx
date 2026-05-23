@@ -13,7 +13,7 @@ export default async function Dashboard() {
   const currentUser = cookieStore.get('auth_email')?.value || '未知账号';
   const currentTitle = cookieStore.get('auth_title')?.value || '业务人员';
 
-  if (!role) { 
+  if (!role) {
     redirect('/');
   }
 
@@ -134,4 +134,3 @@ export default async function Dashboard() {
     </div>
   );
 }
-
