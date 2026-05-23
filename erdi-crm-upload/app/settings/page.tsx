@@ -9,7 +9,7 @@ const prisma = new PrismaClient();
 async function saveSettings(formData: FormData) {
   'use server';
   const role = cookies().get('auth_role')?.value;
-  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN' && role !== 'sales') return;
+  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN' && role !== 'SALES') return;
 
   const rate = parseFloat(formData.get('usdToCnyRate') as string);
   const companyName = formData.get('companyName') as string;
@@ -26,7 +26,7 @@ async function saveSettings(formData: FormData) {
 
 export default async function SettingsPage() {
   const role = cookies().get('auth_role')?.value;
-  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN' && role !== 'sales') {
+  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN' && role !== 'SALES') {
     redirect('/');
   }
 
