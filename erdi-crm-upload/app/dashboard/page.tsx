@@ -58,7 +58,7 @@ export default async function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
-      <header className="mb-8 flex justify-between items-center bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+      <header className="mb-8 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 tracking-tight">ERDI 业务与商机看板</h1>
           <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
@@ -69,29 +69,29 @@ export default async function Dashboard() {
         </div>
         
         {/* 👇 这里就是帮您改好的第四步：新增的物流中心入口按钮 👇 */}
-        <div className="flex items-center gap-6">
-          <Link href="/logistics" className="flex items-center gap-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-4 py-2 rounded-lg font-bold transition-colors border border-indigo-100 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3 xl:gap-4">
+          <Link href="/logistics" className="flex items-center gap-1 sm:gap-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm whitespace-nowrap">
             📦 物流发货中心
           </Link>
-          <Link href="/social" className="flex items-center gap-2 bg-purple-50 text-purple-700 hover:bg-purple-100 px-4 py-2 rounded-lg font-bold transition-colors border border-purple-100 shadow-sm">
+          <Link href="/social" className="flex items-center gap-1 sm:gap-2 bg-purple-50 text-purple-700 hover:bg-purple-100 px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm whitespace-nowrap">
             💬 社媒通信
           </Link>
-          <Link href="/customers" className="flex items-center gap-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 px-4 py-2 rounded-lg font-bold transition-colors border border-emerald-100 shadow-sm">
+          <Link href="/customers" className="flex items-center gap-1 sm:gap-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm whitespace-nowrap">
             👥 客户公海
           </Link>
-          <Link href="/users" className="flex items-center gap-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-4 py-2 rounded-lg font-bold transition-colors border border-indigo-100 shadow-sm">
+          <Link href="/users" className="flex items-center gap-1 sm:gap-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm whitespace-nowrap">
             🧑‍💼 员工管理
           </Link>
-          <Link href="/products" className="flex items-center gap-2 bg-amber-50 text-amber-700 hover:bg-amber-100 px-4 py-2 rounded-lg font-bold transition-colors border border-amber-100 shadow-sm">
+          <Link href="/products" className="flex items-center gap-1 sm:gap-2 bg-amber-50 text-amber-700 hover:bg-amber-100 px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm whitespace-nowrap">
             🛒 产品库
           </Link>
           <Link href="/settings" className="flex items-center gap-2 bg-gray-50 text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg font-bold transition-colors border border-gray-200 shadow-sm">
             ⚙️ 设置
           </Link>
-          <Link href="/analytics" className="flex items-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-100 px-4 py-2 rounded-lg font-bold transition-colors border border-blue-100 shadow-sm">
+          <Link href="/analytics" className="flex items-center gap-1 sm:gap-2 bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm whitespace-nowrap">
             📈 数据
           </Link>
-          <Link href="/suppliers" className="flex items-center gap-2 bg-purple-50 text-purple-700 hover:bg-purple-100 px-4 py-2 rounded-lg font-bold transition-colors border border-purple-100 shadow-sm">
+          <Link href="/suppliers" className="flex items-center gap-1 sm:gap-2 bg-purple-50 text-purple-700 hover:bg-purple-100 px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm whitespace-nowrap">
             🏭 采购
           </Link>
           
