@@ -37,6 +37,19 @@ export async function GET() {
       });
     }
 
+    // 初始化聚合邮箱账号
+    const emails = [
+      { email: 'sales@erdicn.com', password: '', imapHost: 'imap.gmail.com', imapPort: 993, isSecure: true },
+      { email: 'yilin@erdimail.com', password: '', imapHost: 'imap.aliyun.com', imapPort: 993, isSecure: true }
+    ];
+    for (const e of emails) {
+      await prisma.emailAccount.upsert({
+        where: { email: e.email },
+        update: {},
+        create: e
+      });
+    }
+
     return NextResponse.json({ message: '✅ 数据库初始化成功！员工账号已全部创建。' });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
