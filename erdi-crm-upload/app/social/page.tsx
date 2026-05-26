@@ -1,134 +1,124 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { PrismaClient } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
+const prisma = new PrismaClient();
 
-export default async function SocialPage() {
-  const cookieStore = cookies();
-  const role = cookieStore.get('auth_role')?.value;
+export default async function SocialPage({ searchParams }: { searchParams: Record<string, string> }) {
+  const role = cookies().get('auth_role')?.value;
+  if (!role) redirect('/?error=1');
 
-  if (!role) {
-    redirect('/?error=1');
-  }
+  const accounts = await prisma.socialAccount.findMany();
+  const fbAccounts = accounts.filter(a => a.platform === 'FACEBOOK');
+  const liAccounts = accounts.filter(a => a.platform === 'LINKEDIN');
 
-  const platforms = [
-    {
-      id: 'whatsapp',
-      name: 'WhatsApp Web',
-      desc: '与客户即时通讯，聊天记录同步',
-      url: 'https://web.whatsapp.com/',
-      icon: '💬',
-      color: 'bg-green-100 text-green-700',
-      type: 'PRIVATE'
-    },
-    {
-      id: 'gmail',
-      name: 'Google Workspace',
-      desc: '收发海外邮件，询盘自动入库',
-      url: 'https://mail.google.com/',
-      icon: '📧',
-      color: 'bg-red-100 text-red-700',
-      type: 'PRIVATE'
-    },
-    {
-      id: 'linkedin',
-      name: 'LinkedIn',
-      desc: '领英职场开发与背调',
-      url: 'https://www.linkedin.com/',
-      icon: '👔',
-      color: 'bg-blue-100 text-blue-700',
-      type: 'PRIVATE'
-    },
-    {
-      id: 'facebook',
-      name: 'Facebook (公共)',
-      desc: '公司官方主页运营与获客',
-      url: 'https://www.facebook.com/',
-      icon: '📘',
-      color: 'bg-indigo-100 text-indigo-700',
-      type: 'PUBLIC'
-    },
-    {
-      id: 'youtube',
-      name: 'YouTube (公共)',
-      desc: '产品宣传视频与数据',
-      url: 'https://studio.youtube.com/',
-      icon: '▶️',
-      color: 'bg-red-100 text-red-600',
-      type: 'PUBLIC'
-    }
-  ];
+  const fbMessages = await prisma.socialMessage.findMany({
+    where: { platform: 'FACEBOOK' },
+    orderBy: { createdAt: 'desc' },
+    take: 30,
+  });
 
   return (
     <div className="min-h-screen bg-slate-50 p-8 font-sans">
       <header className="mb-8 flex justify-between items-center bg-white p-6 rounded-xl shadow-sm border border-gray-100">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 tracking-tight">社媒与通信聚合工作台</h1>
-          <p className="text-sm text-gray-500 mt-1">一站式管理私域沟通与公域运营，无需频繁切换浏览器</p>
+          <p className="text-sm text-gray-500 mt-1">WhatsApp / Facebook / LinkedIn 一站式管理</p>
         </div>
-        <div className="flex gap-4">
-          <Link href="/dashboard" className="px-5 py-2.5 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors">
-            返回看板
-          </Link>
-        </div>
+        <Link href="/dashboard" className="px-5 py-2.5 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200">返回看板</Link>
       </header>
 
-      <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl mb-8 flex items-start gap-3">
-        <span className="text-xl">💡</span>
-        <div>
-          <h3 className="text-blue-800 font-bold mb-1">多平台聚合模式说明</h3>
-          <p className="text-sm text-blue-600 leading-relaxed">
-            由于大部分国际平台（如 WhatsApp, Google）限制了 iframe 嵌套，我们采用了**安全沙盒快捷模式**。<br/>
-            点击下方平台图标，将在**系统内置安全模式**下极速唤起平台，您的账号密码及 Cookie 均在浏览器本地做到了数据隔离。
-            公域账号由超管绑定，私域账号由您个人独立登录。
-          </p>
+      {searchParams?.connected && (
+        <div className="bg-green-50 border border-green-200 text-green-700 p-3 rounded-lg mb-6">
+          ✅ {searchParams.connected.toUpperCase()} 授权成功！
         </div>
+      )}
+      {searchParams?.error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg mb-6 text-xs break-all">
+          ❌ 错误：{searchParams.error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* WhatsApp */}
+        <Card title="📱 WhatsApp" color="green" cta="进入对话" href="/whatsapp">
+          <p className="text-sm text-gray-600 mb-2">通过 Meta Cloud API 实时收发客户消息，每条入站消息自动翻译为中文。</p>
+          <p className="text-xs text-gray-500">在 <Link href="/settings" className="text-blue-600 underline">设置</Link> 中填入 Phone ID 与 Token 即可。</p>
+        </Card>
+
+        {/* Facebook */}
+        <Card title="📘 Facebook Page" color="blue" cta={fbAccounts.length > 0 ? '重新授权' : '立即授权'} href="/api/auth/facebook/start">
+          <p className="text-sm text-gray-600 mb-2">绑定公司 FB 主页，自动接收 Page Messenger 对话。</p>
+          {fbAccounts.length > 0 ? (
+            <div className="text-xs space-y-1">
+              {fbAccounts.map(a => <div key={a.id} className="text-green-700">✅ {a.name}</div>)}
+              <div className="text-gray-500 mt-2">最近 {fbMessages.length} 条消息</div>
+            </div>
+          ) : (
+            <p className="text-xs text-amber-600">尚未授权任何 Page</p>
+          )}
+        </Card>
+
+        {/* LinkedIn */}
+        <Card title="👔 LinkedIn" color="indigo" cta={liAccounts.length > 0 ? '同步线索' : '立即授权'} href={liAccounts.length > 0 ? '#sync-li' : '/api/auth/linkedin/start'}>
+          <p className="text-sm text-gray-600 mb-2">OAuth 授权后自动拉取 Lead Gen Forms 提交记录到客户库。</p>
+          {liAccounts.length > 0 ? (
+            <div className="text-xs space-y-1">
+              {liAccounts.map(a => <div key={a.id} className="text-green-700">✅ {a.name}</div>)}
+              <form action="/api/linkedin/leads" method="post" className="mt-2">
+                <button className="text-xs text-blue-600 underline">立即拉取线索</button>
+              </form>
+            </div>
+          ) : (
+            <p className="text-xs text-amber-600">尚未授权</p>
+          )}
+        </Card>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* 个人私有账号区 */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <h2 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2 border-b border-gray-100 pb-4">
-            <span className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">🔒</span>
-            业务员私有工作区 (数据隔离)
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {platforms.filter(p => p.type === 'PRIVATE').map(p => (
-              <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer" className="block group">
-                <div className="border border-gray-100 rounded-xl p-4 hover:border-blue-200 hover:shadow-md transition-all cursor-pointer bg-white">
-                  <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl mb-3 ${p.color}`}>
-                    {p.icon}
-                  </div>
-                  <h3 className="font-bold text-gray-800 group-hover:text-blue-600 transition-colors">{p.name}</h3>
-                  <p className="text-xs text-gray-500 mt-1">{p.desc}</p>
+      {/* Facebook 消息流 */}
+      {fbMessages.length > 0 && (
+        <div className="mt-8 bg-white rounded-xl border p-6">
+          <h2 className="text-lg font-bold mb-4">📘 Facebook 最近消息</h2>
+          <div className="space-y-2">
+            {fbMessages.map(m => (
+              <div key={m.id} className="border-b py-2 text-sm">
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>{m.senderName || m.senderId} · {m.direction === 'IN' ? '收' : '发'}</span>
+                  <span>{new Date(m.createdAt).toLocaleString('zh-CN')}</span>
                 </div>
-              </a>
+                <div className="text-gray-800 mt-1">{m.body}</div>
+                {m.translated && m.translated !== m.body && (
+                  <div className="text-xs text-gray-500 italic mt-1">译: {m.translated}</div>
+                )}
+              </div>
             ))}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
 
-        {/* 公司公共账号区 */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <h2 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2 border-b border-gray-100 pb-4">
-            <span className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">🏢</span>
-            公司公域运营区 (全员共用)
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {platforms.filter(p => p.type === 'PUBLIC').map(p => (
-              <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer" className="block group">
-                <div className="border border-gray-100 rounded-xl p-4 hover:border-indigo-200 hover:shadow-md transition-all cursor-pointer bg-slate-50">
-                  <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl mb-3 ${p.color}`}>
-                    {p.icon}
-                  </div>
-                  <h3 className="font-bold text-gray-800 group-hover:text-indigo-600 transition-colors">{p.name}</h3>
-                  <p className="text-xs text-gray-500 mt-1">{p.desc}</p>
-                </div>
-              </a>
-            ))}
-          </div>
-        </div>
-      </div>
+function Card({ title, color, cta, href, children }: { title: string; color: string; cta: string; href: string; children: React.ReactNode }) {
+  const colorMap: Record<string, string> = {
+    green: 'bg-green-50 border-green-200 text-green-700',
+    blue: 'bg-blue-50 border-blue-200 text-blue-700',
+    indigo: 'bg-indigo-50 border-indigo-200 text-indigo-700',
+  };
+  const btnMap: Record<string, string> = {
+    green: 'bg-green-600 hover:bg-green-700',
+    blue: 'bg-blue-600 hover:bg-blue-700',
+    indigo: 'bg-indigo-600 hover:bg-indigo-700',
+  };
+  return (
+    <div className={`rounded-xl border p-6 ${colorMap[color]}`}>
+      <h3 className="text-lg font-bold text-gray-900 mb-3">{title}</h3>
+      <div className="text-gray-700 mb-4">{children}</div>
+      <Link href={href} className={`inline-block text-white text-sm px-4 py-2 rounded-lg font-medium ${btnMap[color]}`}>
+        {cta}
+      </Link>
     </div>
   );
 }
