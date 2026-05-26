@@ -88,7 +88,7 @@ async function notifyShipmentUpdate(shipmentId: string, status: string) {
   });
   const userIds = new Set([ship.opportunity?.owner?.id, ...targets.map(t => t.id)].filter(Boolean) as string[]);
 
-  for (const uid of userIds) {
+  for (const uid of Array.from(userIds)) {
     await prisma.notification.create({
       data: {
         userId: uid,
