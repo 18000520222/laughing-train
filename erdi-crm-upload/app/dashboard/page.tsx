@@ -11,7 +11,7 @@ export default async function Dashboard() {
   const role = cookieStore.get('auth_role')?.value;
   // 动态读取当前登录者的邮箱和头衔！
   const currentUser = cookieStore.get('auth_email')?.value || '未知账号';
-  const roleMap: Record<string, string> = {
+  const roleMap = {
     'SUPER_ADMIN': '超级管理员',
     'ADMIN': '管理员',
     'SALES': '业务主管',
@@ -38,7 +38,7 @@ export default async function Dashboard() {
     redirect('/');
   }
 
-  const renderCard = (opp: any) => (
+  const renderCard = (opp) => (
     <div key={opp.id} className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow group relative mb-4">
       <div className="flex justify-between items-start mb-2">
         <h3 className="font-bold text-gray-800 text-lg line-clamp-1" title={opp.title}>{opp.title}</h3>
@@ -58,7 +58,7 @@ export default async function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
-      <header className="mb-8 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+      <header className="mb-8 flex justify-between items-center bg-white p-6 rounded-xl shadow-sm border border-gray-100">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 tracking-tight">ERDI 业务与商机看板</h1>
           <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
@@ -68,33 +68,31 @@ export default async function Dashboard() {
           </p>
         </div>
         
-        {/* 👇 这里就是帮您改好的第四步：新增的物流中心入口按钮 👇 */}
-        <div className="flex flex-wrap items-center gap-3 xl:gap-4">
-          <Link href="/logistics" className="flex items-center gap-1 sm:gap-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm whitespace-nowrap">
+        <div className="flex items-center gap-6">
+          <Link href="/logistics" className="flex items-center gap-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-4 py-2 rounded-lg font-bold transition-colors border border-indigo-100 shadow-sm">
             📦 物流发货中心
           </Link>
-          <Link href="/social" className="flex items-center gap-1 sm:gap-2 bg-purple-50 text-purple-700 hover:bg-purple-100 px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm whitespace-nowrap">
-            💬 社媒通信
+          <Link href="/social" className="flex items-center gap-2 bg-purple-50 text-purple-700 hover:bg-purple-100 px-4 py-2 rounded-lg font-bold transition-colors border border-purple-100 shadow-sm">
+            💬 聚合收件箱
           </Link>
-          <Link href="/customers" className="flex items-center gap-1 sm:gap-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm whitespace-nowrap">
+          <Link href="/customers" className="flex items-center gap-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 px-4 py-2 rounded-lg font-bold transition-colors border border-emerald-100 shadow-sm">
             👥 客户公海
           </Link>
-          <Link href="/users" className="flex items-center gap-1 sm:gap-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm whitespace-nowrap">
+          <Link href="/users" className="flex items-center gap-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-4 py-2 rounded-lg font-bold transition-colors border border-indigo-100 shadow-sm">
             🧑‍💼 员工管理
           </Link>
-          <Link href="/products" className="flex items-center gap-1 sm:gap-2 bg-amber-50 text-amber-700 hover:bg-amber-100 px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm whitespace-nowrap">
+          <Link href="/products" className="flex items-center gap-2 bg-amber-50 text-amber-700 hover:bg-amber-100 px-4 py-2 rounded-lg font-bold transition-colors border border-amber-100 shadow-sm">
             🛒 产品库
           </Link>
           <Link href="/settings" className="flex items-center gap-2 bg-gray-50 text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg font-bold transition-colors border border-gray-200 shadow-sm">
             ⚙️ 设置
           </Link>
-          <Link href="/analytics" className="flex items-center gap-1 sm:gap-2 bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm whitespace-nowrap">
+          <Link href="/analytics" className="flex items-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-100 px-4 py-2 rounded-lg font-bold transition-colors border border-blue-100 shadow-sm">
             📈 数据
           </Link>
-          <Link href="/suppliers" className="flex items-center gap-1 sm:gap-2 bg-purple-50 text-purple-700 hover:bg-purple-100 px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm whitespace-nowrap">
+          <Link href="/suppliers" className="flex items-center gap-2 bg-purple-50 text-purple-700 hover:bg-purple-100 px-4 py-2 rounded-lg font-bold transition-colors border border-purple-100 shadow-sm">
             🏭 采购
           </Link>
-          
           
           <div className="text-right border-l border-gray-200 pl-6">
             <p className="text-sm text-gray-500">系统总漏斗金额</p>
@@ -106,7 +104,6 @@ export default async function Dashboard() {
             </button>
           </form>
         </div>
-        {/* 👆 第四步修改结束 👆 */}
 
       </header>
 
