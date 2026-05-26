@@ -13,74 +13,98 @@ datasource db {
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
-  password  String   // 实际应用中应加密存储
+  password  String
   name      String?
   role      Role     @default(SALES)
-  isActive  Boolean  @default(true) // 用于离职博禁用
+  isActive  Boolean  @default(true)
 
-  // 关联的业务数据 (实现数据隔离)
-  customers    Company[]     // 该员工名下的客户
-  opportunities Opportunity[] // 该员工的商机
+  customers    Company[]
+  opportunities Opportunity[]
   followUps FollowUp[]
   expensesSubmitted ExpenseClaim[] @relation("ExpenseSubmittedBy")
   expensesApproved  ExpenseClaim[] @relation("ExpenseApprovedBy")
   attendancesSubmitted AttendanceRequest[] @relation("AttendanceSubmittedBy")
   attendancesApproved  AttendanceRequest[] @relation("AttendanceApprovedBy")
+  notifications Notification[]
+  socialAccounts SocialAccount[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 enum Role {
-  SUPER_ADMIN  // 超级管理员 (sales@erdicn.com)
-  ADMIN        // 子管理员
-  SALES        // 业务员
-  PURCHASING   // 采购
-  FINANCE      // 财务
-  DOCUMENT     // 单证
-  OPERATIONS   // 运营
+  SUPER_ADMIN
+  ADMIN
+  SALES
+  PURCHASING
+  FINANCE
+  DOCUMENT
+  OPERATIONS
 }
 
-// --- 模块八：系统基础配置与汇率 ---
+// --- 模块八：系统基础配置 ---
 
 model SystemSettings {
   id            String   @id @default("default")
-  usdToCnyRate  Float    @default(7.2) // 美元兑人民币汇率
+  usdToCnyRate  Float    @default(7.2)
   companyName   String   @default("ERDI TECH LTD")
+
+  // WhatsApp Cloud API
+  whatsappToken       String?
+  whatsappPhoneId     String?
+  whatsappVerifyToken String?
+
+  // Facebook
+  fbAppId       String?
+  fbAppSecret   String?
+  fbVerifyToken String?
+
+  // LinkedIn
+  linkedinClientId     String?
+  linkedinClientSecret String?
+
+  // AfterShip
+  aftershipApiKey String?
+
+  // LibreTranslate (可选自建实例)
+  libretranslateUrl String? @default("https://libretranslate.com")
+
   updatedAt     DateTime @updatedAt
 }
 
-// --- 模块三：客户资源管理 ---
+// --- 模块三：客户资源 ---
 
 model Company {
   id           String   @id @default(cuid())
-  customerCode String?  @unique // 自动编号
+  customerCode String?  @unique
   name         String
   website      String?
   country      String?
   industry     String?
   type         CustomerType @default(PROSPECT)
   source       String   @default("EMAIL")
-  isPublic     Boolean  @default(false) // 是否在公海池
+  isPublic     Boolean  @default(false)
 
-  ownerId      String?  // 归属业务员，为空且isPublic=true时在公海
+  ownerId      String?
   owner        User?    @relation(fields: [ownerId], references: [id])
 
   contacts     Contact[]
   opportunities Opportunity[]
-  followUps FollowUp[]
-  attendances AttendanceRequest[]
+  followUps    FollowUp[]
+  attendances  AttendanceRequest[]
+  whatsappMessages WhatsAppMessage[]
+  socialMessages   SocialMessage[]
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
 
 enum CustomerType {
-  NEW         // 新客户
-  EXISTING    // 老客户
-  PROSPECT    // 潜在客户
-  KEY_ACCOUNT // 重点客户
-  LOST        // 流失客户
+  NEW
+  EXISTING
+  PROSPECT
+  KEY_ACCOUNT
+  LOST
 }
 
 model Contact {
@@ -97,44 +121,43 @@ model Contact {
   createdAt DateTime @default(now())
 }
 
-// --- 模块五：报关要素智能生成 (强化产品库) ---
+// --- 模块五：产品库 ---
 
 model Product {
   id           String   @id @default(cuid())
   sku          String   @unique
-  name         String   // 中文品名
-  enName       String?  // 英文品名
-  category     String   // 基础参数
+  name         String
+  enName       String?
+  category     String
 
   wavelength   String?
   maxRange     Int?
   blindZone    Int?
 
-  basePriceUSD Float?   // 预设美金单价
-  basePriceCNY Float?   // 预设人民币单价
+  basePriceUSD Float?
+  basePriceCNY Float?
 
-  // 报关要素
-  hsCode       String?  // HS编码
-  specifications String? // 规格型号
-  material     String?  // 材质
-  usage        String?  // 用途
-  brand        String?  // 品牌
-  origin       String?  // 产地
-  unit         String?  // 计量单位
-  customsCondition String? // 监管条件
+  hsCode       String?
+  specifications String?
+  material     String?
+  usage        String?
+  brand        String?
+  origin       String?
+  unit         String?
+  customsCondition String?
 
-  isActive     Boolean  @default(true) // 是否停用
+  isActive     Boolean  @default(true)
 
   opportunities Opportunity[]
 }
 
-// --- 模块四：外贸业务与单据 ---
+// --- 模块四：商商机 ---
 
 model Opportunity {
   id              String   @id @default(cuid())
-  opportunityCode String?  @unique // 商机/单据编号
+  opportunityCode String?  @unique
   title           String
-  description     String?  // 留存沟通记录/备注
+  description     String?
   amountUSD       Float?
   amountCNY       Float?
   productId       String?
@@ -145,16 +168,14 @@ model Opportunity {
   company         Company  @relation(fields: [companyId], references: [id])
 
   ownerId         String?
-  owner           User?    @relation(fields: [ownerId], references: [id]) // 归属业务员
+  owner           User?    @relation(fields: [ownerId], references: [id])
 
-  // 归档单据快照 (JSON格式存储当时生成的单据详细数据)
-  lockedPiData    Json?    // PI快照
-  lockedCiData    Json?    // CI快照
-  lockedPlData    Json?    // PL快照
-  lockedContract  Json?    // 合同快照
-  customsData     Json?    // 报关草单快照
+  lockedPiData    Json?
+  lockedCiData    Json?
+  lockedPlData    Json?
+  lockedContract  Json?
+  customsData     Json?
 
-  // 物流
   expenses      ExpenseClaim[]
   shipments     Shipment[]
   carrier         String?
@@ -174,7 +195,7 @@ enum OppStage {
   CLOSED_LOST
 }
 
-// --- 模块七：供货商与采购管理 ---
+// --- 模块七：供货商 ---
 
 model Supplier {
   id            String   @id @default(cuid())
@@ -184,7 +205,7 @@ model Supplier {
   phone         String?
   email         String?
   mainProducts  String?
-  paymentTerms  String?  // 结算方式
+  paymentTerms  String?
 
   purchaseOrders PurchaseOrder[]
 
@@ -198,19 +219,19 @@ model PurchaseOrder {
   supplierId    String
   supplier      Supplier @relation(fields: [supplierId], references: [id])
   totalAmountCNY Float
-  status        String   @default("PENDING") // 等待、已发货、已入库等
-  orderDetails  Json     // 采购明细
+  status        String   @default("PENDING")
+  orderDetails  Json
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
 
-// --- 模块十：多邮箱聚合抓取 (Omnichannel Inbox) ---
+// --- 模块十：邮箱聚合 ---
 
 model EmailAccount {
   id        String   @id @default(cuid())
   email     String   @unique
-  password  String   // IMAP 授权码
+  password  String
   imapHost  String   @default("imap.gmail.com")
   imapPort  Int      @default(993)
   isSecure  Boolean  @default(true)
@@ -227,7 +248,7 @@ model EmailMessage {
   accountId String
   account   EmailAccount @relation(fields: [accountId], references: [id])
   
-  messageId String   @unique // 邮件的唯一ID
+  messageId String   @unique
   subject   String?
   from      String
   to        String
@@ -236,7 +257,7 @@ model EmailMessage {
   htmlBody  String?
   
   isRead    Boolean  @default(false)
-  isLead    Boolean  @default(false) // 是否已转为商机
+  isLead    Boolean  @default(false)
   
   createdAt DateTime @default(now())
 }
@@ -245,7 +266,7 @@ model EmailMessage {
 model FollowUp {
   id        String   @id @default(cuid())
   content   String
-  type      String   @default("NOTE") // EMAIL, WHATSAPP, NOTE, CALL
+  type      String   @default("NOTE")
   
   companyId String
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -257,16 +278,16 @@ model FollowUp {
 }
 
 
-// --- 模块十一：报账与审批流程 ---
+// --- 模块十一：报账 ---
 
 model ExpenseClaim {
   id          String   @id @default(cuid())
-  title       String   // 费用标题
-  amount      Float    // 报销金额
-  currency    String   @default("CNY") // 币种
-  category    String   // 费用类别 (Logistics, Procurement, Travel, Other)
-  description String?  // 详细描述
-  status      ApprovalStatus @default(PENDING) // 审批状态
+  title       String
+  amount      Float
+  currency    String   @default("CNY")
+  category    String
+  description String?
+  status      ApprovalStatus @default(PENDING)
   
   submittedById String
   submittedBy   User     @relation("ExpenseSubmittedBy", fields: [submittedById], references: [id])
@@ -274,7 +295,7 @@ model ExpenseClaim {
   approvedById  String?
   approvedBy    User?    @relation("ExpenseApprovedBy", fields: [approvedById], references: [id])
   
-  opportunityId String?  // 关联商机 (可选)
+  opportunityId String?
   opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
 
   createdAt   DateTime @default(now())
@@ -288,38 +309,40 @@ enum ApprovalStatus {
   PAID
 }
 
-// --- 模块十二：发货与物流 ---
+// --- 模块十二：发货 ---
 
 model Shipment {
   id              String   @id @default(cuid())
   opportunityId   String
   opportunity     Opportunity @relation(fields: [opportunityId], references: [id])
   
-  carrier         String   // 承运商 (DHL, UPS, etc.)
-  trackingNumber  String?  // 运单号
-  freightCost     Float?   // 运费成本
+  carrier         String
+  trackingNumber  String?
+  freightCost     Float?
   status          ShipmentStatus @default(PENDING)
   
-  shippedAt       DateTime? // 发货时间
-  estimatedArrival DateTime? // 预计到达时间
+  shippedAt       DateTime?
+  estimatedArrival DateTime?
+
+  trackingEvents  TrackingEvent[]
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
 
 enum ShipmentStatus {
-  PENDING    // 待发货
-  SHIPPED    // 已发货
-  DELIVERED  // 已签收
+  PENDING
+  SHIPPED
+  DELIVERED
 }
 
 
-// --- 模块十三：行政与考勤 (出差/请假) ---
+// --- 模块十三：行政考勤 ---
 
 model AttendanceRequest {
   id          String   @id @default(cuid())
-  type        String   // "LEAVE" | "BUSINESS_TRIP"
-  subType     String?  // e.g., SICK, ANNUAL, CLIENT_VISIT, EXHIBITION
+  type        String
+  subType     String?
   startDate   DateTime
   endDate     DateTime
   reason      String
@@ -331,9 +354,119 @@ model AttendanceRequest {
   approvedById  String?
   approvedBy    User?    @relation("AttendanceApprovedBy", fields: [approvedById], references: [id])
   
-  companyId   String?  // 可选：出差拜访的具体客户
+  companyId   String?
   company     Company? @relation(fields: [companyId], references: [id])
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+
+// --- 模块十四：WhatsApp Cloud API ---
+
+enum MessageDirection {
+  IN
+  OUT
+}
+
+model WhatsAppMessage {
+  id          String   @id @default(cuid())
+  waMessageId String?  @unique
+  direction   MessageDirection
+  phoneNumber String   // 对方手机号 (E.164)
+  contactName String?
+  body        String
+  translated  String?  // 翻译为中文后的内容
+  mediaUrl    String?
+  status      String   @default("DELIVERED") // SENT/DELIVERED/READ/FAILED
+
+  companyId   String?
+  company     Company? @relation(fields: [companyId], references: [id])
+
+  createdAt   DateTime @default(now())
+}
+
+
+// --- 模块十五：社交平台 (FB / LinkedIn) ---
+
+enum SocialPlatform {
+  FACEBOOK
+  LINKEDIN
+}
+
+model SocialAccount {
+  id          String   @id @default(cuid())
+  platform    SocialPlatform
+  externalId  String   // FB page id 或 LinkedIn URN
+  name        String?
+  accessToken String   @db.Text
+  refreshToken String? @db.Text
+  expiresAt   DateTime?
+
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+
+  messages    SocialMessage[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([platform, externalId])
+}
+
+model SocialMessage {
+  id          String   @id @default(cuid())
+  accountId   String
+  account     SocialAccount @relation(fields: [accountId], references: [id])
+  platform    SocialPlatform
+  direction   MessageDirection
+  senderName  String?
+  senderId    String?
+  body        String
+  translated  String?
+  raw         Json?
+
+  companyId   String?
+  company     Company? @relation(fields: [companyId], references: [id])
+
+  createdAt   DateTime @default(now())
+}
+
+
+// --- 模块十六：通知中心 ---
+
+enum NotificationType {
+  WHATSAPP
+  EMAIL
+  SOCIAL
+  APPROVAL
+  SHIPMENT
+  SYSTEM
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      NotificationType
+  title     String
+  body      String?
+  link      String?  // 点击跳转的 URL
+  isRead    Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+}
+
+
+// --- 模块十七：物流跟踪事件 ---
+
+model TrackingEvent {
+  id          String   @id @default(cuid())
+  shipmentId  String
+  shipment    Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  status      String
+  location    String?
+  description String
+  occurredAt  DateTime
+
+  createdAt   DateTime @default(now())
 }
