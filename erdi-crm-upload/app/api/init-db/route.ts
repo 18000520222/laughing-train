@@ -5,11 +5,26 @@ const prisma = new PrismaClient();
 
 export async function GET() {
   try {
-    // 1. 系统配置
+    // 1. 系统配置 — 自动从环境变量加载第三方 API keys
+    const envKeys = {
+      whatsappToken: process.env.WHATSAPP_TOKEN || undefined,
+      whatsappPhoneId: process.env.WHATSAPP_PHONE_ID || undefined,
+      whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN || undefined,
+      fbAppId: process.env.FB_APP_ID || undefined,
+      fbAppSecret: process.env.FB_APP_SECRET || undefined,
+      fbVerifyToken: process.env.FB_VERIFY_TOKEN || undefined,
+      linkedinClientId: process.env.LINKEDIN_CLIENT_ID || undefined,
+      linkedinClientSecret: process.env.LINKEDIN_CLIENT_SECRET || undefined,
+      aftershipApiKey: process.env.AFTERSHIP_API_KEY || undefined,
+      libretranslateUrl: process.env.LIBRETRANSLATE_URL || undefined,
+    };
+    // 只覆盖有值的字段
+    const settingsPayload: any = { id: 'default', usdToCnyRate: 7.2, companyName: 'ERDI TECH LTD' };
+    for (const [k, v] of Object.entries(envKeys)) if (v) settingsPayload[k] = v;
     await prisma.systemSettings.upsert({
       where: { id: 'default' },
-      update: {},
-      create: { id: 'default', usdToCnyRate: 7.2, companyName: 'ERDI TECH LTD' }
+      update: Object.fromEntries(Object.entries(envKeys).filter(([_, v]) => v)),
+      create: settingsPayload,
     });
 
     // 2. 员工
