@@ -66,7 +66,7 @@ export default async function InboxPage() {
           </div>
           <div className="mt-6 pt-4 border-t border-gray-100">
              <Link href="/settings" className="text-blue-600 text-sm hover:underline font-medium">
-                前往设置配置授权码 &rarr;
+               前往设置配置授权码 &rarr;
              </Link>
           </div>
         </div>
@@ -120,7 +120,7 @@ export default async function InboxPage() {
       </div>
       
       {/* 客户端同步脚本 */}
-      <script dangerouslySetInnerHTML={{__html: \`
+      <script dangerouslySetInnerHTML={{__html: `
         document.getElementById('syncBtn')?.addEventListener('click', async (e) => {
           e.preventDefault();
           const btn = e.target;
@@ -136,8 +136,7 @@ export default async function InboxPage() {
             alert('网络错误');
           }
         });
-      \`}} />
+      `}} />
     </div>
   );
 }
-
