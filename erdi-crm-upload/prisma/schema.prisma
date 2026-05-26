@@ -21,6 +21,9 @@ model User {
   // 关联的业务数据 (实现数据隔离)
   customers    Company[]     // 该员工名下的客户
   opportunities Opportunity[] // 该员工的商机
+  followUps FollowUp[]
+  expensesSubmitted ExpenseClaim[] @relation("ExpenseSubmittedBy")
+  expensesApproved  ExpenseClaim[] @relation("ExpenseApprovedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -63,6 +66,7 @@ model Company {
 
   contacts     Contact[]
   opportunities Opportunity[]
+  followUps FollowUp[]
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -148,6 +152,8 @@ model Opportunity {
   customsData     Json?    // 报关草单快照
 
   // 物流
+  expenses      ExpenseClaim[]
+  shipments     Shipment[]
   carrier         String?
   trackingNumber  String?
 
@@ -230,4 +236,76 @@ model EmailMessage {
   isLead    Boolean  @default(false) // 是否已转为商机
   
   createdAt DateTime @default(now())
+}
+
+
+model FollowUp {
+  id        String   @id @default(cuid())
+  content   String
+  type      String   @default("NOTE") // EMAIL, WHATSAPP, NOTE, CALL
+  
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+
+// --- 模块十一：报账与审批流程 ---
+
+model ExpenseClaim {
+  id          String   @id @default(cuid())
+  title       String   // 费用标题
+  amount      Float    // 报销金额
+  currency    String   @default("CNY") // 币种
+  category    String   // 费用类别 (Logistics, Procurement, Travel, Other)
+  description String?  // 详细描述
+  status      ApprovalStatus @default(PENDING) // 审批状态
+  
+  submittedById String
+  submittedBy   User     @relation("ExpenseSubmittedBy", fields: [submittedById], references: [id])
+  
+  approvedById  String?
+  approvedBy    User?    @relation("ExpenseApprovedBy", fields: [approvedById], references: [id])
+  
+  opportunityId String?  // 关联商机 (可选)
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+}
+
+// --- 模块十二：发货与物流 ---
+
+model Shipment {
+  id              String   @id @default(cuid())
+  opportunityId   String
+  opportunity     Opportunity @relation(fields: [opportunityId], references: [id])
+  
+  carrier         String   // 承运商 (DHL, UPS, etc.)
+  trackingNumber  String?  // 运单号
+  freightCost     Float?   // 运费成本
+  status          ShipmentStatus @default(PENDING)
+  
+  shippedAt       DateTime? // 发货时间
+  estimatedArrival DateTime? // 预计到达时间
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+enum ShipmentStatus {
+  PENDING    // 待发货
+  SHIPPED    // 已发货
+  DELIVERED  // 已签收
 }
