@@ -11,7 +11,7 @@ export default async function Dashboard() {
   const role = cookieStore.get('auth_role')?.value;
   // 动态读取当前登录者的邮箱和头衔！
   const currentUser = cookieStore.get('auth_email')?.value || '未知账号';
-  const roleMap = {
+  const roleMap: Record<string, string> = {
     'SUPER_ADMIN': '超级管理员',
     'ADMIN': '管理员',
     'SALES': '业务主管',
@@ -38,7 +38,7 @@ export default async function Dashboard() {
     redirect('/');
   }
 
-  const renderCard = (opp) => (
+  const renderCard = (opp: any) => (
     <div key={opp.id} className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow group relative mb-4">
       <div className="flex justify-between items-start mb-2">
         <h3 className="font-bold text-gray-800 text-lg line-clamp-1" title={opp.title}>{opp.title}</h3>
