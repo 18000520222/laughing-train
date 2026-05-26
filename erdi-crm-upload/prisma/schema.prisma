@@ -16,7 +16,7 @@ model User {
   password  String   // 实际应用中应加密存储
   name      String?
   role      Role     @default(SALES)
-  isActive  Boolean  @default(true) // 用于离职或禁用
+  isActive  Boolean  @default(true) // 用于离职博禁用
 
   // 关联的业务数据 (实现数据隔离)
   customers    Company[]     // 该员工名下的客户
@@ -194,4 +194,40 @@ model PurchaseOrder {
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+// --- 模块十：多邮箱聚合抓取 (Omnichannel Inbox) ---
+
+model EmailAccount {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String   // IMAP 授权码
+  imapHost  String   @default("imap.gmail.com")
+  imapPort  Int      @default(993)
+  isSecure  Boolean  @default(true)
+  isActive  Boolean  @default(true)
+  
+  messages  EmailMessage[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model EmailMessage {
+  id        String   @id @default(cuid())
+  accountId String
+  account   EmailAccount @relation(fields: [accountId], references: [id])
+  
+  messageId String   @unique // 邮件的唯一ID
+  subject   String?
+  from      String
+  to        String
+  date      DateTime
+  textBody  String?
+  htmlBody  String?
+  
+  isRead    Boolean  @default(false)
+  isLead    Boolean  @default(false) // 是否已转为商机
+  
+  createdAt DateTime @default(now())
 }
