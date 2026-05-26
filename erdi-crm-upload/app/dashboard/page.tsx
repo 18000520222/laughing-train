@@ -90,6 +90,12 @@ export default async function Dashboard() {
           <Link href="/analytics" className="flex items-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-100 px-4 py-2 rounded-lg font-bold transition-colors border border-blue-100 shadow-sm">
             📈 数据
           </Link>
+          <Link href="/expenses" className="flex items-center gap-2 bg-orange-50 text-orange-700 hover:bg-orange-100 px-4 py-2 rounded-lg font-bold transition-colors border border-orange-100 shadow-sm">
+            💰 报账
+          </Link>
+          <Link href="/shipments" className="flex items-center gap-2 bg-teal-50 text-teal-700 hover:bg-teal-100 px-4 py-2 rounded-lg font-bold transition-colors border border-teal-100 shadow-sm">
+            🚚 发货
+          </Link>
           <Link href="/suppliers" className="flex items-center gap-2 bg-purple-50 text-purple-700 hover:bg-purple-100 px-4 py-2 rounded-lg font-bold transition-colors border border-purple-100 shadow-sm">
             🏭 采购
           </Link>
