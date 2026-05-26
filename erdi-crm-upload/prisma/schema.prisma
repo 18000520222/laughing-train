@@ -24,6 +24,8 @@ model User {
   followUps FollowUp[]
   expensesSubmitted ExpenseClaim[] @relation("ExpenseSubmittedBy")
   expensesApproved  ExpenseClaim[] @relation("ExpenseApprovedBy")
+  attendancesSubmitted AttendanceRequest[] @relation("AttendanceSubmittedBy")
+  attendancesApproved  AttendanceRequest[] @relation("AttendanceApprovedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -67,6 +69,7 @@ model Company {
   contacts     Contact[]
   opportunities Opportunity[]
   followUps FollowUp[]
+  attendances AttendanceRequest[]
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -308,4 +311,29 @@ enum ShipmentStatus {
   PENDING    // 待发货
   SHIPPED    // 已发货
   DELIVERED  // 已签收
+}
+
+
+// --- 模块十三：行政与考勤 (出差/请假) ---
+
+model AttendanceRequest {
+  id          String   @id @default(cuid())
+  type        String   // "LEAVE" | "BUSINESS_TRIP"
+  subType     String?  // e.g., SICK, ANNUAL, CLIENT_VISIT, EXHIBITION
+  startDate   DateTime
+  endDate     DateTime
+  reason      String
+  status      ApprovalStatus @default(PENDING)
+  
+  submittedById String
+  submittedBy   User     @relation("AttendanceSubmittedBy", fields: [submittedById], references: [id])
+  
+  approvedById  String?
+  approvedBy    User?    @relation("AttendanceApprovedBy", fields: [approvedById], references: [id])
+  
+  companyId   String?  // 可选：出差拜访的具体客户
+  company     Company? @relation(fields: [companyId], references: [id])
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
