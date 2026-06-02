@@ -36,9 +36,8 @@ export async function GET() {
             ownerId: adminUser.id,
             contacts: {
               create: {
-                name: lead.name,
+                firstName: lead.name,
                 email: lead.email,
-                isPrimary: true
               }
             },
             opportunities: {
