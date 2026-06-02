@@ -22,7 +22,6 @@ export async function GET() {
 
     let count = 0;
     for (const lead of leads) {
-      // Check if lead already exists to avoid duplicates
       const existing = await prisma.company.findUnique({
         where: { customerCode: lead.code }
       });
@@ -37,14 +36,14 @@ export async function GET() {
             contacts: {
               create: {
                 firstName: lead.name,
-                email: lead.email,
+                email: lead.email
               }
             },
             opportunities: {
               create: {
                 title: `Imported Lead: ${lead.summary}`,
                 amountUSD: 0,
-                stage: 'PROSPECTING',
+                stage: 'UNPROCESSED',
                 ownerId: adminUser.id
               }
             }
