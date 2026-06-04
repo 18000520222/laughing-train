@@ -69,6 +69,12 @@ model SystemSettings {
   // LibreTranslate (可选自建实例)
   libretranslateUrl String? @default("https://libretranslate.com")
 
+  // --- 自动化中台:翻译 + AI 自动回复 ---
+  // 业务背景(喂给 AI 起草回复,如主营产品/报价口径)
+  aiBusinessInfo String? @db.Text
+  // 全局自动回复模式:OFF=仅翻译 / DRAFT=AI生成草稿待人工确认 / AUTO=低风险自动发
+  autoReplyMode  String  @default("DRAFT")
+
   updatedAt     DateTime @updatedAt
 }
 
@@ -94,6 +100,7 @@ model Company {
   attendances  AttendanceRequest[]
   whatsappMessages WhatsAppMessage[]
   socialMessages   SocialMessage[]
+  inboxMessages    InboxMessage[]
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -469,4 +476,57 @@ model TrackingEvent {
   occurredAt  DateTime
 
   createdAt   DateTime @default(now())
+}
+
+
+// --- 模块十八:统一自动化收件箱(全渠道) ---
+
+enum InboxChannel {
+  WHATSAPP
+  ALIBABA
+  AMAZON
+  SHOPEE
+  FACEBOOK
+}
+
+enum InboxStatus {
+  NEW          // 新到,未处理
+  AI_DRAFTED   // AI 已生成回复草稿,待人工确认
+  REPLIED      // 已回复(自动或人工)
+  ARCHIVED     // 已归档/忽略
+}
+
+model InboxMessage {
+  id          String   @id @default(cuid())
+  channel     InboxChannel
+  direction   MessageDirection
+
+  externalId  String?  // 平台侧消息 id(去重)
+  threadId    String?  // 平台侧会话 id(归并同一客户对话)
+  senderId    String   // 手机号/平台用户名/店铺账号
+  senderName  String?
+
+  originalText   String  @db.Text         // 客户原文
+  detectedLang   String?                   // 检测到的客户语言
+  translatedText String? @db.Text         // 译为中文
+
+  // AI 自动回复结果
+  intent         String?                   // 意图分类
+  aiReplyZh      String? @db.Text         // AI 中文回复草稿
+  aiReplyCustomer String? @db.Text        // 译成客户语言的回复
+  aiAutoSendable Boolean @default(false)   // AI 是否建议可自动发
+
+  status      InboxStatus @default(NEW)
+  mediaUrl    String?
+
+  companyId   String?
+  company     Company? @relation(fields: [companyId], references: [id])
+
+  sentAt      DateTime?                     // 平台原始时间
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([channel, externalId])
+  @@index([channel, status])
+  @@index([threadId])
 }

@@ -1,57 +1,52 @@
 // app/api/whatsapp/send/route.ts
-import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+// 发送 WhatsApp 消息。支持:
+//   - text: 直接发送的文本(若提供 translateTo,会把 text 视为中文先翻译)
+//   - translateTo: 客户语言 ISO 代码(如 'en'),提供时把中文 text 译成该语言再发
+//   - inboxId: 关联的统一收件箱消息,发送成功后标记为 REPLIED
 
-const prisma = new PrismaClient();
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { whatsappAdapter } from '@/lib/channels/whatsapp';
+import { translateReply } from '@/lib/translate';
+import { markReplied } from '@/lib/inbox';
 
 export async function POST(req: Request) {
   try {
-    const { to, text, companyId } = await req.json();
+    const { to, text, companyId, translateTo, inboxId } = await req.json();
     if (!to || !text) {
       return NextResponse.json({ error: 'to & text required' }, { status: 400 });
     }
 
-    const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
-    const token = settings?.whatsappToken || process.env.WHATSAPP_TOKEN;
-    const phoneId = settings?.whatsappPhoneId || process.env.WHATSAPP_PHONE_ID;
+    // 若指定客户语言,把中文 text 译过去
+    const zhText = text as string;
+    const finalText = translateTo ? await translateReply(zhText, translateTo) : zhText;
 
-    if (!token || !phoneId) {
-      return NextResponse.json({ error: '请先在系统设置中配置 WhatsApp Token 与 Phone ID' }, { status: 400 });
+    const sent = await whatsappAdapter.send({ to, text: finalText });
+    if (!sent.ok) {
+      return NextResponse.json({ error: sent.error }, { status: 400 });
     }
 
     const cleanTo = to.replace(/[^\d]/g, '');
 
-    const res = await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to: cleanTo,
-        type: 'text',
-        text: { body: text },
-      }),
-    });
-
-    const data = await res.json();
-    if (!res.ok) {
-      return NextResponse.json({ error: data }, { status: 400 });
-    }
-
+    // 旧表记录(兼容 /whatsapp 页面)
     const saved = await prisma.whatsAppMessage.create({
       data: {
-        waMessageId: data.messages?.[0]?.id,
+        waMessageId: sent.externalId,
         direction: 'OUT',
         phoneNumber: cleanTo,
-        body: text,
+        body: finalText,
+        translated: translateTo ? zhText : undefined,
         companyId: companyId || undefined,
         status: 'SENT',
       },
     });
 
-    return NextResponse.json({ ok: true, message: saved });
+    // 关联收件箱标记已回复
+    if (inboxId) {
+      await markReplied(inboxId, finalText, translateTo ? zhText : undefined).catch(() => {});
+    }
+
+    return NextResponse.json({ ok: true, message: saved, sentText: finalText });
   } catch (err: any) {
     return NextResponse.json({ error: String(err.message || err) }, { status: 500 });
   }

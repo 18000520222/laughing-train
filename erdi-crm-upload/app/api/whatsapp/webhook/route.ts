@@ -1,10 +1,13 @@
 // app/api/whatsapp/webhook/route.ts
 // Meta WhatsApp Cloud API webhook (GET verify + POST receive)
-import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-import { translateText } from '@/lib/translate';
+//
+// 升级:走统一中台 ingest pipeline(翻译 + AI 回复 + 统一收件箱),
+// 同时保留旧 WhatsAppMessage 表写入,兼容现有 /whatsapp 页面。
 
-const prisma = new PrismaClient();
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { whatsappAdapter } from '@/lib/channels/whatsapp';
+import { ingestInbound, markReplied } from '@/lib/inbox';
 
 // GET = Meta 平台对 Webhook URL 的校验请求
 export async function GET(req: Request) {
@@ -26,75 +29,72 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const payload = await req.json();
-    const entry = payload?.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value = change?.value;
 
-    if (!value?.messages) {
-      // status update 或非消息事件
-      return NextResponse.json({ ok: true });
+    // 1. 适配器解析为标准消息
+    const messages = await whatsappAdapter.parseInbound(payload);
+    if (!messages.length) {
+      return NextResponse.json({ ok: true }); // status 更新等非消息事件
     }
 
-    const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
-    const libreUrl = settings?.libretranslateUrl || 'https://libretranslate.com';
+    for (const m of messages) {
+      // 2. 走统一中台流水线(翻译 + AI 回复 + 入库 InboxMessage + 通知)
+      const result = await ingestInbound(m);
+      if (!result.created) continue;
 
-    for (const msg of value.messages) {
-      const phone = msg.from;
-      const waMessageId = msg.id;
-      const contactName = value.contacts?.[0]?.profile?.name;
-
-      let body = '';
-      let mediaUrl: string | undefined;
-
-      if (msg.type === 'text') {
-        body = msg.text?.body || '';
-      } else if (msg.type === 'image' || msg.type === 'document' || msg.type === 'audio') {
-        body = `[${msg.type}] ${msg[msg.type]?.caption || ''}`.trim();
-        mediaUrl = msg[msg.type]?.id;
-      } else {
-        body = `[${msg.type}]`;
+      // 3. 兼容旧表:同步写一条 WhatsAppMessage(供旧 /whatsapp 页面)
+      try {
+        const inbox = result.inboxId
+          ? await prisma.inboxMessage.findUnique({ where: { id: result.inboxId } })
+          : null;
+        await prisma.whatsAppMessage.create({
+          data: {
+            waMessageId: m.externalId,
+            direction: 'IN',
+            phoneNumber: m.senderId,
+            contactName: m.senderName,
+            body: m.text,
+            translated: inbox?.translatedText || undefined,
+            mediaUrl: m.mediaUrl,
+            companyId: inbox?.companyId || undefined,
+          },
+        });
+      } catch (e) {
+        // waMessageId 唯一冲突等忽略(重复投递)
       }
 
-      // 自动翻译为中文
-      const { translatedText } = await translateText(body, 'zh', 'auto', libreUrl);
-
-      // 尝试匹配已存在客户（通过手机号）
-      const existingContact = await prisma.contact.findFirst({
-        where: { phone: { contains: phone.slice(-8) } },
-        include: { company: true },
-      });
-
-      const saved = await prisma.whatsAppMessage.create({
-        data: {
-          waMessageId,
-          direction: 'IN',
-          phoneNumber: phone,
-          contactName,
-          body,
-          translated: translatedText,
-          mediaUrl,
-          companyId: existingContact?.companyId,
-        },
-      });
-
-      // 通知所有 SUPER_ADMIN / SALES
-      const admins = await prisma.user.findMany({
-        where: { role: { in: ['SUPER_ADMIN', 'ADMIN', 'SALES'] }, isActive: true },
-      });
-      await prisma.notification.createMany({
-        data: admins.map(u => ({
-          userId: u.id,
-          type: 'WHATSAPP' as const,
-          title: `WhatsApp: ${contactName || phone}`,
-          body: translatedText.slice(0, 100),
-          link: '/whatsapp',
-        })),
-      });
+      // 4. AUTO 模式 + AI 判定可自动发 → 立即发送
+      if (result.autoSent && result.inboxId) {
+        const inbox = await prisma.inboxMessage.findUnique({ where: { id: result.inboxId } });
+        if (inbox?.aiReplyCustomer) {
+          const sent = await whatsappAdapter.send({
+            to: m.senderId,
+            text: inbox.aiReplyCustomer,
+            threadId: m.threadId,
+          });
+          if (sent.ok) {
+            await markReplied(result.inboxId, inbox.aiReplyCustomer, inbox.aiReplyZh || undefined);
+            // 出站也记一条旧表
+            try {
+              await prisma.whatsAppMessage.create({
+                data: {
+                  waMessageId: sent.externalId,
+                  direction: 'OUT',
+                  phoneNumber: m.senderId,
+                  body: inbox.aiReplyCustomer,
+                  companyId: inbox.companyId || undefined,
+                  status: 'SENT',
+                },
+              });
+            } catch {}
+          }
+        }
+      }
     }
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
     console.error('[wa-webhook]', err);
-    return NextResponse.json({ error: String(err.message || err) }, { status: 200 }); // 永远返 200 防止 Meta 重试雪崩
+    // 永远返 200 防止 Meta 重试雪崩
+    return NextResponse.json({ error: String(err.message || err) }, { status: 200 });
   }
 }
