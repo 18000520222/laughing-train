@@ -63,6 +63,28 @@ model SystemSettings {
   linkedinClientId     String?
   linkedinClientSecret String?
 
+  // 阿里国际站开放平台(Alibaba.com Open Platform)
+  alibabaAppKey      String?
+  alibabaAppSecret   String?
+  alibabaAccessToken String?
+  alibabaRefreshToken String?
+
+  // 亚马逊 SP-API(LWA 授权)
+  amazonRefreshToken   String?
+  amazonLwaClientId    String?
+  amazonLwaClientSecret String?
+  amazonSellerId       String?
+  amazonMarketplaceId  String? @default("ATVPDKIKX0DER") // 默认美国站
+  amazonRegion         String? @default("na")            // na / eu / fe
+
+  // 虾皮 Shopee Open Platform
+  shopeePartnerId   String?
+  shopeePartnerKey  String?
+  shopeeShopId      String?
+  shopeeAccessToken String?
+  shopeeRefreshToken String?
+  shopeeRegion      String? @default("https://partner.shopeemobile.com") // API base
+
   // AfterShip
   aftershipApiKey String?
 

@@ -53,6 +53,24 @@ export default async function SettingsPage() {
         linkedinClientSecret: (formData.get('linkedinClientSecret') as string) || null,
         aftershipApiKey: (formData.get('aftershipApiKey') as string) || null,
         libretranslateUrl: (formData.get('libretranslateUrl') as string) || 'https://libretranslate.com',
+        // 阿里国际站
+        alibabaAppKey: (formData.get('alibabaAppKey') as string) || null,
+        alibabaAppSecret: (formData.get('alibabaAppSecret') as string) || null,
+        alibabaAccessToken: (formData.get('alibabaAccessToken') as string) || null,
+        alibabaRefreshToken: (formData.get('alibabaRefreshToken') as string) || null,
+        // 亚马逊 SP-API
+        amazonRefreshToken: (formData.get('amazonRefreshToken') as string) || null,
+        amazonLwaClientId: (formData.get('amazonLwaClientId') as string) || null,
+        amazonLwaClientSecret: (formData.get('amazonLwaClientSecret') as string) || null,
+        amazonSellerId: (formData.get('amazonSellerId') as string) || null,
+        amazonMarketplaceId: (formData.get('amazonMarketplaceId') as string) || 'ATVPDKIKX0DER',
+        amazonRegion: (formData.get('amazonRegion') as string) || 'na',
+        // 虾皮 Shopee
+        shopeePartnerId: (formData.get('shopeePartnerId') as string) || null,
+        shopeePartnerKey: (formData.get('shopeePartnerKey') as string) || null,
+        shopeeShopId: (formData.get('shopeeShopId') as string) || null,
+        shopeeAccessToken: (formData.get('shopeeAccessToken') as string) || null,
+        shopeeRefreshToken: (formData.get('shopeeRefreshToken') as string) || null,
       },
       create: { id: 'default' } as any,
     });
@@ -128,6 +146,39 @@ export default async function SettingsPage() {
               </p>
               <Field name="linkedinClientId" label="Client ID" def={(settings as any)?.linkedinClientId} />
               <Field name="linkedinClientSecret" label="Client Secret" def={(settings as any)?.linkedinClientSecret} type="password" />
+            </Section>
+
+            <Section title="🟠 阿里巴巴国际站 (Alibaba.com 开放平台)">
+              <p className="text-xs text-gray-500 -mt-2 mb-3">
+                在阿里开放平台控制台创建应用并授权后填入。需金品诚企(Gold Supplier)资质。询盘/消息将自动汇入统一收件箱。
+              </p>
+              <Field name="alibabaAppKey" label="App Key" def={(settings as any)?.alibabaAppKey} />
+              <Field name="alibabaAppSecret" label="App Secret" def={(settings as any)?.alibabaAppSecret} type="password" />
+              <Field name="alibabaAccessToken" label="Access Token" def={(settings as any)?.alibabaAccessToken} type="password" />
+              <Field name="alibabaRefreshToken" label="Refresh Token" def={(settings as any)?.alibabaRefreshToken} type="password" />
+            </Section>
+
+            <Section title="📦 亚马逊 SP-API (Selling Partner)">
+              <p className="text-xs text-gray-500 -mt-2 mb-3">
+                在 Seller Central → 开发者中心创建应用,LWA 授权后填入。买家消息/订单将轮询汇入统一收件箱。
+              </p>
+              <Field name="amazonLwaClientId" label="LWA Client ID" def={(settings as any)?.amazonLwaClientId} />
+              <Field name="amazonLwaClientSecret" label="LWA Client Secret" def={(settings as any)?.amazonLwaClientSecret} type="password" />
+              <Field name="amazonRefreshToken" label="Refresh Token" def={(settings as any)?.amazonRefreshToken} type="password" />
+              <Field name="amazonSellerId" label="Seller ID (可选)" def={(settings as any)?.amazonSellerId} />
+              <Field name="amazonMarketplaceId" label="Marketplace ID (默认美国 ATVPDKIKX0DER)" def={(settings as any)?.amazonMarketplaceId || 'ATVPDKIKX0DER'} />
+              <Field name="amazonRegion" label="Region (na / eu / fe)" def={(settings as any)?.amazonRegion || 'na'} />
+            </Section>
+
+            <Section title="🛍️ 虾皮 Shopee (Open Platform)">
+              <p className="text-xs text-gray-500 -mt-2 mb-3">
+                在 Shopee 开放平台创建应用并授权店铺后填入。聊天消息将通过 webhook 汇入统一收件箱。Push URL:<code>https://crm.erdicn.com/api/shopee/webhook</code>
+              </p>
+              <Field name="shopeePartnerId" label="Partner ID" def={(settings as any)?.shopeePartnerId} />
+              <Field name="shopeePartnerKey" label="Partner Key" def={(settings as any)?.shopeePartnerKey} type="password" />
+              <Field name="shopeeShopId" label="Shop ID" def={(settings as any)?.shopeeShopId} />
+              <Field name="shopeeAccessToken" label="Access Token" def={(settings as any)?.shopeeAccessToken} type="password" />
+              <Field name="shopeeRefreshToken" label="Refresh Token" def={(settings as any)?.shopeeRefreshToken} type="password" />
             </Section>
 
             <Section title="🚚 AfterShip 物流追踪">
