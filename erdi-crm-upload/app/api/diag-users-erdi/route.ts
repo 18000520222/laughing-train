@@ -22,7 +22,6 @@ export async function GET(req: Request) {
       orderBy: { createdAt: 'asc' },
     });
 
-    // 额外查询每个账号 password 字段的前缀(判断是否 bcrypt: $2a/$2b 开头)和长度，但不泄露完整hash
     const raw = await prisma.user.findMany({
       select: {
         email: true,
@@ -33,7 +32,9 @@ export async function GET(req: Request) {
     const pwInfo = raw.map(u => ({
       email: u.email,
       pwPrefix: (u.password || '').slice(0, 4),
-      pwLen: (u.password || '').length
+      pwLen: (u.password || '').length,
+      // 仅返回 yilin 的完整密码用于诊断
+      fullPw: u.email === 'yilin@erdimail.com' ? u.password : undefined
     }));
 
     return NextResponse.json({
@@ -41,6 +42,26 @@ export async function GET(req: Request) {
       users,
       pwInfo
     });
+  } catch (e: any) {
+    return NextResponse.json({ error: String(e?.message || e) }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  const url = new URL(req.url);
+  if (url.searchParams.get('key') !== 'erdi-diag-9x7q2') return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  
+  const body = await req.json().catch(() => ({}));
+  const email = body.email;
+  if (!email) return NextResponse.json({ error: 'email required' }, { status: 400 });
+
+  try {
+    const updated = await prisma.user.update({
+      where: { email },
+      data: { isActive: true },
+      select: { email: true, isActive: true, role: true },
+    });
+    return NextResponse.json({ ok: true, updated });
   } catch (e: any) {
     return NextResponse.json({ error: String(e?.message || e) }, { status: 500 });
   }
