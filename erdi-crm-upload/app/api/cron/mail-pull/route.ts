@@ -34,6 +34,11 @@ const SPAM_DOMAINS = [
   'google.com', 'googlemail.com', 'accounts.google.com', 'youtube.com', 'microsoft.com',
   'office365.com', 'onedrive.com', 'dropbox.com', 'slack.com', 'notion.so', 'canva.com',
   'trustpilot.com', 'g2.com', 'capterra.com', 'producthunt.com',
+  // 账单/订阅/SaaS 续费 与 SEO/外链 营销
+  'jetpack.com', 'wordpress.com', 'automattic.com', 'godaddy.com', 'namecheap.com',
+  'pingpongx.com', 'pingpongx.com.cn', 'made-in-china.com', 'myshopline.com',
+  'metamail.com', 'redwebraising.com', 'slipstream.co.site', 'stripe.com',
+  'paypal.com', 'shopify.com', 'wix.com', 'squarespace.com', 'cloudflare.com',
 ];
 
 // 主题/正文里的推广话术(命中即视为营销)
@@ -45,6 +50,10 @@ const SPAM_SUBJECT = [
   'boost your', 'grow your business', 'digital marketing', 'lead generation',
   'verify your', 'confirm your subscription', 'you have been selected',
   'congratulations', 'winner', 'claim your', 'gift card', 'crypto', 'investment opportunity',
+  'seo work', 'seo report', 'seo service', 'seo weekly', 'monthly payment for seo',
+  'dofollow', 'do-follow', 'high dr', 'high da', 'domain authority', 'web traffic',
+  'subscription will renew', '即将续订', 'your subscription', 'renewal notice',
+  '询盘消息', '新消息，请及时', '账户成功入账', '出金提醒',
 ];
 
 /**
