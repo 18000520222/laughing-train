@@ -4,6 +4,8 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: Request) {
   const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
   const appId = settings?.fbAppId || process.env.FB_APP_ID;
