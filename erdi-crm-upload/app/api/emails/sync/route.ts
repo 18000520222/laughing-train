@@ -80,39 +80,6 @@ export async function POST() {
       }
     }
 
-    // 如果数据库里一封邮件都没有，且刚才没抓到(因为没密码)，为了让UI不空，我们生成几封测试邮件
-    const countDB = await prisma.emailMessage.count();
-    if (countDB === 0 && totalFetched === 0) {
-      const demoAccount = accounts[0];
-      const demoAccount2 = accounts.length > 1 ? accounts[1] : demoAccount;
-      
-      await prisma.emailMessage.createMany({
-        data: [
-          {
-            accountId: demoAccount.id,
-            messageId: 'mock-1',
-            subject: 'Inquiry for LR20 Module',
-            from: 'Udi ben ami <tester@optisiv.com>',
-            to: demoAccount.email,
-            date: new Date(),
-            textBody: 'Hi, I saw your products on Alibaba. We need 10 units for testing. Please send PI.',
-            isRead: false
-          },
-          {
-            accountId: demoAccount2.id,
-            messageId: 'mock-2',
-            subject: 'Re: Quotation',
-            from: 'John Doe <john@example.com>',
-            to: demoAccount2.email,
-            date: new Date(Date.now() - 3600000),
-            textBody: 'The quotation looks good. Let us proceed with the contract.',
-            isRead: true
-          }
-        ]
-      });
-      totalFetched += 2;
-    }
-
     return NextResponse.json({ success: true, count: totalFetched });
 
   } catch (error: any) {
