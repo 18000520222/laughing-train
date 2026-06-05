@@ -1,7 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
-const prisma = new PrismaClient();
+
 
 export default async function PackingList({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params;

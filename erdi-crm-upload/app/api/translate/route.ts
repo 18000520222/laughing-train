@@ -1,9 +1,9 @@
 // app/api/translate/route.ts
 import { NextResponse } from 'next/server';
 import { translateText } from '@/lib/translate';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 
-const prisma = new PrismaClient();
+
 
 export async function POST(req: Request) {
   try {

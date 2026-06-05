@@ -1,8 +1,9 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { createSession, normalizeRole } from '@/lib/auth';
 
-const prisma = new PrismaClient();
+
 
 export default async function LoginPage(props: any) {
   async function login(formData: FormData) {
@@ -10,36 +11,37 @@ export default async function LoginPage(props: any) {
     const email = String(formData.get('email')).trim().toLowerCase();
     const pwd = String(formData.get('password'));
 
-    // 真正的企业级做法：去数据库核实账号密码
-    let user = await prisma.user.findUnique({
-      where: { email: email }
+    // 去数据库核实账号密码
+    const user = await prisma.user.findUnique({
+      where: { email: email },
     });
 
-    // 检查密码是否正确，且账号是否处于激活状态(未离职)
-    if ((user && user.password === pwd && user.isActive) || pwd === 'ERDI2026!') {
-      const authUser = user || { 
-        id: 'default', 
-        role: 'SUPER_ADMIN', 
-        email: 'sales@erdicn.com', 
-        name: 'Admin', 
-        isActive: true 
-      };
-
-      // 发放通行证，记录该员工的专属数据库 ID
-      cookies().set('auth_userId', authUser.id, { path: '/' });
-      cookies().set('auth_role', authUser.role as string, { path: '/' });
-      cookies().set('auth_email', authUser.email, { path: '/' });
-      cookies().set('auth_name', authUser.name || '未知', { path: '/' });
-
-      // 财务去财务室，业务去看板
-      if (authUser.role === 'FINANCE') {
-        redirect('/finance');
-      } else {
-        redirect('/dashboard');
-      }
-    } else {
+    // 密码正确且账号处于激活状态(未离职)才放行。无后门。
+    if (!user || user.password !== pwd || !user.isActive) {
       redirect('/?error=1');
     }
+
+    const role = normalizeRole(user.role as string);
+
+    // 签发签名 JWT 会话(httpOnly)，与 middleware 校验打通
+    await createSession({
+      userId: user.id,
+      email: user.email,
+      name: user.name || '未知',
+      role,
+    });
+
+    // 同时写入非敏感的明文 cookie，供前端 UI 直接读取(角色/姓名展示)
+    cookies().set('auth_userId', user.id, { path: '/' });
+    cookies().set('auth_role', role, { path: '/' });
+    cookies().set('auth_email', user.email, { path: '/' });
+    cookies().set('auth_name', user.name || '未知', { path: '/' });
+
+    // 财务去财务室，业务去看板
+    if (role === 'FINANCE') {
+      redirect('/finance');
+    }
+    redirect('/dashboard');
   }
 
   const searchParams = props.searchParams;

@@ -1,8 +1,8 @@
 // app/api/auth/linkedin/callback/route.ts
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 
-const prisma = new PrismaClient();
+
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);

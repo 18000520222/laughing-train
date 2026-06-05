@@ -1,10 +1,10 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import nodemailer from 'nodemailer';
 
 export const dynamic = 'force-dynamic';
-const prisma = new PrismaClient();
+
 
 // 动作 1：常规业务保存 (改金额、改公司、改阶段)
 async function updateOpportunity(formData: FormData) {
@@ -45,19 +45,24 @@ async function sendEmailReply(formData: FormData) {
 
   try {
     // 2. 配置 Gmail 发送引擎
+    const smtpUser = process.env.SMTP_USER || 'sales@erdicn.com';
+    const smtpPass = process.env.SMTP_PASS;
+    if (!smtpPass) {
+      throw new Error('SMTP_PASS is not configured in environment variables.');
+    }
     const transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: Number(process.env.SMTP_PORT || 465),
       secure: true,
       auth: {
-        user: 'sales@erdicn.com',
-        pass: 'qmkqpaledxcxicmu' // Gmail专用应用密码
-      }
+        user: smtpUser,
+        pass: smtpPass,
+      },
     });
 
     // 3. 发送真实邮件给客户
     await transporter.sendMail({
-      from: '"ERDI TECH LTD" <sales@erdicn.com>',
+      from: `"ERDI TECH LTD" <${smtpUser}>`,
       to: cleanEmail,
       subject: `Re: ${oppTitle}`,
       text: replyContent

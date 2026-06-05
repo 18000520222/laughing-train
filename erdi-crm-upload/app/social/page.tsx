@@ -1,10 +1,10 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
-const prisma = new PrismaClient();
+
 
 export default async function SocialPage({ searchParams }: { searchParams: Record<string, string> }) {
   const role = cookies().get('auth_role')?.value;

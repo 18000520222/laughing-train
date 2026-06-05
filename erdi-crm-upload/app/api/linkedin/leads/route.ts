@@ -1,9 +1,9 @@
 // app/api/linkedin/leads/route.ts
 // 拉取所有 LinkedIn 账号下的 Lead Gen Forms 提交记录
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 
-const prisma = new PrismaClient();
+
 
 export async function POST(req: Request) {
   const accounts = await prisma.socialAccount.findMany({ where: { platform: 'LINKEDIN' } });

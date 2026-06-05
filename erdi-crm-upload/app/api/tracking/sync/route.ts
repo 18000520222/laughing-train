@@ -1,9 +1,9 @@
 // app/api/tracking/sync/route.ts
 // 每日定时同步全部活跃发货的物流信息 (AfterShip)
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 
-const prisma = new PrismaClient();
+
 
 export async function GET() {
   return handle();

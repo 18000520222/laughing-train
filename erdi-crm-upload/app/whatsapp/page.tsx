@@ -1,11 +1,11 @@
 // app/whatsapp/page.tsx — Server component shell
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import WhatsAppChat from './WhatsAppChat';
 
 export const dynamic = 'force-dynamic';
-const prisma = new PrismaClient();
+
 
 export default async function WhatsAppPage() {
   const role = cookies().get('auth_role')?.value;

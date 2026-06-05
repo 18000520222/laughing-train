@@ -1,7 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
-const prisma = new PrismaClient();
+
 
 export default async function CustomsDeclaration({ params }: { params: { id: string } }) {
   const oppId = params?.id;

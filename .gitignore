@@ -1,0 +1,10 @@
+# 临时导入数据 / 脚本(不进仓库)
+*.json
+*.csv
+*.py
+!erdi-crm-upload/**
+
+# 但保留 CRM 项目内的配置类 json
+!erdi-crm-upload/package.json
+!erdi-crm-upload/tsconfig.json
+!erdi-crm-upload/vercel.json

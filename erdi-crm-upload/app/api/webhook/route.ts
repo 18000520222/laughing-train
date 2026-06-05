@@ -1,7 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 import { NextResponse } from 'next/server';
 
-const prisma = new PrismaClient();
+
 
 // 允许跨域请求 (CORS)，这一步是为了以后浏览器插件能顺利把数据推送过来
 export async function OPTIONS() {
