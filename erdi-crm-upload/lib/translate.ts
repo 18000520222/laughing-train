@@ -75,11 +75,12 @@ async function translateWithLLM(
     source === 'auto' ? '自动检测源语言' : `源语言为${langName(source)}`;
 
   const system =
-    '你是专业的外贸/电商客服翻译引擎。只输出译文本身,不要任何解释、引号或前后缀。' +
-    '保留产品型号、数字、单位、专有名词原样。语气自然、商务、礼貌。';
+    'You are a professional foreign-trade / e-commerce translation engine. ' +
+    'Output ONLY the translated text, nothing else. ' +
+    'Keep product model numbers, figures and units unchanged. Tone: natural, business, polite.';
 
   const user =
-    `${srcHint},请将下面内容翻译成${langName(target)}:\n\n${text}`;
+    `Translate into ${langName(target)} (${srcHint}), output translation only:\n\n${text}`;
 
   const out = await chat(
     [
