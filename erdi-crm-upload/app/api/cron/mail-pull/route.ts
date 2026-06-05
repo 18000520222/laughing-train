@@ -10,13 +10,79 @@ export const maxDuration = 60;
 
 // 自己的域名:这些发件人是我方,不当客户入库
 const OWN_DOMAINS = ['erdicn.com', 'erdimail.com', 'erditechs.com', 'erdicrm.com'];
-// 系统噪音发件人,跳过
-const NOISE = ['noreply', 'no-reply', 'donotreply', 'mailer-daemon', 'postmaster', 'notification', 'notifications', 'newsletter', 'support@google', 'security@', 'automated'];
 
-function isNoise(email: string): boolean {
-  const e = email.toLowerCase();
-  if (OWN_DOMAINS.some((d) => e.endsWith('@' + d) || e.endsWith('.' + d))) return true;
-  return NOISE.some((n) => e.includes(n));
+// 发件人本地段(@前)噪音关键词 — 系统/群发/营销
+const LOCAL_NOISE = [
+  'noreply', 'no-reply', 'donotreply', 'do-not-reply', 'mailer-daemon', 'postmaster',
+  'notification', 'notifications', 'newsletter', 'news@', 'mailer', 'bounce', 'bounces',
+  'automated', 'auto-confirm', 'updates', 'update@', 'digest', 'marketing', 'promo',
+  'promotions', 'campaign', 'mailing', 'noticed', 'alerts', 'alert@', 'feedback',
+  'invite', 'invitation', 'webinar', 'events@', 'community',
+];
+
+// 营销/SaaS/群发平台域名(及其子域)黑名单 — 这些发来的一律不进 CRM
+const SPAM_DOMAINS = [
+  'aftership.com', 'mailchimp.com', 'mailchimpapp.net', 'sendgrid.net', 'sendgrid.com',
+  'sendinblue.com', 'brevo.com', 'hubspot.com', 'hubspotemail.net', 'mailgun.org',
+  'amazonses.com', 'sparkpostmail.com', 'mandrillapp.com', 'constantcontact.com',
+  'cmail19.com', 'cmail20.com', 'createsend.com', 'rsgsv.net', 'mcsv.net',
+  'klaviyomail.com', 'klaviyo.com', 'salesforce.com', 'exacttarget.com', 'pardot.com',
+  'intercom.io', 'intercom-mail.com', 'zendesk.com', 'mixmax.com', 'mailjet.com',
+  'getresponse.com', 'activecampaign.com', 'drip.com', 'customer.io', 'mailerlite.com',
+  'substack.com', 'medium.com', 'linkedin.com', 'facebookmail.com', 'twitter.com',
+  'x.com', 'quora.com', 'pinterest.com', 'reddit.com', 'glassdoor.com', 'indeed.com',
+  'google.com', 'googlemail.com', 'accounts.google.com', 'youtube.com', 'microsoft.com',
+  'office365.com', 'onedrive.com', 'dropbox.com', 'slack.com', 'notion.so', 'canva.com',
+  'trustpilot.com', 'g2.com', 'capterra.com', 'producthunt.com',
+];
+
+// 主题/正文里的推广话术(命中即视为营销)
+const SPAM_SUBJECT = [
+  'unsubscribe', 'newsletter', 'webinar', 'free trial', 'limited time', 'act now',
+  'click here', 'special offer', 'discount', '% off', 'sale ends', 'buy now',
+  'backlink', 'guest post', 'seo service', 'rank higher', 'increase traffic',
+  'link building', 'collaboration opportunity', 'sponsored', 'affiliate',
+  'boost your', 'grow your business', 'digital marketing', 'lead generation',
+  'verify your', 'confirm your subscription', 'you have been selected',
+  'congratulations', 'winner', 'claim your', 'gift card', 'crypto', 'investment opportunity',
+];
+
+/**
+ * 多信号垃圾/营销邮件判定。命中任一即不进 CRM。
+ * 返回命中原因(用于统计/排查),null = 正常客户邮件。
+ */
+function spamReason(parsed: any): string | null {
+  const fromAddr: string = (parsed.from?.value?.[0]?.address || '').toLowerCase();
+  if (!fromAddr || !fromAddr.includes('@')) return 'no-from';
+
+  const domain = fromAddr.split('@')[1] || '';
+  const local = fromAddr.split('@')[0] || '';
+
+  // 1. 自己域名
+  if (OWN_DOMAINS.some((d) => domain === d || domain.endsWith('.' + d))) return 'own-domain';
+
+  // 2. 营销/群发平台域名(精确或子域)
+  if (SPAM_DOMAINS.some((d) => domain === d || domain.endsWith('.' + d))) return 'spam-domain';
+
+  // 3. 发件人本地段噪音关键词
+  if (LOCAL_NOISE.some((n) => local.includes(n.replace('@', '')))) return 'noise-sender';
+
+  // 4. 群发邮件头信号(营销邮件几乎必带其一)
+  const h = parsed.headers as Map<string, any> | undefined;
+  if (h) {
+    if (h.has('list-unsubscribe') || h.has('list-id') || h.has('list-post')) return 'list-header';
+    const precedence = String(h.get('precedence') || '').toLowerCase();
+    if (precedence === 'bulk' || precedence === 'list' || precedence === 'junk') return 'precedence-bulk';
+    if (h.has('x-campaign') || h.has('x-mailer-id') || h.has('feedback-id') || h.has('x-csa-complaints')) return 'campaign-header';
+    const autoSubmitted = String(h.get('auto-submitted') || '').toLowerCase();
+    if (autoSubmitted && autoSubmitted !== 'no') return 'auto-submitted';
+  }
+
+  // 5. 主题推广话术
+  const subject = String(parsed.subject || '').toLowerCase();
+  if (SPAM_SUBJECT.some((k) => subject.includes(k))) return 'spam-subject';
+
+  return null;
 }
 
 /** 鉴权:Vercel Cron 会带 Authorization: Bearer <CRON_SECRET>;手动调用用 ?key= */
@@ -47,7 +113,7 @@ export async function GET(req: Request) {
       report.push({ account: acc.email, skipped: 'no-password' });
       continue;
     }
-    const stat = { account: acc.email, fetched: 0, ingested: 0, duplicate: 0, noise: 0, errors: [] as string[] };
+    const stat = { account: acc.email, fetched: 0, ingested: 0, duplicate: 0, noise: 0, noiseReasons: {} as Record<string, number>, errors: [] as string[] };
 
     try {
       const client = new ImapFlow({
@@ -79,7 +145,27 @@ export async function GET(req: Request) {
               const subject: string = parsed.subject || '(无主题)';
               const body: string = (parsed.text || '').trim() || subject;
 
-              // 原始存档到 EmailMessage(同时作为去重锚点)
+              // 垃圾/营销邮件:不存档、不进 CRM、不建客户。只记 messageId 防下次重复判定。
+              const reason = spamReason(parsed);
+              if (reason) {
+                await prisma.emailMessage.create({
+                  data: {
+                    accountId: acc.id,
+                    messageId,
+                    subject,
+                    from: parsed.from?.text || fromAddr,
+                    to: parsed.to?.text || acc.email,
+                    date: parsed.date || new Date(),
+                    textBody: '', // 垃圾邮件不留正文,只占位去重
+                    htmlBody: '',
+                  },
+                });
+                stat.noise++;
+                stat.noiseReasons[reason] = (stat.noiseReasons[reason] || 0) + 1;
+                continue;
+              }
+
+              // 正常客户邮件:原始存档到 EmailMessage(同时作为去重锚点)
               await prisma.emailMessage.create({
                 data: {
                   accountId: acc.id,
@@ -92,8 +178,6 @@ export async function GET(req: Request) {
                   htmlBody: parsed.html || '',
                 },
               });
-
-              if (!fromAddr || isNoise(fromAddr)) { stat.noise++; continue; }
 
               // 进统一收件箱(翻译 + AI 草稿 + 自动建/匹配客户 + 通知)
               const msg: NormalizedMessage = {
