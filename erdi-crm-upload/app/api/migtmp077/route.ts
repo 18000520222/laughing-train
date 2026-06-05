@@ -12,6 +12,30 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
   try {
+    if (searchParams.get('inspect') === '1') {
+      const msgs = await prisma.inboxMessage.findMany({
+        where: { channel: 'EMAIL' as any },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        include: { company: { select: { name: true, source: true } } },
+      });
+      const emailCustomers = await prisma.company.count({ where: { source: 'EMAIL' } });
+      return NextResponse.json({
+        ok: true,
+        emailInboxCount: await prisma.inboxMessage.count({ where: { channel: 'EMAIL' as any } }),
+        emailSourceCompanies: emailCustomers,
+        latest: msgs.map((m: any) => ({
+          from: m.senderName,
+          senderId: m.senderId,
+          text: (m.originalText || '').slice(0, 120),
+          translated: (m.translatedText || '').slice(0, 120),
+          aiDraft: (m.aiReplyCustomer || m.aiReplyZh || '').slice(0, 120),
+          company: m.company?.name,
+          companySource: m.company?.source,
+        })),
+      });
+    }
+
     if (searchParams.get('setpass') === '1') {
       const email = (searchParams.get('email') || '').toLowerCase().trim();
       const pass = (searchParams.get('pass') || '').replace(/\s+/g, ''); // 去空格
