@@ -109,7 +109,6 @@ export async function GET(req: Request) {
   }
   const { searchParams } = new URL(req.url);
   const lookback = Math.min(parseInt(searchParams.get('n') || '20', 10), 50);
-  const classifyOnly = searchParams.get('classify') === '1';
 
   const accounts = await prisma.emailAccount.findMany({ where: { isActive: true } });
   if (accounts.length === 0) {
@@ -145,22 +144,6 @@ export async function GET(req: Request) {
             try {
               const parsed: any = await simpleParser(m.source as any);
               const messageId = parsed.messageId || `uid-${acc.id}-${m.uid}`;
-
-              // classify=1 干跑:只分类不存库不调 LLM,用于验证过滤准确性
-              if (classifyOnly) {
-                const r = spamReason(parsed);
-                (stat as any).samples = (stat as any).samples || [];
-                if ((stat as any).samples.length < 40) {
-                  (stat as any).samples.push({
-                    from: parsed.from?.value?.[0]?.address || '',
-                    subject: String(parsed.subject || '').slice(0, 50),
-                    verdict: r ? `SPAM:${r}` : 'CUSTOMER',
-                  });
-                }
-                if (r) { stat.noise++; stat.noiseReasons[r] = (stat.noiseReasons[r] || 0) + 1; }
-                else stat.ingested++;
-                continue;
-              }
 
               // 已入库(EmailMessage 或之前 ingest 过)→ 跳过
               const dup = await prisma.emailMessage.findUnique({ where: { messageId }, select: { id: true } });
