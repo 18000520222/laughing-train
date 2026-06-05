@@ -11,10 +11,10 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
   const available = isLLMAvailable();
-  let zh = '';
+  let result: unknown = null;
   let err = '';
   try {
-    zh = await translateText('What is the MOQ for your laser rangefinder?', 'zh');
+    result = await translateText('What is the MOQ for your laser rangefinder?', 'zh');
   } catch (e: any) {
     err = String(e?.message || e);
   }
@@ -23,7 +23,7 @@ export async function GET(req: Request) {
     model: process.env.OPENAI_MODEL,
     baseUrl: process.env.OPENAI_BASE_URL,
     keyTail: (process.env.OPENAI_API_KEY || '').slice(-6),
-    translateResult: zh,
+    translateResult: result,
     error: err,
   });
 }
