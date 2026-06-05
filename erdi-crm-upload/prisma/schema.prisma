@@ -509,6 +509,7 @@ enum InboxChannel {
   AMAZON
   SHOPEE
   FACEBOOK
+  EMAIL
 }
 
 enum InboxStatus {

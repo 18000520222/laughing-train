@@ -43,8 +43,8 @@ export async function ingestInbound(msg: NormalizedMessage): Promise<IngestResul
   // 2. 翻译为中文
   const { translatedText, detectedLanguage } = await translateText(msg.text, 'zh', 'auto');
 
-  // 3. 关联已知客户(按发送方标识尾号匹配联系人电话)
-  const company = await matchCompany(msg);
+  // 3. 关联已知客户(邮件按 email 匹配/自动建客户；其他渠道按电话尾号匹配)
+  const company = await matchOrCreateCompany(msg);
 
   // 4. AI 回复(OFF 模式跳过)
   let intent: string | undefined;
@@ -103,8 +103,57 @@ export async function ingestInbound(msg: NormalizedMessage): Promise<IngestResul
   return { created: true, inboxId: saved.id, autoSent };
 }
 
-/** 根据发送方标识匹配已有客户公司(电话尾 8 位) */
-async function matchCompany(msg: NormalizedMessage) {
+/**
+ * 关联客户公司。
+ * - 邮件渠道(senderId 为 email):先按 Contact.email 精确匹配;匹配不到则自动建客户
+ *   (按域名归并/复用 Company,新建 Contact),实现"新邮件自动建客户"。
+ * - 其他渠道:按电话尾 8 位匹配已有联系人。
+ */
+async function matchOrCreateCompany(msg: NormalizedMessage) {
+  // 邮件渠道:email 匹配 + 自动建客户
+  if (msg.channel === 'EMAIL' && msg.senderId.includes('@')) {
+    const email = msg.senderId.toLowerCase().trim();
+
+    const contact = await prisma.contact.findUnique({
+      where: { email },
+      include: { company: true },
+    });
+    if (contact?.company) return contact.company;
+
+    // 自动建客户:按域名复用/新建 Company,再建 Contact
+    const domain = email.split('@')[1] || 'unknown';
+    const { firstName, lastName } = splitName(msg.senderName, email);
+    const companyName = guessCompanyName(domain, msg.senderName);
+
+    let company = await prisma.company.findFirst({ where: { name: companyName } });
+    if (!company) {
+      const admin = await prisma.user.findFirst({
+        where: { role: 'SUPER_ADMIN', isActive: true },
+        select: { id: true },
+      });
+      company = await prisma.company.create({
+        data: {
+          name: companyName,
+          source: 'EMAIL',
+          type: 'PROSPECT',
+          isPublic: false,
+          ownerId: admin?.id ?? undefined,
+        },
+      });
+    }
+
+    // Contact 可能已存在但无 company,补建/补关联
+    if (contact && !contact.companyId) {
+      await prisma.contact.update({ where: { id: contact.id }, data: { companyId: company.id } });
+    } else if (!contact) {
+      await prisma.contact.create({
+        data: { firstName, lastName: lastName ?? undefined, email, companyId: company.id },
+      });
+    }
+    return company;
+  }
+
+  // 其他渠道:电话尾号匹配
   const digits = msg.senderId.replace(/[^\d]/g, '');
   if (digits.length >= 6) {
     const contact = await prisma.contact.findFirst({
@@ -114,6 +163,28 @@ async function matchCompany(msg: NormalizedMessage) {
     if (contact?.company) return contact.company;
   }
   return null;
+}
+
+/** 从显示名或邮箱本地段拆出 first/last name */
+function splitName(displayName: string | undefined, email: string): { firstName: string; lastName: string | null } {
+  const dn = (displayName || '').trim();
+  if (dn && !dn.includes('@')) {
+    const parts = dn.split(/\s+/);
+    if (parts.length >= 2) return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
+    return { firstName: dn, lastName: null };
+  }
+  return { firstName: email.split('@')[0], lastName: null };
+}
+
+/** 公司名:个人邮箱用显示名兜底,企业邮箱用域名首段 */
+function guessCompanyName(domain: string, displayName?: string): string {
+  const freeMail = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'qq.com', '163.com', '126.com', 'icloud.com', 'mail.ru', 'gmx.com', 'aol.com', 'protonmail.com'];
+  if (freeMail.includes(domain.toLowerCase())) {
+    const dn = (displayName || '').trim();
+    return dn && !dn.includes('@') ? dn : domain;
+  }
+  const first = domain.split('.')[0];
+  return first.charAt(0).toUpperCase() + first.slice(1);
 }
 
 /** 取该会话最近历史(给 AI 上下文) */
@@ -158,7 +229,7 @@ async function notify(msg: NormalizedMessage, preview: string, link: string) {
 
 function channelLabel(c: ChannelType): string {
   return (
-    { WHATSAPP: 'WhatsApp', ALIBABA: '阿里国际站', AMAZON: '亚马逊', SHOPEE: '虾皮', FACEBOOK: 'Facebook' } as Record<
+    { WHATSAPP: 'WhatsApp', ALIBABA: '阿里国际站', AMAZON: '亚马逊', SHOPEE: '虾皮', FACEBOOK: 'Facebook', EMAIL: '邮件' } as Record<
       ChannelType,
       string
     >
