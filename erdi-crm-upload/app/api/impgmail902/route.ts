@@ -12,6 +12,12 @@ export async function GET(req: Request) {
   if (searchParams.get('key') !== 'erdi-import-2026') {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
+  if (searchParams.get('stat') === '1') {
+    const companies = await prisma.company.count();
+    const contacts = await prisma.contact.count();
+    const gmailCompanies = await prisma.company.count({ where: { source: 'GMAIL' } });
+    return NextResponse.json({ ok: true, companies, contacts, gmailCompanies });
+  }
   const start = parseInt(searchParams.get('start') || '0', 10);
   const count = parseInt(searchParams.get('count') || '60', 10);
   const slice = LEADS.slice(start, start + count);
