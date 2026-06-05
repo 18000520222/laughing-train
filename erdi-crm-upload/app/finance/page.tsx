@@ -8,8 +8,8 @@ export const dynamic = 'force-dynamic';
 
 export default async function FinanceDashboard() {
   // 🔒 安全校验：拦截没买票的黑客
-  const role = cookies().get('auth_role')?.value;
-  if (role !== 'finance' && role !== 'sales') {
+  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
+  if (role !== 'FINANCE' && role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
     redirect('/');
   }
 
