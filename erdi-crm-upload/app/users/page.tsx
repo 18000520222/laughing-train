@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
+import bcrypt from 'bcryptjs';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,8 +39,9 @@ export default async function UsersPage() {
     const r = formData.get('role') as any;
 
     if (email && name && pwd) {
+      const hash = await bcrypt.hash(pwd, 10);
       await prisma.user.create({
-        data: { email, name, password: pwd, role: r }
+        data: { email, name, password: hash, role: r }
       });
       revalidatePath('/users');
     }

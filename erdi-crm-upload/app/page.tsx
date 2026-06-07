@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createSession, normalizeRole } from '@/lib/auth';
+import bcrypt from 'bcryptjs';
 
 
 
@@ -16,8 +17,28 @@ export default async function LoginPage(props: any) {
       where: { email: email },
     });
 
-    // 密码正确且账号处于激活状态(未离职)才放行。无后门。
-    if (!user || user.password !== pwd || !user.isActive) {
+    // 账号必须存在且激活(未离职)
+    if (!user || !user.isActive) {
+      redirect('/?error=1');
+    }
+
+    // 密码校验:bcrypt 哈希优先;兼容历史明文密码,验证通过后自动升级为哈希(渐进迁移,不锁死任何人)。
+    const stored = user.password || '';
+    const isHashed = stored.startsWith('$2');
+    let ok = false;
+    if (isHashed) {
+      ok = await bcrypt.compare(pwd, stored);
+    } else {
+      ok = stored === pwd;
+      if (ok) {
+        // 明文校验通过 → 立即升级为 bcrypt 哈希
+        try {
+          const hash = await bcrypt.hash(pwd, 10);
+          await prisma.user.update({ where: { id: user.id }, data: { password: hash } });
+        } catch {}
+      }
+    }
+    if (!ok) {
       redirect('/?error=1');
     }
 
