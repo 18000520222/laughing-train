@@ -21,14 +21,32 @@ export default async function Dashboard() {
 
   if (!role) redirect('/');
 
-  const [opps, waUnread, pendingApprovals, activeShipments] = await Promise.all([
-    prisma.opportunity.findMany({ orderBy: { createdAt: 'desc' } }),
-    prisma.whatsAppMessage.count({ where: { direction: 'IN', createdAt: { gte: new Date(Date.now() - 7 * 24 * 3600 * 1000) } } }),
-    prisma.expenseClaim.count({ where: { status: 'PENDING' } }).catch(() => 0),
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+
+  const [
+    opps,
+    totalCustomers,
+    newCustomersThisMonth,
+    inboxPending,
+    activeShipments,
+  ] = await Promise.all([
+    prisma.opportunity.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { company: { select: { name: true } } },
+    }).catch(() => [] as any[]),
+    prisma.company.count().catch(() => 0),
+    prisma.company.count({ where: { createdAt: { gte: monthStart } } }).catch(() => 0),
+    prisma.inboxMessage.count({ where: { direction: 'IN', status: { not: 'CLOSED' as any } } }).catch(() => 0),
     prisma.shipment.count({ where: { status: { not: 'DELIVERED' } } }).catch(() => 0),
   ]);
 
-  const totalAmount = opps.reduce((sum, opp) => sum + (opp.amountUSD || 0), 0);
+  // 漏斗金额:统计进行中(未关闭)商机的总额
+  const openOpps = opps.filter((o: any) => o.stage !== 'CLOSED_WON' && o.stage !== 'CLOSED_LOST');
+  const wonOpps = opps.filter((o: any) => o.stage === 'CLOSED_WON');
+  const pipelineAmount = openOpps.reduce((sum: number, o: any) => sum + (o.amountUSD || 0), 0);
+  const wonAmount = wonOpps.reduce((sum: number, o: any) => sum + (o.amountUSD || 0), 0);
 
   async function logout() {
     'use server';
@@ -44,7 +62,7 @@ export default async function Dashboard() {
         <h3 className="font-bold text-gray-800 text-lg line-clamp-1" title={opp.title}>{opp.title}</h3>
         <span className="text-green-600 font-semibold">${opp.amountUSD || 0}</span>
       </div>
-      <p className="text-sm text-gray-500 mb-4 line-clamp-2">客户: {opp.companyId || '未分配'}</p>
+      <p className="text-sm text-gray-500 mb-4 line-clamp-2">客户: {opp.company?.name || '未分配'}</p>
       <div className="flex justify-between items-center pt-3 border-t border-gray-100">
         <Link href={`/opportunity/${opp.id}`} className="text-sm text-blue-600 hover:text-blue-800 font-medium px-3 py-1.5 bg-blue-50 hover:bg-blue-100 rounded-md">
           处理邮件 & 详情
@@ -88,17 +106,19 @@ export default async function Dashboard() {
       </header>
 
       {/* 数据概览卡 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <StatCard label="系统总漏斗" value={`$${totalAmount.toLocaleString()}`} color="text-green-600" />
-        <StatCard label="本周 WhatsApp 新消息" value={`${waUnread}`} color="text-emerald-600" link="/whatsapp" />
-        <StatCard label="待审批报销" value={`${pendingApprovals}`} color="text-orange-600" link="/expenses" />
-        <StatCard label="在途运单" value={`${activeShipments}`} color="text-teal-600" link="/shipments" />
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+        <StatCard label="客户总数" value={`${totalCustomers}`} color="text-blue-600" link="/customers" />
+        <StatCard label="本月新增客户" value={`${newCustomersThisMonth}`} color="text-emerald-600" link="/customers" />
+        <StatCard label="进行中商机" value={`${openOpps.length}`} color="text-indigo-600" link="/documents" />
+        <StatCard label="进行中金额" value={`$${pipelineAmount.toLocaleString()}`} color="text-amber-600" />
+        <StatCard label="已成交金额" value={`$${wonAmount.toLocaleString()}`} color="text-green-600" link="/documents" />
+        <StatCard label="待处理收件箱" value={`${inboxPending}`} color="text-rose-600" link="/omnibox" />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Column title="新询盘确认" stage="SPEC_CONFIRMING" opps={opps} render={renderCard} />
-        <Column title="样品测试" stage="NEGOTIATING" opps={opps} render={renderCard} />
-        <Column title="已成单" stage="CLOSED_WON" opps={opps} render={renderCard} />
+        <Column title="🆕 新询盘 / 待处理" stages={['UNPROCESSED', 'REPLIED', 'QUOTING']} opps={opps} render={renderCard} />
+        <Column title="🤝 谈判 / 确认中" stages={['NEGOTIATING', 'SPEC_CONFIRMING']} opps={opps} render={renderCard} />
+        <Column title="✅ 已成单" stages={['CLOSED_WON']} opps={opps} render={renderCard} />
       </div>
     </div>
   );
@@ -134,8 +154,8 @@ function StatCard({ label, value, color, link }: { label: string; value: string;
   return link ? <Link href={link}>{inner}</Link> : inner;
 }
 
-function Column({ title, stage, opps, render }: { title: string; stage: string; opps: any[]; render: (o: any) => any }) {
-  const list = opps.filter(o => o.stage === stage);
+function Column({ title, stages, opps, render }: { title: string; stages: string[]; opps: any[]; render: (o: any) => any }) {
+  const list = opps.filter(o => stages.includes(o.stage));
   return (
     <div className="bg-gray-100/50 rounded-xl p-4 border border-gray-200">
       <div className="flex justify-between items-center mb-4">
