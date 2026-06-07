@@ -15,6 +15,16 @@ export default async function PIDocument({ params }: { params: Promise<{ id: str
 
   if (!opp) return <div className="p-10 text-red-500 font-bold">❌ 错误：找不到该商机。</div>;
 
+  // 收款银行信息从系统设置读取(可在 /settings 配置)
+  const settings = await prisma.systemSettings.findFirst();
+  const bank = {
+    name: settings?.bankName || '[请在系统设置中配置开户行]',
+    swift: settings?.bankSwift || '[请配置 SWIFT]',
+    accountNo: settings?.bankAccountNo || '[请配置收款账号]',
+    beneficiary: settings?.bankBeneficiary || settings?.companyName || 'ERDI TECH LTD',
+    address: settings?.bankAddress || '',
+  };
+
   // ==== 核心冻结逻辑开始 ==== //
   // 判断是否是“已成单”，且是否已经存在冻结快照
   let invoiceData = null;
@@ -120,10 +130,11 @@ export default async function PIDocument({ params }: { params: Promise<{ id: str
 
         <div className="text-sm text-gray-600 bg-gray-50 p-4 rounded border border-gray-200 mb-8 relative z-0">
           <h3 className="font-bold text-gray-800 mb-2">BANKING DETAILS (T/T in Advance)</h3>
-          <p>Bank Name: [Your Bank Name]</p>
-          <p>Swift Code: [Your Swift Code]</p>
-          <p>A/C No.: [Your Account Number]</p>
-          <p>Beneficiary: ERDI TECH LTD</p>
+          <p>Bank Name: {bank.name}</p>
+          <p>Swift Code: {bank.swift}</p>
+          <p>A/C No.: {bank.accountNo}</p>
+          <p>Beneficiary: {bank.beneficiary}</p>
+          {bank.address && <p>Bank Address: {bank.address}</p>}
         </div>
 
         <div className="absolute bottom-12 right-12 w-48 text-center z-0">

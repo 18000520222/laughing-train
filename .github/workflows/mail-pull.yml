@@ -1,0 +1,36 @@
+name: Mail Pull (准实时拉取邮件)
+
+# Vercel Hobby 计划 Cron 上限为每天 1 次，无法满足实时性。
+# 改用 GitHub Actions 每 5 分钟触发一次邮件同步路由，实现准实时入站。
+on:
+  schedule:
+    - cron: '*/5 * * * *' # 每 5 分钟(UTC)
+  workflow_dispatch: {}      # 支持手动触发
+
+concurrency:
+  group: mail-pull
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger mail-pull
+        run: |
+          echo "Triggering mail-pull at $(date -u)"
+          code=$(curl -sS -o /tmp/resp.txt -w "%{http_code}" \
+            --max-time 90 \
+            "https://crm.erdicn.com/api/cron/mail-pull?key=${MAIL_CRON_KEY}&n=30" || true)
+          echo "HTTP $code"
+          echo "----- response -----"
+          cat /tmp/resp.txt || true
+          echo ""
+          # 2xx 视为成功;Vercel 函数 60s 超时导致的客户端超时(空 code)也容忍,因写库幂等
+          if [ -n "$code" ] && [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then
+            echo "OK"
+          else
+            echo "::warning::mail-pull returned HTTP '$code' (may be a server-side timeout; writes are idempotent)"
+          fi
+        env:
+          MAIL_CRON_KEY: ${{ secrets.MAIL_CRON_KEY }}

@@ -26,11 +26,18 @@ export default async function SettingsPage() {
     if (r !== 'SUPER_ADMIN' && r !== 'ADMIN' && r !== 'SALES') return;
     const rate = parseFloat(formData.get('usdToCnyRate') as string);
     const companyName = formData.get('companyName') as string;
+    const bankFields = {
+      bankName: (formData.get('bankName') as string) || null,
+      bankSwift: (formData.get('bankSwift') as string) || null,
+      bankAccountNo: (formData.get('bankAccountNo') as string) || null,
+      bankBeneficiary: (formData.get('bankBeneficiary') as string) || null,
+      bankAddress: (formData.get('bankAddress') as string) || null,
+    };
     if (rate && companyName) {
       await prisma.systemSettings.upsert({
         where: { id: 'default' },
-        update: { usdToCnyRate: rate, companyName: companyName },
-        create: { id: 'default', usdToCnyRate: rate, companyName: companyName }
+        update: { usdToCnyRate: rate, companyName: companyName, ...bankFields },
+        create: { id: 'default', usdToCnyRate: rate, companyName: companyName, ...bankFields }
       });
     }
     redirect('/settings');
@@ -108,6 +115,32 @@ export default async function SettingsPage() {
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">公司主体名称</label>
                 <input type="text" name="companyName" defaultValue={settings?.companyName} required className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:border-blue-500" />
+              </div>
+            </div>
+            <div className="pt-4 border-t border-gray-100">
+              <h2 className="text-base font-bold text-gray-800 mb-1">🏦 收款银行信息（用于 PI / 形式发票）</h2>
+              <p className="text-xs text-gray-500 mb-4">填写后将自动显示在所有 PI 单据的 BANKING DETAILS 区域。</p>
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">开户行名称 (Bank Name)</label>
+                  <input type="text" name="bankName" defaultValue={(settings as any)?.bankName || ''} className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">SWIFT / BIC 代码</label>
+                  <input type="text" name="bankSwift" defaultValue={(settings as any)?.bankSwift || ''} className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">收款账号 (A/C No.)</label>
+                  <input type="text" name="bankAccountNo" defaultValue={(settings as any)?.bankAccountNo || ''} className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">收款人 (Beneficiary)</label>
+                  <input type="text" name="bankBeneficiary" defaultValue={(settings as any)?.bankBeneficiary || 'ERDI TECH LTD'} className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:border-blue-500" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">开户行地址 (可选)</label>
+                  <input type="text" name="bankAddress" defaultValue={(settings as any)?.bankAddress || ''} className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:border-blue-500" />
+                </div>
               </div>
             </div>
             <button type="submit" className="bg-gray-900 text-white px-6 py-3 rounded-lg font-bold hover:bg-gray-800">保存系统设置</button>

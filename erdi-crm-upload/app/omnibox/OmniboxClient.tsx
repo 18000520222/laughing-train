@@ -20,6 +20,7 @@ interface Msg {
 }
 
 const CHANNEL_LABEL: Record<string, string> = {
+  EMAIL: '邮件',
   WHATSAPP: 'WhatsApp',
   ALIBABA: '阿里国际站',
   AMAZON: '亚马逊',
@@ -27,6 +28,7 @@ const CHANNEL_LABEL: Record<string, string> = {
   FACEBOOK: 'Facebook',
 };
 const CHANNEL_COLOR: Record<string, string> = {
+  EMAIL: 'bg-indigo-100 text-indigo-700',
   WHATSAPP: 'bg-green-100 text-green-700',
   ALIBABA: 'bg-orange-100 text-orange-700',
   AMAZON: 'bg-yellow-100 text-yellow-700',
@@ -104,7 +106,7 @@ export default function OmniboxClient({
     }
   }
 
-  const channels = ['', 'WHATSAPP', 'ALIBABA', 'AMAZON', 'SHOPEE', 'FACEBOOK'];
+  const channels = ['', 'EMAIL', 'WHATSAPP', 'ALIBABA', 'AMAZON', 'SHOPEE', 'FACEBOOK'];
   const statuses = ['', 'NEW', 'AI_DRAFTED', 'REPLIED'];
 
   return (

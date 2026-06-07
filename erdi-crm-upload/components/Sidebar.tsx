@@ -26,7 +26,7 @@ const GROUPS: NavGroup[] = [
     title: '客户与商机',
     items: [
       { href: '/customers', label: '客户管理', icon: '👥' },
-      { href: '/inbox', label: '统一收件箱', icon: '📥' },
+      { href: '/omnibox', label: '统一收件箱', icon: '📥' },
       { href: '/products', label: '产品库', icon: '🛒' },
       { href: '/suppliers', label: '供应商', icon: '🏭' },
     ],

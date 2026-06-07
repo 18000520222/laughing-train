@@ -49,6 +49,13 @@ model SystemSettings {
   usdToCnyRate  Float    @default(7.2)
   companyName   String   @default("ERDI TECH LTD")
 
+  // 收款银行信息(用于 PI/CI 单据)
+  bankName        String? // 开户行名称
+  bankSwift       String? // SWIFT/BIC 代码
+  bankAccountNo   String? // 收款账号
+  bankBeneficiary String? @default("ERDI TECH LTD") // 收款人
+  bankAddress     String? // 开户行地址(可选)
+
   // WhatsApp Cloud API
   whatsappToken       String?
   whatsappPhoneId     String?
