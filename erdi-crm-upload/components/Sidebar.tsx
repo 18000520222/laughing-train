@@ -44,6 +44,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { href: '/whatsapp', label: 'WhatsApp', icon: '💬' },
       { href: '/social', label: '社媒消息', icon: '📱' },
+      { href: '/settings/channels', label: '渠道接入', icon: '🔌' },
     ],
   },
   {

@@ -14,6 +14,8 @@ const PUBLIC_PREFIXES = [
   '/api/shopline',     // SHOPLINE webhook
   '/api/whatsapp/webhook',
   '/api/facebook/webhook',
+  '/api/alibaba/webhook',  // 阿里国际站消息推送
+  '/api/shopee/webhook',   // Shopee push
   '/api/tracking/webhook',
   '/api/cron/',        // 定时任务(自带 ?key= / Bearer 校验)
 ];
