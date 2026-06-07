@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { NextResponse } from 'next/server';
+import bcrypt from 'bcryptjs';
 
 
 
@@ -38,11 +39,12 @@ export async function GET() {
       { email: '18628970297@163.com', password: 'finance888', name: '财务审计', role: 'FINANCE' }
     ];
     for (const u of users) {
+      const hashed = await bcrypt.hash(u.password, 10);
       await prisma.user.upsert({
         where: { email: u.email },
         update: {},
         // @ts-ignore
-        create: { email: u.email, password: u.password, name: u.name, role: u.role }
+        create: { email: u.email, password: hashed, name: u.name, role: u.role }
       });
     }
 
