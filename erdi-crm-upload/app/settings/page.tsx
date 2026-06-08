@@ -53,6 +53,7 @@ export default async function SettingsPage() {
         whatsappToken: (formData.get('whatsappToken') as string) || null,
         whatsappPhoneId: (formData.get('whatsappPhoneId') as string) || null,
         whatsappVerifyToken: (formData.get('whatsappVerifyToken') as string) || null,
+        whatsapp360ApiKey: (formData.get('whatsapp360ApiKey') as string) || null,
         fbAppId: (formData.get('fbAppId') as string) || null,
         fbAppSecret: (formData.get('fbAppSecret') as string) || null,
         fbVerifyToken: (formData.get('fbVerifyToken') as string) || null,
@@ -157,9 +158,21 @@ export default async function SettingsPage() {
             <p className="text-sm text-gray-500 mt-1">配置后，对应模块（WhatsApp / Facebook / LinkedIn / AfterShip 物流）自动启用。</p>
           </div>
           <form action={saveIntegrations} className="space-y-8">
-            <Section title="📱 WhatsApp Cloud API (Meta)">
-              <p className="text-xs text-gray-500 -mt-2 mb-3">
-                Webhook URL：<code>https://crm.erdicn.com/api/whatsapp/webhook</code>（在 Meta 后台填入，Verify Token 与下方一致）
+            <Section title="📱 WhatsApp（二选一：360dialog BSP 或 Meta 原生）">
+              <div className="rounded-lg border border-green-300 bg-green-50 p-3 mb-3">
+                <p className="text-sm font-semibold text-green-800">✅ 推荐：360dialog (BSP)</p>
+                <p className="text-xs text-green-700 mt-1 leading-snug">
+                  在 360dialog Hub 完成 Embedded Signup 后会拿到一个 API Key，填入下方即可。
+                  填了这个 Key，系统会自动走 360dialog 网关，<b>无需</b>再填下面的 Meta Phone ID / Token。
+                  <br />Webhook 在 360dialog Hub 里设为：<code>https://crm.erdicn.com/api/whatsapp/webhook</code>
+                </p>
+              </div>
+              <Field name="whatsapp360ApiKey" label="360dialog API Key" def={(settings as any)?.whatsapp360ApiKey} type="password" />
+
+              <div className="border-t border-gray-200 my-4" />
+              <p className="text-xs text-gray-500 mb-2">
+                — 或 — 原生 Meta Cloud API（业务组合未被封时用；当前你的 ERDI 组合已被封，建议走上面的 360dialog）
+                <br />Webhook URL：<code>https://crm.erdicn.com/api/whatsapp/webhook</code>（Verify Token 与下方一致）
               </p>
               <Field name="whatsappPhoneId" label="Phone Number ID" def={(settings as any)?.whatsappPhoneId} />
               <Field name="whatsappToken" label="Permanent Access Token" def={(settings as any)?.whatsappToken} type="password" />

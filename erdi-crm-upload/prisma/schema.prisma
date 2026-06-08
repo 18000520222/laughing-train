@@ -60,6 +60,8 @@ model SystemSettings {
   whatsappToken       String?
   whatsappPhoneId     String?
   whatsappVerifyToken String?
+  // WhatsApp via 360dialog (BSP) — 填了 API Key 即走 360dialog 网关，否则走原生 Meta Cloud
+  whatsapp360ApiKey   String?
 
   // Facebook
   fbAppId       String?
