@@ -122,9 +122,10 @@ export class AlibabaAdapter implements ChannelAdapter {
     if (!creds) return { ok: false, error: '未配置阿里国际站 AppKey/AppSecret/AccessToken' };
 
     try {
-      // method 以控制台授权的消息发送 API 为准(示意:alibaba.message.send)
+      // 阿里国际站新版网关路径规则：method `alibaba.icbu.xxx.yyy` → 路径 `/icbu/xxx/yyy`
+      // 买家消息回复走 ICBU 站内信 API。具体字段以控制台「API 授权」后的文档为准。
       const data = await callAlibaba(
-        '/alibaba/message/send',
+        '/icbu/message/send',
         {
           to_user_id: msg.to,
           content: msg.text,
@@ -148,10 +149,11 @@ export class AlibabaAdapter implements ChannelAdapter {
     if (!creds) return [];
 
     try {
-      // method 以控制台授权的询盘列表 API 为准(示意:alibaba.inquiry.list)
+      // 询盘列表(ICBU)。路径规则同上：method → /icbu/.../...
+      // 真实 method 名以控制台授权的 ICBU 询盘/消息 API 为准(如 alibaba.icbu.message.list)。
       const data = await callAlibaba(
-        '/alibaba/inquiry/list',
-        { page_size: '50', page: '1' },
+        '/icbu/message/list',
+        { page_size: '50', current_page: '1' },
         creds
       );
       return this.parseInbound(data);
