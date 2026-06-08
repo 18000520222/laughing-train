@@ -7,9 +7,16 @@ export const dynamic = 'force-dynamic';
 
 const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'];
 
-export default async function ChannelSettingsPage() {
+export default async function ChannelSettingsPage({
+  searchParams,
+}: {
+  searchParams?: { connected?: string; error?: string; saved?: string };
+}) {
   const role = cookies().get('auth_role')?.value?.toUpperCase();
   if (!role || !ADMIN_ROLES.includes(role)) redirect('/');
+
+  const connected = searchParams?.connected;
+  const authError = searchParams?.error;
 
   let s = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
   if (!s) s = { id: 'default', usdToCnyRate: 7.2, companyName: 'ERDI TECH LTD', updatedAt: new Date() } as any;
@@ -81,6 +88,17 @@ export default async function ChannelSettingsPage() {
         凭据保存在数据库，不会显示在前端明文回显之外的位置。
       </p>
 
+      {connected && (
+        <div className="mb-6 p-4 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm font-medium">
+          ✅ {connected.toUpperCase()} 授权成功，access_token 已保存并将自动刷新。
+        </div>
+      )}
+      {authError && (
+        <div className="mb-6 p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm break-all">
+          ❌ 授权失败：{decodeURIComponent(authError)}
+        </div>
+      )}
+
       <form action={save} className="space-y-8">
         {/* WhatsApp */}
         <section className="bg-white rounded-xl border border-gray-200 p-6">
@@ -100,9 +118,12 @@ export default async function ChannelSettingsPage() {
         <section className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-1">
             <h2 className="text-lg font-bold text-gray-800">🟠 阿里巴巴国际站</h2>
-            {status(abOk)}
+            <div className="flex items-center gap-2">
+              {status(abOk)}
+              <a href="/api/auth/alibaba/start" className="text-xs px-3 py-1 rounded-full bg-orange-500 text-white font-semibold hover:bg-orange-600">🔑 一键授权</a>
+            </div>
           </div>
-          <p className="text-xs text-gray-400 mb-4">消息推送地址：<code>{baseUrl}/api/alibaba/webhook</code>（开放平台审核通过后在控制台创建应用获取凭据）</p>
+          <p className="text-xs text-gray-400 mb-4">消息推送地址：<code>{baseUrl}/api/alibaba/webhook</code>　·　授权回调：<code>{baseUrl}/api/auth/alibaba/callback</code>（先填 AppKey/AppSecret 并「保存」，再点右上「一键授权」跳转阿里授权页，回来后 token 自动入库并续期）</p>
           <div className="grid grid-cols-2 gap-4">
             <Field name="alibabaAppKey" label="App Key" defaultValue={st.alibabaAppKey} />
             <Field name="alibabaAppSecret" label="App Secret" defaultValue={st.alibabaAppSecret} />
@@ -115,7 +136,10 @@ export default async function ChannelSettingsPage() {
         <section className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-1">
             <h2 className="text-lg font-bold text-gray-800">📦 亚马逊 SP-API</h2>
-            {status(amzOk)}
+            <div className="flex items-center gap-2">
+              {status(amzOk)}
+              <a href="/api/auth/amazon/start" className="text-xs px-3 py-1 rounded-full bg-yellow-500 text-white font-semibold hover:bg-yellow-600">🔑 一键授权</a>
+            </div>
           </div>
           <p className="text-xs text-gray-400 mb-4">亚马逊无消息 webhook，系统每 10 分钟轮询订单/消息。</p>
           <div className="grid grid-cols-2 gap-4">
@@ -132,7 +156,10 @@ export default async function ChannelSettingsPage() {
         <section className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-1">
             <h2 className="text-lg font-bold text-gray-800">🛒 Shopee 虾皮</h2>
-            {status(spOk)}
+            <div className="flex items-center gap-2">
+              {status(spOk)}
+              <a href="/api/auth/shopee/start" className="text-xs px-3 py-1 rounded-full bg-orange-600 text-white font-semibold hover:bg-orange-700">🔑 一键授权</a>
+            </div>
           </div>
           <p className="text-xs text-gray-400 mb-4">Push 回调地址：<code>{baseUrl}/api/shopee/webhook</code></p>
           <div className="grid grid-cols-2 gap-4">

@@ -11,6 +11,7 @@
 
 import crypto from 'crypto';
 import { prisma } from '@/lib/prisma';
+import { getShopeeAccessToken } from '@/lib/channels/oauth-tokens';
 import type {
   ChannelAdapter,
   NormalizedMessage,
@@ -38,7 +39,7 @@ export class ShopeeAdapter implements ChannelAdapter {
     const partnerId = s?.shopeePartnerId || process.env.SHOPEE_PARTNER_ID;
     const partnerKey = s?.shopeePartnerKey || process.env.SHOPEE_PARTNER_KEY;
     const shopId = s?.shopeeShopId || process.env.SHOPEE_SHOP_ID;
-    const accessToken = s?.shopeeAccessToken || process.env.SHOPEE_ACCESS_TOKEN;
+    const accessToken = (await getShopeeAccessToken()) || process.env.SHOPEE_ACCESS_TOKEN || '';
     if (!partnerId || !partnerKey || !shopId || !accessToken) return null;
     return {
       partnerId,

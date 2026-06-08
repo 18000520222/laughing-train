@@ -11,6 +11,7 @@
 
 import crypto from 'crypto';
 import { prisma } from '@/lib/prisma';
+import { getAlibabaAccessToken } from '@/lib/channels/oauth-tokens';
 import type {
   ChannelAdapter,
   NormalizedMessage,
@@ -69,7 +70,8 @@ export class AlibabaAdapter implements ChannelAdapter {
     const s = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
     const appKey = s?.alibabaAppKey || process.env.ALIBABA_APP_KEY;
     const appSecret = s?.alibabaAppSecret || process.env.ALIBABA_APP_SECRET;
-    const accessToken = s?.alibabaAccessToken || process.env.ALIBABA_ACCESS_TOKEN;
+    // 走刷新中心拿"保证有效"的 access_token(过期自动续期)；无 OAuth 时回退环境变量
+    const accessToken = (await getAlibabaAccessToken()) || process.env.ALIBABA_ACCESS_TOKEN || '';
     if (!appKey || !appSecret || !accessToken) return null;
     return { appKey, appSecret, accessToken };
   }
