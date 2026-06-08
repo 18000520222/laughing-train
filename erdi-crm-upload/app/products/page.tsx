@@ -92,7 +92,11 @@ export default async function ProductsPage() {
       <div className="max-w-6xl mx-auto">
         <div className="flex justify-between items-center mb-8 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <h1 className="text-2xl font-bold text-gray-800">📦 光电/激光产品资料库</h1>
-          <Link href="/dashboard" className="text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-lg font-medium transition-colors">← 返回看板</Link>
+          <div className="flex gap-2">
+            <Link href="/import" className="text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 px-4 py-2 rounded-lg font-medium transition-colors">📥 批量导入</Link>
+            <a href="/api/products/export" className="text-green-700 bg-green-50 border border-green-200 hover:bg-green-100 px-4 py-2 rounded-lg font-medium transition-colors">📤 导出CSV</a>
+            <Link href="/dashboard" className="text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-lg font-medium transition-colors">← 返回看板</Link>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

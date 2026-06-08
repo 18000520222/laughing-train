@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { ensureCustomerCode } from '@/lib/customer-code';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,10 +30,12 @@ async function addCustomer(formData: FormData) {
   const name = s('name');
   if (!name) return;
 
+  const customerCode = await ensureCustomerCode(s('customerCode'));
+
   const company = await prisma.company.create({
     data: {
       name,
-      customerCode: s('customerCode'),
+      customerCode,
       type: (s('type') as any) || 'PROSPECT',
       country: s('country'),
       industry: s('industry'),
@@ -105,9 +108,17 @@ export default async function CustomersPage(props: any) {
           <h1 className="text-2xl font-bold text-gray-800 tracking-tight">👥 客户管理中心</h1>
           <p className="text-sm text-gray-500 mt-1">共 {total} 家客户{q ? `（搜索 “${q}”）` : ''}</p>
         </div>
-        <Link href="/dashboard" className="bg-gray-800 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition-all">
-          返回看板
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/import" className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-2 rounded-lg font-bold hover:bg-blue-100 transition-all">
+            📥 批量导入
+          </Link>
+          <a href={`/api/customers/export${q ? `?q=${encodeURIComponent(q)}` : ''}`} className="bg-green-50 text-green-700 border border-green-200 px-4 py-2 rounded-lg font-bold hover:bg-green-100 transition-all">
+            📤 导出CSV
+          </a>
+          <Link href="/dashboard" className="bg-gray-800 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition-all">
+            返回看板
+          </Link>
+        </div>
       </header>
 
       {/* 手动新增客户 */}
@@ -124,7 +135,7 @@ export default async function CustomersPage(props: any) {
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-500 mb-1">客户编号</label>
-              <input name="customerCode" placeholder="如：CUST-2026-001（可留空）" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
+              <input name="customerCode" placeholder="留空自动生成 CUST-年-序号" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-500 mb-1">客户类型</label>
