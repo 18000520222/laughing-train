@@ -60,6 +60,9 @@ export default async function SettingsPage() {
         linkedinClientSecret: (formData.get('linkedinClientSecret') as string) || null,
         aftershipApiKey: (formData.get('aftershipApiKey') as string) || null,
         libretranslateUrl: (formData.get('libretranslateUrl') as string) || 'https://libretranslate.com',
+        // AI 智能客服
+        autoReplyMode: (formData.get('autoReplyMode') as string) || 'DRAFT',
+        aiBusinessInfo: (formData.get('aiBusinessInfo') as string) || null,
         // 阿里国际站
         alibabaAppKey: (formData.get('alibabaAppKey') as string) || null,
         alibabaAppSecret: (formData.get('alibabaAppSecret') as string) || null,
@@ -219,9 +222,38 @@ export default async function SettingsPage() {
               <p className="text-xs text-gray-500">配置后，访问 <code>/api/tracking/sync</code> 手动同步，或绑定 Vercel Cron 每天自动同步。</p>
             </Section>
 
-            <Section title="🌐 LibreTranslate 翻译服务">
+            <Section title="🤖 AI 智能客服 / 实时翻译">
+              <p className="text-xs text-gray-500 -mt-2 mb-3">
+                全渠道（WhatsApp / 阿里 / 亚马逊 / 虾皮 / Facebook / 邮件）入站消息自动翻译为中文，并由 AI 生成回复。配置后即时生效。
+                <span className="text-green-600 font-medium"> 当前翻译引擎已升级为 LLM（外贸语境最佳）。</span>
+              </p>
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-2">自动回复模式</label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <RadioCard name="autoReplyMode" value="OFF" current={(settings as any)?.autoReplyMode || 'DRAFT'}
+                    title="🚫 关闭" desc="只翻译，不生成 AI 回复" />
+                  <RadioCard name="autoReplyMode" value="DRAFT" current={(settings as any)?.autoReplyMode || 'DRAFT'}
+                    title="✍️ 草稿（推荐）" desc="AI 生成回复草稿，业务员审阅后手动发送" />
+                  <RadioCard name="autoReplyMode" value="AUTO" current={(settings as any)?.autoReplyMode || 'DRAFT'}
+                    title="⚡ 全自动" desc="低风险问题 AI 直接回复客户；报价/交期/投诉仍转人工" />
+                </div>
+              </div>
+              <div className="mt-2">
+                <label className="block text-xs font-semibold text-gray-700 mb-1">业务背景 / 话术（喂给 AI，让回复更贴合你的产品）</label>
+                <textarea
+                  name="aiBusinessInfo"
+                  defaultValue={(settings as any)?.aiBusinessInfo || ''}
+                  rows={6}
+                  placeholder={"例如：\nERDI TECH LTD 是激光测距模块/激光目标指示器/光电模块的中国制造商。\n主营产品：LR系列激光测距模块（量程 20m-20km）、激光指示器。\n回复口径：交期 15-30 天；MOQ 可议；样品支持；不在聊天中直接报价，引导客户提供型号/数量后由专人报价。\n语气：专业、礼貌、简洁。"}
+                  className="w-full border border-gray-300 rounded-lg p-3 text-sm outline-none focus:border-blue-500 font-mono leading-relaxed"
+                />
+                <p className="text-xs text-gray-500 mt-1">建议写清：公司简介、主营产品线、报价/交期/MOQ 口径、希望的回复语气。AI 会据此起草更准确的回复，且不会编造价格数字。</p>
+              </div>
+            </Section>
+
+            <Section title="🌐 翻译引擎降级 (LibreTranslate)">
               <Field name="libretranslateUrl" label="服务地址" def={(settings as any)?.libretranslateUrl || 'https://libretranslate.com'} />
-              <p className="text-xs text-gray-500">默认使用公共实例（可能限流）。建议自部署 LibreTranslate 后填入 https 地址。</p>
+              <p className="text-xs text-gray-500">仅当 LLM 不可用时作为降级翻译。默认公共实例（可能限流），建议自部署后填 https 地址。</p>
             </Section>
 
             <button type="submit" className="bg-gray-900 text-white px-6 py-3 rounded-lg font-bold hover:bg-gray-800">保存所有 API Key</button>
@@ -284,6 +316,19 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <h3 className="font-bold text-gray-800 mb-4">{title}</h3>
       <div className="space-y-3">{children}</div>
     </div>
+  );
+}
+
+function RadioCard({ name, value, current, title, desc }: { name: string; value: string; current: string; title: string; desc: string }) {
+  const checked = current === value;
+  return (
+    <label className={`cursor-pointer block rounded-lg border p-3 transition ${checked ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-gray-300 bg-white hover:border-gray-400'}`}>
+      <div className="flex items-center gap-2">
+        <input type="radio" name={name} value={value} defaultChecked={checked} className="accent-blue-600" />
+        <span className="font-semibold text-sm text-gray-800">{title}</span>
+      </div>
+      <p className="text-xs text-gray-500 mt-1 leading-snug">{desc}</p>
+    </label>
   );
 }
 
