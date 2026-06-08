@@ -38,6 +38,35 @@ function fmtDate(d: Date | null | undefined): string {
   return new Date(d).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 }
 
+async function updateCustomer(formData: FormData) {
+  'use server';
+  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
+  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
+
+  const id = String(formData.get('id') || '');
+  if (!id) return;
+  const s = (k: string) => {
+    const v = formData.get(k);
+    const str = v === null ? '' : String(v).trim();
+    return str === '' ? null : str;
+  };
+  const name = s('name');
+  if (!name) return;
+
+  await prisma.company.update({
+    where: { id },
+    data: {
+      name,
+      customerCode: s('customerCode'),
+      type: (s('type') as any) || 'PROSPECT',
+      country: s('country'),
+      industry: s('industry'),
+      website: s('website'),
+    },
+  });
+  redirect(`/customers/${id}`);
+}
+
 export default async function CustomerDetailPage(props: any) {
   const role = (cookies().get('auth_role')?.value || '').toUpperCase();
   if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
@@ -118,6 +147,51 @@ export default async function CustomerDetailPage(props: any) {
             </div>
           </div>
         </div>
+
+        {/* 编辑客户信息 */}
+        <details className="mt-5 pt-5 border-t border-gray-100">
+          <summary className="cursor-pointer select-none text-sm font-bold text-indigo-600 hover:text-indigo-700">
+            ✏️ 编辑客户信息
+          </summary>
+          <form action={updateCustomer} className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <input type="hidden" name="id" value={company.id} />
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">公司名称 *</label>
+              <input name="name" defaultValue={company.name} required className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">客户编号</label>
+              <input name="customerCode" defaultValue={company.customerCode || ''} placeholder="可填写 / 修改" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">客户类型</label>
+              <select name="type" defaultValue={company.type} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                <option value="PROSPECT">潜在客户</option>
+                <option value="NEW">新客户</option>
+                <option value="EXISTING">老客户</option>
+                <option value="KEY_ACCOUNT">重点客户</option>
+                <option value="LOST">流失客户</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">国家 / 地区</label>
+              <input name="country" defaultValue={company.country || ''} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">行业</label>
+              <input name="industry" defaultValue={company.industry || ''} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">官网</label>
+              <input name="website" defaultValue={company.website || ''} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div className="md:col-span-3">
+              <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 py-2.5 rounded-lg transition-all">
+                保存修改
+              </button>
+            </div>
+          </form>
+        </details>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
