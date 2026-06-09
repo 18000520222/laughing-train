@@ -67,6 +67,37 @@ async function updateCustomer(formData: FormData) {
   redirect(`/customers/${id}`);
 }
 
+async function addFollowUp(formData: FormData) {
+  'use server';
+  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
+  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
+
+  const companyId = String(formData.get('companyId') || '');
+  const content = String(formData.get('content') || '').trim();
+  const type = String(formData.get('type') || 'NOTE');
+  
+  if (!companyId || !content) return;
+
+  const authEmail = cookies().get('auth_email')?.value;
+  if (!authEmail) return;
+
+  const user = await prisma.user.findUnique({
+    where: { email: authEmail }
+  });
+  if (!user) return;
+
+  await prisma.followUp.create({
+    data: {
+      content,
+      type,
+      companyId,
+      userId: user.id
+    }
+  });
+
+  redirect(`/customers/${companyId}`);
+}
+
 export default async function CustomerDetailPage(props: any) {
   const role = (cookies().get('auth_role')?.value || '').toUpperCase();
   if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
@@ -366,6 +397,41 @@ export default async function CustomerDetailPage(props: any) {
 
           <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             <h2 className="px-6 py-4 font-bold text-gray-800 border-b border-gray-100">📝 跟进记录</h2>
+            
+            {/* 快速新增跟进记录表单 */}
+            <form action={addFollowUp} className="p-6 border-b border-gray-100 bg-gray-50/50">
+              <input type="hidden" name="companyId" value={company.id} />
+              <div className="flex gap-4 mb-3">
+                <select 
+                  name="type" 
+                  defaultValue="NOTE" 
+                  className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="NOTE">💡 备注 / 便签</option>
+                  <option value="PHONE">📞 电话跟进</option>
+                  <option value="EMAIL">✉️ 邮件联系</option>
+                  <option value="WECHAT">💬 微信 / 聊天</option>
+                  <option value="MEETING">🤝 面对面会议</option>
+                </select>
+                <span className="text-xs text-gray-400 self-center">记录线下跟进或客户口头需求</span>
+              </div>
+              <div className="flex gap-2">
+                <textarea
+                  name="content"
+                  placeholder="输入沟通记录（如：客户要求在 6 月 15 日前发送样品报价...）"
+                  required
+                  rows={2}
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition self-end h-fit"
+                >
+                  提交记录
+                </button>
+              </div>
+            </form>
+
             {company.followUps.length === 0 ? (
               <p className="px-6 py-8 text-center text-gray-400 text-sm">暂无跟进记录</p>
             ) : (
