@@ -95,6 +95,60 @@ export default async function CustomerDetailPage(props: any) {
     (o) => o.stage !== 'CLOSED_WON' && o.stage !== 'CLOSED_LOST'
   ).length;
 
+  // 💡 智能行动指南 / 互动提示语逻辑
+  const lastMailDate = company.inboxMessages[0]?.sentAt || company.inboxMessages[0]?.createdAt || null;
+  const lastFollowUpDate = company.followUps[0]?.createdAt || null;
+  const lastInteractionDate = [lastMailDate, lastFollowUpDate, company.createdAt]
+    .filter(Boolean)
+    .map(d => new Date(d!).getTime())
+    .reduce((max, t) => Math.max(max, t), 0);
+
+  const daysSinceLastInteraction = Math.floor((Date.now() - lastInteractionDate) / (1000 * 60 * 60 * 24));
+
+  const hints: Array<{ type: 'danger' | 'warning' | 'success' | 'info'; text: string }> = [];
+
+  if (daysSinceLastInteraction >= 90) {
+    hints.push({
+      type: 'danger',
+      text: `⚠️ 失联预警：该客户已失联长达 ${daysSinceLastInteraction} 天！系统判定为深度休眠，建议立即主动联络激活，或释放归入公海。`
+    });
+  } else if (daysSinceLastInteraction >= 30) {
+    hints.push({
+      type: 'warning',
+      text: `🔔 提示：已有 ${daysSinceLastInteraction} 天没有与客户互动，建议尽快安排跟进（如发送最新的激光模块规格、报价单进行常规问候）。`
+    });
+  } else {
+    hints.push({
+      type: 'success',
+      text: `🎉 状态活跃：最近跟进/往来发生在 ${daysSinceLastInteraction} 天内。客户关系处于活跃期，请继续保持！`
+    });
+  }
+
+  const lastIncomingMail = company.inboxMessages.find(m => m.direction === 'IN');
+  if (lastIncomingMail && lastIncomingMail.status === 'AI_DRAFTED') {
+    hints.push({
+      type: 'warning',
+      text: `✉️ 新邮件提示：客户发来了新询盘，AI 已经为您翻译为中文并写好回复草稿，请前往【全渠道收件箱】查看回复！`
+    });
+  }
+
+  const openOpps = company.opportunities.filter(o => o.stage !== 'CLOSED_WON' && o.stage !== 'CLOSED_LOST');
+  if (openOpps.length > 0) {
+    openOpps.forEach(op => {
+      if (op.stage === 'UNPROCESSED' || op.stage === 'REPLIED') {
+        hints.push({
+          type: 'info',
+          text: `💼 商机提示：商机【${op.title}】规格若已基本敲定，建议在商机模块为其一键生成 形式发票 (PI) 锁定项目订单！`
+        });
+      } else if (op.stage === 'SPEC_CONFIRMING' && !op.lockedCiData) {
+        hints.push({
+          type: 'info',
+          text: `📜 单证提示：商机【${op.title}】的订单已锁定，请前往商机管理中生成 商业发票 (CI) 和 装箱单 (PL) 以筹备出口报关装运！`
+        });
+      }
+    });
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
       {/* 顶部 */}
@@ -193,6 +247,28 @@ export default async function CustomerDetailPage(props: any) {
           </form>
         </details>
       </div>
+
+      {/* 💡 智能行动指南 (Hints & Alerts) */}
+      {hints.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+          <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
+            💡 智能行动指南
+          </h3>
+          <div className="space-y-2.5">
+            {hints.map((h, i) => {
+              const bg = h.type === 'danger' ? 'bg-red-50 text-red-700 border-red-100'
+                : h.type === 'warning' ? 'bg-amber-50 text-amber-700 border-amber-100'
+                : h.type === 'success' ? 'bg-green-50 text-green-700 border-green-100'
+                : 'bg-blue-50 text-blue-700 border-blue-100';
+              return (
+                <div key={i} className={`px-4 py-3 rounded-xl border text-sm font-medium ${bg}`}>
+                  {h.text}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* 左列：联系人 + 商机 */}
