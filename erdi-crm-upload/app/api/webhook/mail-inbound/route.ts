@@ -72,7 +72,7 @@ export async function POST(req: Request) {
     const domain = senderEmail.includes('@') ? senderEmail.split('@')[1] : 'unknown';
 
     // 4. Run AI Analysis & Extraction via OpenAI
-    const systemPrompt = \`You are a B2B AI Assistant for ERDI TECH LTD (a manufacturer of 1535nm laser rangefinders).
+    const systemPrompt = `You are a B2B AI Assistant for ERDI TECH LTD (a manufacturer of 1535nm laser rangefinders).
 Analyze the incoming email metadata and body. You MUST return a JSON object with the following schema:
 {
   "clientName": "string - extracted contact person's name (fallback to senderName if cannot find in body)",
@@ -81,19 +81,19 @@ Analyze the incoming email metadata and body. You MUST return a JSON object with
   "intent": "string - short categorization of inquiry (e.g. Price Inquiry, Technical Support, Sample Request, General)",
   "aiReplyCustomer": "string - a highly professional, polite, and persuasive B2B reply draft in English addressing their specific technical/business points, offering product datasheets or samples",
   "estimatedAmountUSD": "number - estimated business value (e.g., sample testing = 1000, batch order = 50000, support = 0)"
-}\`;
+}`;
 
-    const userPrompt = \`Email Sender: \${sender}
-Email Subject: \${subject}
+    const userPrompt = `Email Sender: ${sender}
+Email Subject: ${subject}
 Email Content:
-\${body_content}\`;
+${body_content}`;
 
     const aiResult = await callOpenAI(systemPrompt, userPrompt) || {
       clientName: senderName || senderEmail,
       companyName: domain,
-      translatedTextZh: '（AI 翻译失败）\\n' + body_content,
+      translatedTextZh: '（AI 翻译失败）\n' + body_content,
       intent: 'Inquiry',
-      aiReplyCustomer: 'Dear partner,\\nThank you for reaching out to ERDI TECH. We have received your inquiry regarding our laser rangefinder modules and our sales team will get back to you with official datasheets shortly.\\nBest regards,\\nERDI TECH LTD',
+      aiReplyCustomer: 'Dear partner,\nThank you for reaching out to ERDI TECH. We have received your inquiry regarding our laser rangefinder modules and our sales team will get back to you with official datasheets shortly.\nBest regards,\nERDI TECH LTD',
       estimatedAmountUSD: 0
     };
 
@@ -142,8 +142,8 @@ Email Content:
     // DB operations: Create Opportunity
     const opportunity = await prisma.opportunity.create({
       data: {
-        title: \`AI Extracted: \${subject || 'New Inquiry'}\`,
-        description: \`【客户原文】:\\n\${body_content}\\n\\n【AI 中文翻译】:\\n\${aiResult.translatedTextZh}\`,
+        title: `AI Extracted: ${subject || 'New Inquiry'}`,
+        description: `【客户原文】:\n${body_content}\n\n【AI 中文翻译】:\n${aiResult.translatedTextZh}`,
         amountUSD: aiResult.estimatedAmountUSD,
         stage: 'UNPROCESSED',
         companyId: company.id,
@@ -154,11 +154,12 @@ Email Content:
     // DB operations: Write to Unified Inbox (InboxMessage)
     let inboxMsg = null;
     try {
+      const randStr = Math.random().toString(36).substring(2, 11);
       inboxMsg = await prisma.inboxMessage.create({
         data: {
           channel: 'EMAIL',
           direction: 'IN',
-          externalId: \`mail-\${Date.now()}-\${Math.random().toString(36).substr(2, 9)}\`,
+          externalId: `mail-${Date.now()}-${randStr}`,
           senderId: senderEmail,
           senderName: aiResult.clientName || senderName,
           originalText: body_content,
