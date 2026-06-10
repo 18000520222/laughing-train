@@ -13,7 +13,8 @@ export async function GET() {
       { code: 'ED1127', name: 'Ariel Lotzov', email: 'Ariel.l@nextvision-sys.com', company: 'NextVision Stabilized Systems LTD', summary: 'Refund and follow-up for Diode Pump module' },
       { code: 'ED1128', name: 'Prakhar Sharda', email: 'prakhar@newagein.com', company: 'New Age Instruments & Materials Pvt. Ltd.', summary: 'LRF software, SDK and troubleshooting' },
       { code: 'ED1129', name: 'Pavel Omelchenko', email: 'p.omelchenko@lenlasers.ru', company: 'SC LLS', summary: 'Inquiry for 1064nm laser modules (10mJ/20mJ)' },
-      { code: 'ED1130', name: 'Tom Hines', email: 'tom@odinworks.com', company: 'ODIN Works', summary: 'LRF2000A sample and UART protocol request' },
+      { code: 'ED1130', name: 'Tom Hines', email: 'tom@odinworks.com', company: '✅${count}\${count}
+      'ODIN Works', summary: 'LRF2000A sample and UART protocol request' },
       { code: 'ED1131', name: 'Info LLS', email: 'info@lenlasers.ru', company: 'SC LLS', summary: 'General inquiry for laser components' },
       { code: 'ED1132', name: 'Ariel Lotzov', email: 'Ariel.l@nextvision-sys.com    return NextResponse.json({ message: `✅ 成功同步 ${count} 个新客户及开发线索到 CRM！`, totalProcessed: leads.length });    return NextResponse.json({ message:NextResponse.json({ message:
 
