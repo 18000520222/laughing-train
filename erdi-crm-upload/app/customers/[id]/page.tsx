@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { cookies } from 'next/headers';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
+import { chat, isLLMAvailable } from '@/lib/llm';
 
 export const dynamic = 'force-dynamic';
 
@@ -107,6 +108,61 @@ async function addFollowUp(formData: FormData) {
   redirect(`/customers/${companyId}`);
 }
 
+async function getAICustomerInsights(company: any) {
+  try {
+    const isAvailable = isLLMAvailable();
+    if (!isAvailable) return null;
+
+    const recentMsgs = company.inboxMessages.slice(0, 3).map((m: any) => ({
+      direction: m.direction === 'IN' ? '客户来信' : '我方回复',
+      channel: m.channel,
+      text: m.originalText,
+    }));
+
+    const recentFollowUps = company.followUps.slice(0, 3).map((f: any) => ({
+      content: f.content,
+      type: f.type,
+      date: f.createdAt,
+    }));
+
+    const prompt = `你是一个外贸 B2B 领域的资深销售专家 AI 助手。请根据下方的客户信息、往来消息和跟进记录，对客户进行深度意图、情绪和成单赢率的智能分析，并提供针对性的跟进话术模板。
+    
+客户基本信息：
+公司名称: ${company.name}
+国家/地区: ${company.country || '未知'}
+行业: ${company.industry || '未知'}
+客户类型: ${company.type}
+
+最近 3 条往来消息：
+${JSON.stringify(recentMsgs, null, 2)}
+
+最近 3 条跟进记录：
+${JSON.stringify(recentFollowUps, null, 2)}
+
+请务必输出一个合法的 JSON 格式字符串，格式必须与以下结构一致（不要输出 Markdown 的 \`\`\`json 标记，直接输出 JSON 文本）：
+{
+  "clientType": "例如：高价值批发商 / 学术机构 / 价格敏感买家",
+  "clientSentiment": "例如：高度意向 / 温和观望 / 冰冷休眠",
+  "winRate": "成单概率估计，例如：75%",
+  "riskAssessment": "识别出的潜在风险或同行竞争威胁，如果没有，写'暂无风险'",
+  "followUpStrategy": "具体的跟进策略和建议（100字以内，中文）",
+  "recommendedDraftZh": "一键跟进邮件中文模板（语气专业、针对性极强，且表达热情）",
+  "recommendedDraftEn": "英文翻译（销售经理可以直接发送给客户）"
+}`;
+
+    const resText = await chat([
+      { role: 'system', content: 'You must output a raw, valid JSON object matching the requested schema.' },
+      { role: 'user', content: prompt }
+    ], { temperature: 0.3, timeoutMs: 12000 });
+
+    const cleanJson = resText.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+    return JSON.parse(cleanJson);
+  } catch (err) {
+    console.error('AI Customer Insights extraction failed:', err);
+    return null;
+  }
+}
+
 export default async function CustomerDetailPage(props: any) {
   const role = (cookies().get('auth_role')?.value || '').toUpperCase();
   if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
@@ -127,6 +183,8 @@ export default async function CustomerDetailPage(props: any) {
   });
 
   if (!company) notFound();
+
+  const aiInsights = await getAICustomerInsights(company);
 
   const wonAmount = company.opportunities
     .filter((o) => o.stage === 'CLOSED_WON')
@@ -287,6 +345,69 @@ export default async function CustomerDetailPage(props: any) {
           </form>
         </details>
       </div>
+
+      {/* ✨ AI 客户智能分析大脑 (AI Customer Brain) */}
+      {aiInsights && (
+        <div className="bg-gradient-to-r from-indigo-50 via-purple-50 to-pink-50 rounded-2xl shadow-md border border-indigo-100/50 p-6 mb-6">
+          <div className="flex items-center justify-between mb-4 border-b border-indigo-100/30 pb-3">
+            <h3 className="text-base font-black text-indigo-900 flex items-center gap-2">
+              <span className="animate-pulse">✨</span> AI 客户智能分析大脑
+            </h3>
+            <span className="bg-indigo-600 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shadow-sm">
+              Copilot Active
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div className="bg-white/80 p-3 rounded-xl border border-indigo-100/30">
+              <span className="text-[10px] text-indigo-500 font-bold uppercase block mb-0.5 tracking-wider">🎯 客户画像判定</span>
+              <span className="text-sm font-extrabold text-gray-800">{aiInsights.clientType}</span>
+            </div>
+            <div className="bg-white/80 p-3 rounded-xl border border-indigo-100/30">
+              <span className="text-[10px] text-indigo-500 font-bold uppercase block mb-0.5 tracking-wider">🔥 采购意向热度</span>
+              <span className="text-sm font-extrabold text-gray-800">{aiInsights.clientSentiment}</span>
+            </div>
+            <div className="bg-white/80 p-3 rounded-xl border border-indigo-100/30">
+              <span className="text-[10px] text-indigo-500 font-bold uppercase block mb-0.5 tracking-wider">📈 预计成单赢率</span>
+              <span className="text-sm font-extrabold text-indigo-600">{aiInsights.winRate}</span>
+            </div>
+            <div className="bg-white/80 p-3 rounded-xl border border-indigo-100/30">
+              <span className="text-[10px] text-red-500 font-bold uppercase block mb-0.5 tracking-wider">⚠️ 潜在流失风险</span>
+              <span className="text-sm font-extrabold text-red-600">{aiInsights.riskAssessment}</span>
+            </div>
+          </div>
+
+          <div className="bg-white/90 p-4 rounded-xl border border-indigo-100/30 mb-4 shadow-inner">
+            <span className="text-xs font-bold text-indigo-800 block mb-1">🎯 首席顾问跟进策略建议：</span>
+            <p className="text-sm text-gray-700 leading-relaxed">{aiInsights.followUpStrategy}</p>
+          </div>
+
+          {/* AI 一键跟进模板双语 */}
+          <details className="group bg-white/90 rounded-xl border border-indigo-100/30 overflow-hidden">
+            <summary className="list-none flex items-center justify-between text-xs font-bold text-indigo-700 hover:text-indigo-900 cursor-pointer select-none p-3.5">
+              <span className="flex items-center gap-1.5">
+                <span>✉️</span> 智能生成针对性跟进话术模板 (中英对照)
+              </span>
+              <span className="transition-transform group-open:rotate-180 text-[10px]">▼</span>
+            </summary>
+            
+            <div className="p-4 border-t border-indigo-100/20 bg-indigo-50/20 space-y-4 text-xs">
+              <div>
+                <div className="text-[10px] text-indigo-600 font-bold mb-1 tracking-wider">🇨🇳 中文话术（供您理解）</div>
+                <div className="text-sm text-gray-800 bg-white p-3 rounded-lg border border-indigo-100/10 whitespace-pre-wrap leading-relaxed shadow-sm">{aiInsights.recommendedDraftZh}</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-indigo-600 font-bold mb-1 tracking-wider flex items-center justify-between">
+                  <span>🇺🇸 英文内容（点击内容即可全选复制，回复客户）</span>
+                </div>
+                <pre className="text-xs font-mono text-gray-700 bg-white p-3 rounded-lg border border-indigo-100/10 whitespace-pre-wrap leading-relaxed shadow-sm select-all cursor-pointer" title="双击或长按即可快速全选">
+                  {aiInsights.recommendedDraftEn}
+                </pre>
+              </div>
+            </div>
+          </details>
+        </div>
+      )}
 
       {/* 💡 智能行动指南 (Hints & Alerts) */}
       {hints.length > 0 && (
