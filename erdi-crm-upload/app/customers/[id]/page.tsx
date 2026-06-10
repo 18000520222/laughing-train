@@ -25,6 +25,15 @@ const STAGE_COLOR: Record<string, string> = {
   CLOSED_LOST: 'bg-red-50 text-red-600',
 };
 
+const CHANNEL_LABEL: Record<string, string> = {
+  EMAIL: '邮件',
+  WHATSAPP: 'WhatsApp',
+  ALIBABA: '阿里国际站',
+  AMAZON: '亚马逊',
+  SHOPEE: '虾皮',
+  FACEBOOK: 'Facebook',
+};
+
 const TYPE_LABEL: Record<string, string> = {
   NEW: '新客户',
   EXISTING: '老客户',
@@ -379,16 +388,56 @@ export default async function CustomerDetailPage(props: any) {
             {company.inboxMessages.length === 0 ? (
               <p className="px-6 py-8 text-center text-gray-400 text-sm">暂无往来消息</p>
             ) : (
-              <ul className="divide-y divide-gray-50 max-h-[420px] overflow-y-auto">
+              <ul className="divide-y divide-gray-50 max-h-[500px] overflow-y-auto">
                 {company.inboxMessages.map((m) => (
-                  <li key={m.id} className="px-6 py-3">
-                    <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
+                  <li key={m.id} className="px-6 py-4 hover:bg-gray-50/40 transition-colors">
+                    <div className="flex items-center justify-between text-xs text-gray-400 mb-2">
                       <span className={`font-bold ${m.direction === 'IN' ? 'text-blue-600' : 'text-green-600'}`}>
-                        {m.direction === 'IN' ? '↓ 客户来信' : '↑ 我方回复'} · {m.channel}
+                        {m.direction === 'IN' ? '↓ 客户来信' : '↑ 我方回复'} · {CHANNEL_LABEL[m.channel] || m.channel}
                       </span>
                       <span>{fmtDate(m.sentAt || m.createdAt)}</span>
                     </div>
-                    <p className="text-sm text-gray-700 line-clamp-2">{m.translatedText || m.originalText}</p>
+                    
+                    {/* 默认简短预览 */}
+                    <p className="text-sm font-semibold text-gray-800 line-clamp-2 leading-relaxed">
+                      {m.direction === 'IN' ? (m.translatedText || m.originalText) : (m.originalText || m.aiReplyZh)}
+                    </p>
+
+                    {/* 免 JS 纯 HTML 细节折叠器，极速展开译文和原文对照 */}
+                    <details className="group mt-2">
+                      <summary className="list-none flex items-center justify-between text-xs text-indigo-600 hover:text-indigo-800 cursor-pointer select-none font-medium">
+                        <span>{m.direction === 'IN' ? '📖 展开中英双语对照' : '📖 展开我方中英回复'}</span>
+                        <span className="transition-transform group-open:rotate-180 text-[10px]">▼</span>
+                      </summary>
+                      
+                      <div className="mt-2 text-xs space-y-3.5 border-t border-gray-100 pt-3 bg-gray-50/60 p-3 rounded-xl border border-gray-100/50">
+                        {m.direction === 'IN' ? (
+                          <>
+                            <div>
+                              <div className="text-[10px] text-blue-600 font-bold mb-1 tracking-wider uppercase">🇨🇳 中文翻译</div>
+                              <div className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed bg-white p-2.5 rounded-lg border border-gray-100">{m.translatedText || '暂无翻译'}</div>
+                            </div>
+                            <div>
+                              <div className="text-[10px] text-gray-500 font-bold mb-1 tracking-wider uppercase">🇺🇸 客户原文 ({m.detectedLang || 'EN'})</div>
+                              <div className="text-xs text-gray-600 font-mono whitespace-pre-wrap leading-relaxed bg-white p-2.5 rounded-lg border border-gray-100">{m.originalText}</div>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div>
+                              <div className="text-[10px] text-green-600 font-bold mb-1 tracking-wider uppercase">🇨🇳 我方中文 (编写内容)</div>
+                              <div className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed bg-white p-2.5 rounded-lg border border-gray-100">{m.originalText || m.aiReplyZh}</div>
+                            </div>
+                            {m.aiReplyCustomer && (
+                              <div>
+                                <div className="text-[10px] text-gray-500 font-bold mb-1 tracking-wider uppercase">🇺🇸 译文 (实际发送给客户)</div>
+                                <div className="text-xs text-gray-600 font-mono whitespace-pre-wrap leading-relaxed bg-white p-2.5 rounded-lg border border-gray-100">{m.aiReplyCustomer}</div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </details>
                   </li>
                 ))}
               </ul>

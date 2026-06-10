@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import nodemailer from 'nodemailer';
+import { translateText } from '@/lib/translate';
 
 export const dynamic = 'force-dynamic';
 
@@ -101,6 +102,20 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
   // 从 title 里剥离出客户的名字 and 邮箱
   const rawSender = opp.title.replace('New Inquiry from ', '');
 
+  // 智能翻译描述内容 (如果包含英文且存在内容)
+  let translatedDesc = '';
+  if (opp.description && opp.description.trim()) {
+    const hasEnglish = /[a-zA-Z]{5,}/.test(opp.description);
+    if (hasEnglish) {
+      try {
+        const transRes = await translateText(opp.description, 'zh', 'auto');
+        translatedDesc = transRes.translatedText;
+      } catch (err) {
+        console.error('Failed to translate opportunity description:', err);
+      }
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-6xl mx-auto">
@@ -124,10 +139,34 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
                 <span className="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded-full font-medium">{rawSender}</span>
               </div>
               
-              {/* 正文阅读区 */}
-              <div className="bg-gray-50/50 p-5 rounded-xl border border-gray-100 min-h-[300px] max-h-[500px] overflow-y-auto whitespace-pre-wrap text-gray-700 font-sans text-[15px] leading-relaxed shadow-inner">
-                {(opp as any).description || '（目前没有正文记录）'}
-              </div>
+              {/* 正文与智能翻译阅读区 */}
+              {translatedDesc ? (
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-xs font-bold text-blue-600 mb-1.5 flex items-center gap-1">
+                      <span>🇨🇳 智能中文翻译</span>
+                      <span className="px-1.5 py-0.2 bg-blue-100 text-blue-700 rounded text-[9px]">AUTOMATIC</span>
+                    </div>
+                    <div className="bg-blue-50/20 p-5 rounded-xl border border-blue-100/50 min-h-[180px] max-h-[350px] overflow-y-auto whitespace-pre-wrap text-gray-800 font-sans text-[15px] leading-relaxed shadow-inner">
+                      {translatedDesc}
+                    </div>
+                  </div>
+                  
+                  <details className="group">
+                    <summary className="list-none flex items-center justify-between text-xs text-gray-500 hover:text-gray-700 cursor-pointer select-none font-medium mb-1.5">
+                      <span>🇺🇸 查看英文原文对照</span>
+                      <span className="transition-transform group-open:rotate-180 text-[10px]">▼</span>
+                    </summary>
+                    <div className="bg-gray-50/50 p-5 rounded-xl border border-gray-100 min-h-[150px] max-h-[300px] overflow-y-auto whitespace-pre-wrap text-gray-600 font-mono text-xs leading-relaxed shadow-inner">
+                      {(opp as any).description || '（目前没有正文记录）'}
+                    </div>
+                  </details>
+                </div>
+              ) : (
+                <div className="bg-gray-50/50 p-5 rounded-xl border border-gray-100 min-h-[300px] max-h-[500px] overflow-y-auto whitespace-pre-wrap text-gray-700 font-sans text-[15px] leading-relaxed shadow-inner">
+                  {(opp as any).description || '（目前没有正文记录）'}
+                </div>
+              )}
             </div>
 
             {/* 一键回复客户控制台 (已修复按钮丢失问题) */}
