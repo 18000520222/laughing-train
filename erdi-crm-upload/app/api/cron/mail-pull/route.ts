@@ -188,6 +188,9 @@ export async function GET(req: Request) {
                 },
               });
 
+              // 正常客户邮件:对正文进行智能去燥切割,提取最新单条邮件内容
+              const cleanedBody = cleanEmailBody(body);
+
               // 进统一收件箱(翻译 + AI 草稿 + 自动建/匹配客户 + 通知)
               const msg: NormalizedMessage = {
                 channel: 'EMAIL',
@@ -196,7 +199,7 @@ export async function GET(req: Request) {
                 threadId: fromAddr, // 同一发件人归并为一个会话
                 senderId: fromAddr,
                 senderName: fromName,
-                text: subject ? `主题: ${subject}\n\n${body}` : body,
+                text: subject ? `主题: ${subject}\n\n${cleanedBody}` : cleanedBody,
                 sentAt: parsed.date || undefined,
               };
               const res = await ingestInbound(msg);
@@ -217,4 +220,38 @@ export async function GET(req: Request) {
   }
 
   return NextResponse.json({ ok: true, report });
+}
+
+/**
+ * 智能去燥切割: 剥离 Gmail/Outlook 历史邮件引用,只留下本次发送的最新内容。
+ * 解决长会话导致翻译/AI 生成超时、废 tokens 的痛点。
+ */
+function cleanEmailBody(body: string): string {
+  if (!body) return '';
+
+  const splitMarkers = [
+    /^-+Original Message-+[\r\t ]*$/im,               // Outlook Standard original message
+    /^[> \t]*On .+,.* at .+,.*wrote:[\r\t ]*$/im,      // Outlook/Gmail style "On ... wrote:"
+    /^[> \t]*On .+,.*wrote:[\r\t ]*$/im,              // Gmail style "On ... wrote:"
+    /^[> \t]*在.+,.*写道:[\r\t ]*$/im,                // Chinese "在 ... 写道:"
+    /^[> \t]*-+ 原始邮件 -+[\r\t ]*$/im,               // Tencent/Aliyun style 原始邮件
+    /^[> \t]*From: [a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/im, // From: email
+    /^[> \t]*________________________________/m, // Outlook line divider
+  ];
+
+  let cleaned = body;
+  for (const marker of splitMarkers) {
+    const match = cleaned.search(marker);
+    if (match !== -1) {
+      cleaned = cleaned.substring(0, match);
+    }
+  }
+
+  // 去除移动端自带小尾巴
+  cleaned = cleaned.replace(/Sent from my iPhone[\s\S]*/i, '');
+  cleaned = cleaned.replace(/Sent from my Mail[\s\S]*/i, '');
+  cleaned = cleaned.replace(/发送自我的 iPhone[\s\S]*/i, '');
+  cleaned = cleaned.replace(/发送自我的手机[\s\S]*/i, '');
+
+  return cleaned.trim();
 }

@@ -58,12 +58,12 @@ export async function translateText(
     try {
       return await translateWithLLM(text, target, source);
     } catch (err) {
-      console.error('[translate] LLM failed, falling back to libre:', err);
-      // 继续走 LibreTranslate
+      console.error('[translate] LLM failed, falling back to translation engine:', err);
+      // 继续走备选翻译引擎
     }
   }
 
-  return translateWithLibre(text, target, source, baseUrl);
+  return translateWithFallback(text, target, source, baseUrl);
 }
 
 async function translateWithLLM(
@@ -87,38 +87,64 @@ async function translateWithLLM(
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    { temperature: 0.2, timeoutMs: 15000 }
+    { temperature: 0.2, timeoutMs: 30000 }
   );
 
   return { translatedText: out || text, engine: 'llm' };
 }
 
-async function translateWithLibre(
+/**
+ * 智能容灾翻译引擎：优先使用免 Key、高速稳定的 Google Translate GTX 引擎，
+ * 失败时自动降级到私有/公有 LibreTranslate 实例。
+ */
+async function translateWithFallback(
   text: string,
   target: string,
   source: string,
   baseUrl: string
 ): Promise<TranslateResult> {
+  // 1. 优先尝试高可用、免 Key 的 Google Translate 官方公开通道 (GTX)
+  try {
+    const sl = source === 'auto' ? 'auto' : source;
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${target}&dt=t&q=${encodeURIComponent(text)}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data[0]) {
+        const translatedText = data[0].map((item: any) => (item && item[0]) || '').join('');
+        const detectedLanguage = data[2] || undefined;
+        if (translatedText) {
+          return { translatedText, detectedLanguage, engine: 'libre' };
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[translate] Google Translate GTX failed:', err);
+  }
+
+  // 2. 备用降级到 LibreTranslate 引擎
   try {
     const res = await fetch(`${baseUrl.replace(/\/$/, '')}/translate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ q: text, source, target, format: 'text' }),
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(6000),
     });
 
-    if (!res.ok) return { translatedText: text, engine: 'none' };
-
-    const data = await res.json();
-    return {
-      translatedText: data.translatedText || text,
-      detectedLanguage: data.detectedLanguage?.language,
-      engine: 'libre',
-    };
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        translatedText: data.translatedText || text,
+        detectedLanguage: data.detectedLanguage?.language,
+        engine: 'libre',
+      };
+    }
   } catch (err) {
-    console.error('[translate] libre error:', err);
-    return { translatedText: text, engine: 'none' };
+    console.error('[translate] LibreTranslate failed:', err);
   }
+
+  // 3. 终极兜底：直接返回原文
+  return { translatedText: text, engine: 'none' };
 }
 
 /**

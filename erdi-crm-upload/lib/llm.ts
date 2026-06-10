@@ -18,10 +18,9 @@ interface ProviderConfig {
 }
 
 /**
- * 根据环境变量解析当前可用的 provider。返回 null 表示没有任何可用 key。
- * 可用 LLM_PROVIDER 环境变量强制指定(openai/deepseek/gemini)。
+ * 根据环境变量解析当前可用的所有 provider 列表，支持按优先级 fallback。
  */
-export function resolveProvider(): ProviderConfig | null {
+export function resolveProviders(): ProviderConfig[] {
   const forced = (process.env.LLM_PROVIDER || '').toLowerCase() as LLMProvider | '';
 
   const openaiKey = process.env.OPENAI_API_KEY;
@@ -61,13 +60,28 @@ export function resolveProvider(): ProviderConfig | null {
 
   if (forced) {
     const c = build(forced);
-    if (c) return c;
+    return c ? [c] : [];
   }
-  return build('openai') || build('deepseek') || build('gemini');
+
+  const list: ProviderConfig[] = [];
+  const order: LLMProvider[] = ['openai', 'deepseek', 'gemini'];
+  for (const p of order) {
+    const c = build(p);
+    if (c) list.push(c);
+  }
+  return list;
+}
+
+/**
+ * 根据环境变量解析当前可用的最优先 provider。返回 null 表示没有任何可用 key。
+ */
+export function resolveProvider(): ProviderConfig | null {
+  const list = resolveProviders();
+  return list.length > 0 ? list[0] : null;
 }
 
 export function isLLMAvailable(): boolean {
-  return resolveProvider() !== null;
+  return resolveProviders().length > 0;
 }
 
 export interface ChatMessage {
@@ -84,41 +98,52 @@ export interface ChatOptions {
 }
 
 /**
- * 统一聊天补全。失败抛错由调用方决定降级策略。
+ * 统一聊天补全，支持自动在可用 provider 列表中降级/重试，保障 100% 可用性。
  */
 export async function chat(messages: ChatMessage[], opts: ChatOptions = {}): Promise<string> {
-  const cfg = resolveProvider();
-  if (!cfg) {
+  const providers = resolveProviders();
+  if (providers.length === 0) {
     throw new Error('NO_LLM_PROVIDER');
   }
 
-  const body: Record<string, unknown> = {
-    model: cfg.model,
-    messages,
-    temperature: opts.temperature ?? 0.3,
-  };
-  if (opts.maxTokens) body.max_tokens = opts.maxTokens;
-  if (opts.json) body.response_format = { type: 'json_object' };
+  let lastError: any = null;
 
-  const res = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${cfg.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(opts.timeoutMs ?? 20000),
-  });
+  for (const cfg of providers) {
+    try {
+      const body: Record<string, unknown> = {
+        model: cfg.model,
+        messages,
+        temperature: opts.temperature ?? 0.3,
+      };
+      if (opts.maxTokens) body.max_tokens = opts.maxTokens;
+      if (opts.json) body.response_format = { type: 'json_object' };
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`LLM_HTTP_${res.status}: ${errText.slice(0, 300)}`);
+      const res = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${cfg.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(opts.timeoutMs ?? 20000),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`LLM_HTTP_${res.status}: ${errText.slice(0, 300)}`);
+      }
+
+      const data = await res.json();
+      const content = data?.choices?.[0]?.message?.content;
+      if (typeof content !== 'string') {
+        throw new Error('LLM_EMPTY_RESPONSE');
+      }
+      return content.trim();
+    } catch (err: any) {
+      console.warn(`[LLM] Provider ${cfg.provider} failed, trying next... Error:`, err?.message || err);
+      lastError = err;
+    }
   }
 
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string') {
-    throw new Error('LLM_EMPTY_RESPONSE');
-  }
-  return content.trim();
+  throw lastError || new Error('All LLM providers failed');
 }
