@@ -16,7 +16,8 @@ export async function OPTIONS() {
 export async function POST(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    if (searchParams.get('token') !== 'erdi2026') {
+    const expectedToken = process.env.WEBHOOK_TOKEN || 'erdi2026';
+    if (searchParams.get('token') !== expectedToken) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -34,7 +35,7 @@ export async function POST(request: Request) {
         title: `官网新询盘 (Shopline)`,
         stage: 'SPEC_CONFIRMING' as any,
         company: { create: { name: customerName, source: 'SHOPLINE', type: 'PROSPECT' } },
-        description: `🌍 来源平台: SHOPLINE (erdicn.com)\\n👤 客户姓名: ${customerName}\\n📧 联系邮箱: ${customerEmail}\\n📞 联系电话: ${phone}\\n\\n📝 备注/留言:\\n${note}\\n\\n---\n接收时间: ${new Date().toLocaleString()}`,
+        description: `🌍 来源平台: SHOPLINE (erdicn.com)\n👤 客户姓名: ${customerName}\n📧 联系邮箱: ${customerEmail}\n📞 联系电话: ${phone}\n\n📝 备注/留言:\n${note}\n\n---\n接收时间: ${new Date().toLocaleString()}`,
         amountUSD: 0
       }
     });

@@ -17,12 +17,12 @@ export async function OPTIONS() {
 // 接收外部数据的核心逻辑
 export async function POST(request: Request) {
   try {
-    // 1. 隐形安全锁：检查网址里有没有正确的通关密语
+    // 1. 安全锁：校验通关密语（优先读环境变量 WEBHOOK_TOKEN，未配置时回退旧值保持兼容）
     const { searchParams } = new URL(request.url);
     const token = searchParams.get('token');
-    
-    // 这里的 erdi2026 就是我们的密语，不对的话系统拒收！
-    if (token !== 'erdi2026') {
+
+    const expectedToken = process.env.WEBHOOK_TOKEN || 'erdi2026';
+    if (token !== expectedToken) {
       return NextResponse.json({ error: '安全拦截：Token 错误' }, { status: 401 });
     }
 

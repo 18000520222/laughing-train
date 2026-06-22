@@ -1,11 +1,18 @@
 import { prisma } from '@/lib/prisma';
 import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
+import { getSession } from '@/lib/auth';
 
 
 
 export async function GET() {
   try {
+    // 仅允许超级管理员触发数据库初始化/账号重建
+    const session = await getSession();
+    if (!session || session.role !== 'SUPER_ADMIN') {
+      return NextResponse.json({ error: 'Forbidden: 仅超级管理员可执行初始化' }, { status: 403 });
+    }
+
     // 1. 系统配置 — 自动从环境变量加载第三方 API keys
     const envKeys = {
       whatsappToken: process.env.WHATSAPP_TOKEN || undefined,
