@@ -38,7 +38,7 @@ export default async function Dashboard() {
     }).catch(() => [] as any[]),
     prisma.company.count().catch(() => 0),
     prisma.company.count({ where: { createdAt: { gte: monthStart } } }).catch(() => 0),
-    prisma.inboxMessage.count({ where: { direction: 'IN', status: { not: 'CLOSED' as any } } }).catch(() => 0),
+    prisma.inboxMessage.count({ where: { direction: 'IN', status: { in: ['NEW', 'AI_DRAFTED'] } } }).catch(() => 0),
     prisma.shipment.count({ where: { status: { not: 'DELIVERED' } } }).catch(() => 0),
   ]);
 
