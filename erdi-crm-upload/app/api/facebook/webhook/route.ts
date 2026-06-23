@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { translateText } from '@/lib/translate';
+import { ingestInbound } from '@/lib/inbox';
 
 
 
@@ -45,6 +46,16 @@ export async function POST(req: Request) {
               translated: translatedText,
               raw: event,
             },
+          });
+
+          await ingestInbound({
+            channel: 'FACEBOOK',
+            direction: 'IN',
+            externalId: event.message.mid || `${pageId}-${senderId}-${event.timestamp || Date.now()}`,
+            threadId: `${pageId}:${senderId}`,
+            senderId,
+            text,
+            sentAt: event.timestamp ? new Date(Number(event.timestamp)) : undefined,
           });
 
           const admins = await prisma.user.findMany({

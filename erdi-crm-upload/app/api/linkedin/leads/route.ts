@@ -2,6 +2,7 @@
 // 拉取所有 LinkedIn 账号下的 Lead Gen Forms 提交记录
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { ingestInbound } from '@/lib/inbox';
 
 
 
@@ -30,6 +31,16 @@ export async function POST(req: Request) {
         const email = answers['EMAIL'] || answers['email'] || answers['Email Address'];
         const name = answers['FULL_NAME'] || answers['Name'] || 'LinkedIn Lead';
         const company = answers['COMPANY_NAME'] || answers['Company'] || name;
+        await ingestInbound({
+          channel: 'LINKEDIN',
+          direction: 'IN',
+          externalId: String(lead.id || lead.leadGenFormResponse || `${acc.id}-${email || name}`),
+          threadId: String(lead.form || lead.leadGenForm || acc.externalId),
+          senderId: String(email || lead.id || name),
+          senderName: name,
+          text: `LinkedIn Lead Gen 表单提交\n姓名: ${name}\n公司: ${company}\n邮箱: ${email || '-'}\n电话: ${answers['PHONE_NUMBER'] || '-'}\n国家: ${answers['COUNTRY'] || '-'}\n原始字段: ${JSON.stringify(answers)}`,
+          sentAt: lead.submittedAt ? new Date(lead.submittedAt) : undefined,
+        });
         if (!email) continue;
 
         const existing = await prisma.contact.findUnique({ where: { email } });

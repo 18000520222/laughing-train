@@ -73,6 +73,8 @@ export default async function SettingsPage() {
         amazonRefreshToken: (formData.get('amazonRefreshToken') as string) || null,
         amazonLwaClientId: (formData.get('amazonLwaClientId') as string) || null,
         amazonLwaClientSecret: (formData.get('amazonLwaClientSecret') as string) || null,
+        amazonAwsAccessKeyId: (formData.get('amazonAwsAccessKeyId') as string) || null,
+        amazonAwsSecretAccessKey: (formData.get('amazonAwsSecretAccessKey') as string) || null,
         amazonSellerId: (formData.get('amazonSellerId') as string) || null,
         amazonMarketplaceId: (formData.get('amazonMarketplaceId') as string) || 'ATVPDKIKX0DER',
         amazonRegion: (formData.get('amazonRegion') as string) || 'na',
@@ -213,6 +215,8 @@ export default async function SettingsPage() {
               </p>
               <Field name="amazonLwaClientId" label="LWA Client ID" def={(settings as any)?.amazonLwaClientId} />
               <Field name="amazonLwaClientSecret" label="LWA Client Secret" def={(settings as any)?.amazonLwaClientSecret} type="password" />
+              <Field name="amazonAwsAccessKeyId" label="AWS Access Key ID (SP-API SigV4)" def={(settings as any)?.amazonAwsAccessKeyId} />
+              <Field name="amazonAwsSecretAccessKey" label="AWS Secret Access Key (SP-API SigV4)" def={(settings as any)?.amazonAwsSecretAccessKey} type="password" />
               <Field name="amazonRefreshToken" label="Refresh Token" def={(settings as any)?.amazonRefreshToken} type="password" />
               <Field name="amazonSellerId" label="Seller ID (可选)" def={(settings as any)?.amazonSellerId} />
               <Field name="amazonMarketplaceId" label="Marketplace ID (默认美国 ATVPDKIKX0DER)" def={(settings as any)?.amazonMarketplaceId || 'ATVPDKIKX0DER'} />

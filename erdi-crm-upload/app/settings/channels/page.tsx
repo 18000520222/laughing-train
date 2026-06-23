@@ -35,6 +35,14 @@ export default async function ChannelSettingsPage({
       whatsappToken: g('whatsappToken'),
       whatsappPhoneId: g('whatsappPhoneId'),
       whatsappVerifyToken: g('whatsappVerifyToken'),
+      whatsapp360ApiKey: g('whatsapp360ApiKey'),
+      // Facebook / LinkedIn / AfterShip
+      fbAppId: g('fbAppId'),
+      fbAppSecret: g('fbAppSecret'),
+      fbVerifyToken: g('fbVerifyToken'),
+      linkedinClientId: g('linkedinClientId'),
+      linkedinClientSecret: g('linkedinClientSecret'),
+      aftershipApiKey: g('aftershipApiKey'),
       // 阿里国际站
       alibabaAppKey: g('alibabaAppKey'),
       alibabaAppSecret: g('alibabaAppSecret'),
@@ -44,6 +52,8 @@ export default async function ChannelSettingsPage({
       amazonRefreshToken: g('amazonRefreshToken'),
       amazonLwaClientId: g('amazonLwaClientId'),
       amazonLwaClientSecret: g('amazonLwaClientSecret'),
+      amazonAwsAccessKeyId: g('amazonAwsAccessKeyId'),
+      amazonAwsSecretAccessKey: g('amazonAwsSecretAccessKey'),
       amazonSellerId: g('amazonSellerId'),
       amazonMarketplaceId: g('amazonMarketplaceId'),
       amazonRegion: g('amazonRegion'),
@@ -70,9 +80,12 @@ export default async function ChannelSettingsPage({
       <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-semibold">未配置</span>
     );
 
-  const waOk = !!(st.whatsappToken && st.whatsappPhoneId);
+  const waOk = !!(st.whatsapp360ApiKey || (st.whatsappToken && st.whatsappPhoneId));
+  const fbOk = !!(st.fbAppId && st.fbAppSecret);
+  const liOk = !!(st.linkedinClientId && st.linkedinClientSecret);
+  const aftershipOk = !!st.aftershipApiKey;
   const abOk = !!(st.alibabaAppKey && st.alibabaAppSecret && st.alibabaAccessToken);
-  const amzOk = !!(st.amazonRefreshToken && st.amazonLwaClientId && st.amazonLwaClientSecret);
+  const amzOk = !!(st.amazonRefreshToken && st.amazonLwaClientId && st.amazonLwaClientSecret && st.amazonAwsAccessKeyId && st.amazonAwsSecretAccessKey);
   const spOk = !!(st.shopeePartnerId && st.shopeePartnerKey && st.shopeeShopId);
 
   const baseUrl = 'https://crm.erdicn.com';
@@ -103,15 +116,59 @@ export default async function ChannelSettingsPage({
         {/* WhatsApp */}
         <section className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-1">
-            <h2 className="text-lg font-bold text-gray-800">💬 WhatsApp Cloud API</h2>
+            <h2 className="text-lg font-bold text-gray-800">💬 WhatsApp</h2>
             {status(waOk)}
           </div>
-          <p className="text-xs text-gray-400 mb-4">Webhook 回调地址：<code>{baseUrl}/api/whatsapp/webhook</code></p>
+          <p className="text-xs text-gray-400 mb-4">推荐 360dialog BSP。Webhook 回调地址：<code>{baseUrl}/api/whatsapp/webhook</code></p>
+          <div className="mb-4">
+            <Field name="whatsapp360ApiKey" label="360dialog API Key（推荐）" defaultValue={st.whatsapp360ApiKey} type="password" />
+          </div>
           <div className="grid grid-cols-2 gap-4">
-            <Field name="whatsappToken" label="Access Token" defaultValue={st.whatsappToken} />
+            <Field name="whatsappToken" label="Meta Access Token" defaultValue={st.whatsappToken} type="password" />
             <Field name="whatsappPhoneId" label="Phone Number ID" defaultValue={st.whatsappPhoneId} />
             <Field name="whatsappVerifyToken" label="Verify Token（Webhook 校验）" defaultValue={st.whatsappVerifyToken} placeholder="erdi-verify-2026" />
           </div>
+        </section>
+
+        {/* Facebook / LinkedIn / AfterShip */}
+        <section className="bg-white rounded-xl border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-lg font-bold text-gray-800">📘 Facebook Page / Messenger</h2>
+            <div className="flex items-center gap-2">
+              {status(fbOk)}
+              <a href="/api/auth/facebook/start" className="text-xs px-3 py-1 rounded-full bg-blue-600 text-white font-semibold hover:bg-blue-700">🔑 一键授权</a>
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 mb-4">授权回调：<code>{baseUrl}/api/auth/facebook/callback</code>　·　Webhook：<code>{baseUrl}/api/facebook/webhook</code></p>
+          <div className="grid grid-cols-2 gap-4">
+            <Field name="fbAppId" label="App ID" defaultValue={st.fbAppId} />
+            <Field name="fbAppSecret" label="App Secret" defaultValue={st.fbAppSecret} type="password" />
+            <Field name="fbVerifyToken" label="Webhook Verify Token" defaultValue={st.fbVerifyToken} placeholder="erdi-fb-verify" />
+          </div>
+        </section>
+
+        <section className="bg-white rounded-xl border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-lg font-bold text-gray-800">👔 LinkedIn Lead Gen</h2>
+            <div className="flex items-center gap-2">
+              {status(liOk)}
+              <a href="/api/auth/linkedin/start" className="text-xs px-3 py-1 rounded-full bg-indigo-600 text-white font-semibold hover:bg-indigo-700">🔑 一键授权</a>
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 mb-4">授权回调：<code>{baseUrl}/api/auth/linkedin/callback</code></p>
+          <div className="grid grid-cols-2 gap-4">
+            <Field name="linkedinClientId" label="Client ID" defaultValue={st.linkedinClientId} />
+            <Field name="linkedinClientSecret" label="Client Secret" defaultValue={st.linkedinClientSecret} type="password" />
+          </div>
+        </section>
+
+        <section className="bg-white rounded-xl border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-lg font-bold text-gray-800">🚚 AfterShip 物流追踪</h2>
+            {status(aftershipOk)}
+          </div>
+          <p className="text-xs text-gray-400 mb-4">配置后可在物流中心或 <code>/api/tracking/sync</code> 同步未签收运单。</p>
+          <Field name="aftershipApiKey" label="AfterShip API Key" defaultValue={st.aftershipApiKey} type="password" />
         </section>
 
         {/* 阿里国际站 */}
@@ -141,11 +198,13 @@ export default async function ChannelSettingsPage({
               <a href="/api/auth/amazon/start" className="text-xs px-3 py-1 rounded-full bg-yellow-500 text-white font-semibold hover:bg-yellow-600">🔑 一键授权</a>
             </div>
           </div>
-          <p className="text-xs text-gray-400 mb-4">亚马逊无消息 webhook，系统每 10 分钟轮询订单/消息。</p>
+          <p className="text-xs text-gray-400 mb-4">亚马逊无消息 webhook，系统每 10 分钟轮询订单/消息。SP-API 正式请求需要 LWA token + AWS SigV4 签名。</p>
           <div className="grid grid-cols-2 gap-4">
             <Field name="amazonRefreshToken" label="LWA Refresh Token" defaultValue={st.amazonRefreshToken} />
             <Field name="amazonLwaClientId" label="LWA Client ID" defaultValue={st.amazonLwaClientId} />
             <Field name="amazonLwaClientSecret" label="LWA Client Secret" defaultValue={st.amazonLwaClientSecret} />
+            <Field name="amazonAwsAccessKeyId" label="AWS Access Key ID" defaultValue={st.amazonAwsAccessKeyId} />
+            <Field name="amazonAwsSecretAccessKey" label="AWS Secret Access Key" defaultValue={st.amazonAwsSecretAccessKey} type="password" />
             <Field name="amazonSellerId" label="Seller ID" defaultValue={st.amazonSellerId} />
             <Field name="amazonMarketplaceId" label="Marketplace ID" defaultValue={st.amazonMarketplaceId} placeholder="ATVPDKIKX0DER（美国）" />
             <Field name="amazonRegion" label="Region（na / eu / fe）" defaultValue={st.amazonRegion} placeholder="na" />
@@ -179,12 +238,12 @@ export default async function ChannelSettingsPage({
   );
 }
 
-function Field({ name, label, defaultValue, placeholder }: { name: string; label: string; defaultValue?: string | null; placeholder?: string }) {
+function Field({ name, label, defaultValue, placeholder, type = 'text' }: { name: string; label: string; defaultValue?: string | null; placeholder?: string; type?: string }) {
   return (
     <div>
       <label className="block text-sm font-semibold text-gray-700 mb-1.5">{label}</label>
       <input
-        type="text"
+        type={type}
         name={name}
         defaultValue={defaultValue || ''}
         placeholder={placeholder || ''}

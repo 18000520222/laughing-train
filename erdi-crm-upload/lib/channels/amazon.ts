@@ -12,6 +12,7 @@
 // 拿到授权后按实际 operation 微调。
 
 import { prisma } from '@/lib/prisma';
+import crypto from 'crypto';
 import type {
   ChannelAdapter,
   NormalizedMessage,
@@ -27,13 +28,22 @@ const SP_ENDPOINTS: Record<string, string> = {
   fe: 'https://sellingpartnerapi-fe.amazon.com',
 };
 
+const AWS_REGIONS: Record<string, string> = {
+  na: 'us-east-1',
+  eu: 'eu-west-1',
+  fe: 'us-west-2',
+};
+
 interface AmazonCreds {
   refreshToken: string;
   clientId: string;
   clientSecret: string;
+  awsAccessKeyId: string;
+  awsSecretAccessKey: string;
   sellerId?: string;
   marketplaceId: string;
   endpoint: string;
+  awsRegion: string;
 }
 
 // access_token 进程内缓存(1h 有效,留 5min 余量)
@@ -47,15 +57,20 @@ export class AmazonAdapter implements ChannelAdapter {
     const refreshToken = s?.amazonRefreshToken || process.env.AMAZON_REFRESH_TOKEN;
     const clientId = s?.amazonLwaClientId || process.env.AMAZON_LWA_CLIENT_ID;
     const clientSecret = s?.amazonLwaClientSecret || process.env.AMAZON_LWA_CLIENT_SECRET;
-    if (!refreshToken || !clientId || !clientSecret) return null;
+    const awsAccessKeyId = s?.amazonAwsAccessKeyId || process.env.AMAZON_AWS_ACCESS_KEY_ID;
+    const awsSecretAccessKey = s?.amazonAwsSecretAccessKey || process.env.AMAZON_AWS_SECRET_ACCESS_KEY;
+    if (!refreshToken || !clientId || !clientSecret || !awsAccessKeyId || !awsSecretAccessKey) return null;
     const region = (s?.amazonRegion || 'na').toLowerCase();
     return {
       refreshToken,
       clientId,
       clientSecret,
+      awsAccessKeyId,
+      awsSecretAccessKey,
       sellerId: s?.amazonSellerId || undefined,
       marketplaceId: s?.amazonMarketplaceId || 'ATVPDKIKX0DER',
       endpoint: SP_ENDPOINTS[region] || SP_ENDPOINTS.na,
+      awsRegion: AWS_REGIONS[region] || AWS_REGIONS.na,
     };
   }
 
@@ -94,13 +109,21 @@ export class AmazonAdapter implements ChannelAdapter {
   ): Promise<any> {
     const token = await this.accessToken(creds);
     if (!token) throw new Error('LWA access_token 获取失败');
-    const res = await fetch(`${creds.endpoint}${path}`, {
+    const bodyText = body ? JSON.stringify(body) : '';
+    const signed = signSpApiRequest({
+      endpoint: creds.endpoint,
+      path,
       method,
-      headers: {
-        'x-amz-access-token': token,
-        'Content-Type': 'application/json',
-      },
-      body: body ? JSON.stringify(body) : undefined,
+      body: bodyText,
+      accessToken: token,
+      accessKeyId: creds.awsAccessKeyId,
+      secretAccessKey: creds.awsSecretAccessKey,
+      awsRegion: creds.awsRegion,
+    });
+    const res = await fetch(signed.url, {
+      method,
+      headers: signed.headers,
+      body: bodyText || undefined,
       signal: AbortSignal.timeout(20000),
     });
     return res.json();
@@ -153,7 +176,7 @@ export class AmazonAdapter implements ChannelAdapter {
   /** 给买家发消息(SP-API Messaging,受场景模板限制) */
   async send(msg: OutboundMessage): Promise<SendResult> {
     const creds = await this.creds();
-    if (!creds) return { ok: false, error: '未配置亚马逊 SP-API 凭据(refreshToken/clientId/clientSecret)' };
+    if (!creds) return { ok: false, error: '未配置亚马逊 SP-API 凭据(refreshToken/clientId/clientSecret/AWS SigV4 keys)' };
 
     const orderId = msg.threadId || msg.to;
     try {
@@ -187,3 +210,83 @@ export class AmazonAdapter implements ChannelAdapter {
 }
 
 export const amazonAdapter = new AmazonAdapter();
+
+function hash(value: string) {
+  return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function hmac(key: crypto.BinaryLike, value: string) {
+  return crypto.createHmac('sha256', key).update(value, 'utf8').digest();
+}
+
+function hmacHex(key: crypto.BinaryLike, value: string) {
+  return crypto.createHmac('sha256', key).update(value, 'utf8').digest('hex');
+}
+
+function amzDate(date = new Date()) {
+  const iso = date.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  return { full: iso, short: iso.slice(0, 8) };
+}
+
+function encodeRfc3986(value: string) {
+  return encodeURIComponent(value).replace(/[!'()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function canonicalQuery(searchParams: URLSearchParams) {
+  return Array.from(searchParams.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${encodeRfc3986(k)}=${encodeRfc3986(v)}`)
+    .join('&');
+}
+
+function signSpApiRequest({
+  endpoint,
+  path,
+  method,
+  body,
+  accessToken,
+  accessKeyId,
+  secretAccessKey,
+  awsRegion,
+}: {
+  endpoint: string;
+  path: string;
+  method: string;
+  body: string;
+  accessToken: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  awsRegion: string;
+}) {
+  const url = new URL(path, endpoint);
+  const { full, short } = amzDate();
+  const payloadHash = hash(body || '');
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    host: url.host,
+    'x-amz-access-token': accessToken,
+    'x-amz-date': full,
+  };
+  const signedHeaders = Object.keys(headers).sort().join(';');
+  const canonicalHeaders = Object.keys(headers)
+    .sort()
+    .map(k => `${k}:${headers[k].trim()}\n`)
+    .join('');
+  const canonicalRequest = [
+    method.toUpperCase(),
+    url.pathname,
+    canonicalQuery(url.searchParams),
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash,
+  ].join('\n');
+  const scope = `${short}/${awsRegion}/execute-api/aws4_request`;
+  const stringToSign = ['AWS4-HMAC-SHA256', full, scope, hash(canonicalRequest)].join('\n');
+  const dateKey = hmac(`AWS4${secretAccessKey}`, short);
+  const regionKey = hmac(dateKey, awsRegion);
+  const serviceKey = hmac(regionKey, 'execute-api');
+  const signingKey = hmac(serviceKey, 'aws4_request');
+  const signature = hmacHex(signingKey, stringToSign);
+  headers.authorization = `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  return { url: url.toString(), headers };
+}

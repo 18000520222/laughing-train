@@ -153,7 +153,7 @@ async function matchOrCreateCompany(msg: NormalizedMessage) {
     return company;
   }
 
-  // 其他渠道:电话尾号匹配
+  // 其他渠道(阿里/亚马逊/虾皮/Facebook/WhatsApp/LinkedIn):先电话尾号匹配
   const digits = msg.senderId.replace(/[^\d]/g, '');
   if (digits.length >= 6) {
     const contact = await prisma.contact.findFirst({
@@ -162,7 +162,42 @@ async function matchOrCreateCompany(msg: NormalizedMessage) {
     });
     if (contact?.company) return contact.company;
   }
-  return null;
+
+  // 再按外部账号ID匹配已有联系人(避免重复建档)
+  const existing = await prisma.contact.findFirst({
+    where: { externalId: msg.senderId },
+    include: { company: true },
+  }).catch(() => null);
+  if (existing?.company) return existing.company;
+
+  // 匹配不到 → 自动建潜在客户(成熟CRM:任何渠道新联系人都自动入库)
+  const displayName = (msg.senderName || '').trim() || ('客户-' + msg.senderId.slice(-6));
+  const channelSource = channelLabel(msg.channel);
+  const admin = await prisma.user.findFirst({
+    where: { role: 'SUPER_ADMIN', isActive: true },
+    select: { id: true },
+  });
+  const company = await prisma.company.create({
+    data: {
+      name: displayName,
+      source: channelSource,
+      type: 'PROSPECT',
+      isPublic: false,
+      ownerId: admin?.id ?? undefined,
+    },
+  });
+  // 建联系人,记录外部账号ID + 电话(若有)
+  const { firstName, lastName } = splitName(msg.senderName, msg.senderId);
+  await prisma.contact.create({
+    data: {
+      firstName,
+      lastName: lastName ?? undefined,
+      phone: digits.length >= 6 ? digits : undefined,
+      externalId: msg.senderId,
+      companyId: company.id,
+    },
+  }).catch(() => {});
+  return company;
 }
 
 /** 从显示名或邮箱本地段拆出 first/last name */
@@ -216,7 +251,7 @@ async function notify(msg: NormalizedMessage, preview: string, link: string) {
     await prisma.notification.createMany({
       data: admins.map((u) => ({
         userId: u.id,
-        type: 'WHATSAPP' as const, // 复用现有枚举;统一收件箱链接到 /inbox
+        type: notificationType(msg.channel) as any,
         title: `${channelLabel(msg.channel)}: ${msg.senderName || msg.senderId}`,
         body: preview.slice(0, 100),
         link: '/inbox',
@@ -229,11 +264,18 @@ async function notify(msg: NormalizedMessage, preview: string, link: string) {
 
 function channelLabel(c: ChannelType): string {
   return (
-    { WHATSAPP: 'WhatsApp', ALIBABA: '阿里国际站', AMAZON: '亚马逊', SHOPEE: '虾皮', FACEBOOK: 'Facebook', EMAIL: '邮件' } as Record<
+    { WHATSAPP: 'WhatsApp', ALIBABA: '阿里国际站', AMAZON: '亚马逊', SHOPEE: '虾皮', FACEBOOK: 'Facebook', LINKEDIN: 'LinkedIn', EMAIL: '邮件' } as Record<
       ChannelType,
       string
     >
   )[c];
+}
+
+function notificationType(c: ChannelType): string {
+  if (c === 'FACEBOOK' || c === 'LINKEDIN') return 'SOCIAL';
+  if (c === 'EMAIL') return 'EMAIL';
+  if (c === 'AMAZON' || c === 'ALIBABA' || c === 'SHOPEE') return 'SYSTEM';
+  return 'WHATSAPP';
 }
 
 /**

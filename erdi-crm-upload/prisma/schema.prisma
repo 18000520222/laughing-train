@@ -83,6 +83,8 @@ model SystemSettings {
   amazonRefreshToken   String?
   amazonLwaClientId    String?
   amazonLwaClientSecret String?
+  amazonAwsAccessKeyId  String?
+  amazonAwsSecretAccessKey String?
   amazonSellerId       String?
   amazonMarketplaceId  String? @default("ATVPDKIKX0DER") // 默认美国站
   amazonRegion         String? @default("na")            // na / eu / fe
@@ -148,12 +150,13 @@ enum CustomerType {
 }
 
 model Contact {
-  id        String   @id @default(cuid())
-  firstName String
-  lastName  String?
-  email     String   @unique
-  phone     String?
-  title     String?
+  id         String   @id @default(cuid())
+  firstName  String
+  lastName   String?
+  email      String?  @unique
+  phone      String?
+  title      String?
+  externalId String?  @unique
 
   companyId String
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -520,6 +523,7 @@ enum InboxChannel {
   AMAZON
   SHOPEE
   FACEBOOK
+  LINKEDIN
   EMAIL
 }
 
