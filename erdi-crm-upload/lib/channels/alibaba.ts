@@ -46,6 +46,89 @@ function formatAlibabaError(data: any): string | null {
   return `${code}: ${message}`;
 }
 
+function tryParseJson(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const s = value.trim();
+  if (!((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('[') && s.endsWith(']')))) return value;
+  try {
+    return JSON.parse(s);
+  } catch {
+    return value;
+  }
+}
+
+function normalizePayload(value: unknown): any {
+  const parsed = tryParseJson(value);
+  if (Array.isArray(parsed)) return parsed.map(normalizePayload);
+  if (!parsed || typeof parsed !== 'object') return parsed;
+
+  const obj: Record<string, unknown> = { ...(parsed as Record<string, unknown>) };
+  for (const key of ['message', 'msg', 'data', 'body', 'payload', 'value', 'content']) {
+    if (key in obj) obj[key] = normalizePayload(obj[key]);
+  }
+  return obj;
+}
+
+function collectMessageCandidates(payload: any): any[] {
+  const directLists = [
+    payload?.messages,
+    payload?.messageList,
+    payload?.inquiries,
+    payload?.inquiryList,
+    payload?.data?.messages,
+    payload?.data?.list,
+    payload?.data?.items,
+    payload?.result?.list,
+    payload?.result?.items,
+    payload?.value?.order_list,
+    payload?.value?.orderList,
+  ];
+  for (const candidate of directLists) {
+    if (Array.isArray(candidate) && candidate.length) return candidate;
+  }
+
+  const nested = [payload?.message, payload?.msg, payload?.data, payload?.body, payload?.payload, payload?.value];
+  for (const candidate of nested) {
+    if (!candidate || candidate === payload) continue;
+    if (Array.isArray(candidate) && candidate.length) return candidate;
+    if (typeof candidate === 'object') {
+      const found = collectMessageCandidates(candidate);
+      if (found.length) return found;
+    }
+  }
+
+  if (Array.isArray(payload)) return payload;
+  const hasMessageShape = Boolean(
+    payload?.content ||
+      payload?.body ||
+      payload?.messageContent ||
+      payload?.text ||
+      payload?.subject ||
+      payload?.inquirySubject ||
+      payload?.trade_id ||
+      payload?.tradeId ||
+      payload?.orderId
+  );
+  return hasMessageShape ? [payload] : [];
+}
+
+function stableId(value: unknown): string {
+  return crypto.createHash('sha1').update(JSON.stringify(value)).digest('hex');
+}
+
+function toDate(value: unknown): Date | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) return value;
+  if (typeof value === 'number') return new Date(value);
+  if (typeof value === 'string') {
+    const asNumber = Number(value);
+    const date = Number.isFinite(asNumber) && value.length >= 10 ? new Date(asNumber) : new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+  if (typeof value === 'object') return toDate((value as any).timestamp ?? (value as any).time);
+  return undefined;
+}
+
 async function callAlibaba(
   apiPath: string,
   bizParams: Record<string, string>,
@@ -98,49 +181,69 @@ export class AlibabaAdapter implements ChannelAdapter {
    *   b) 单条推送 payload
    */
   async parseInbound(rawPayload: unknown): Promise<NormalizedMessage[]> {
-    const payload = rawPayload as any;
+    const payload = normalizePayload(rawPayload) as any;
     const out: NormalizedMessage[] = [];
 
-    // 尝试从常见结构里取消息数组
-    const orderList = payload?.value?.order_list || payload?.value?.orderList || [];
-    const list: any[] =
-      payload?.messages ||
-      payload?.data?.messages ||
-      payload?.data?.list ||
-      payload?.result?.list ||
-      payload?.result?.items ||
-      orderList ||
-      (Array.isArray(payload) ? payload : []) ||
-      [];
+    // 尝试从常见结构里取消息数组,也兼容单条 push 包装。
+    const list = collectMessageCandidates(payload);
 
     for (const m of list) {
       const text =
+        m.text ||
         m.content ||
         m.body ||
         m.messageContent ||
+        m.message ||
+        m.remark ||
         m.subject ||
         m.inquirySubject ||
+        m.inquiryName ||
         (m.trade_id || m.tradeId
           ? `Alibaba order ${m.trade_id || m.tradeId} status: ${m.trade_status || m.tradeStatus || 'unknown'}`
           : '');
-      const externalId = m.id || m.messageId || m.inquiryId || m.tradeId || m.trade_id || '';
+      if (!String(text || '').trim()) continue;
+
+      const externalId =
+        m.id ||
+        m.messageId ||
+        m.msgId ||
+        m.inquiryId ||
+        m.inquiry_id ||
+        m.tradeId ||
+        m.trade_id ||
+        m.orderId ||
+        m.eventId ||
+        m.event_id ||
+        stableId(m);
       out.push({
         channel: 'ALIBABA',
         direction: 'IN',
         externalId: String(externalId),
-        threadId: String(m.threadId || m.conversationId || m.buyerId || m.senderId || m.tradeId || m.trade_id || ''),
-        senderId: String(m.buyerId || m.senderId || m.fromUserId || m.sales_man_login_id || 'alibaba'),
-        senderName: m.buyerName || m.senderName || m.contactName || m.sales_man_login_id || 'Alibaba',
+        threadId: String(
+          m.threadId ||
+            m.conversationId ||
+            m.inquiryId ||
+            m.inquiry_id ||
+            m.buyerId ||
+            m.senderId ||
+            m.tradeId ||
+            m.trade_id ||
+            m.orderId ||
+            ''
+        ),
+        senderId: String(
+          m.buyerId ||
+            m.buyerLoginId ||
+            m.senderId ||
+            m.fromUserId ||
+            m.from ||
+            m.contactEmail ||
+            m.sales_man_login_id ||
+            'alibaba'
+        ),
+        senderName: m.buyerName || m.senderName || m.contactName || m.companyName || m.sales_man_login_id || 'Alibaba',
         text: String(text),
-        sentAt: m.gmtCreate
-          ? new Date(m.gmtCreate)
-          : m.create_date?.timestamp
-          ? new Date(Number(m.create_date.timestamp))
-          : m.createDate?.timestamp
-          ? new Date(Number(m.createDate.timestamp))
-          : m.timestamp
-          ? new Date(Number(m.timestamp))
-          : undefined,
+        sentAt: toDate(m.gmtCreate || m.create_date || m.createDate || m.timestamp || m.gmtModified || m.sendTime),
       });
     }
 

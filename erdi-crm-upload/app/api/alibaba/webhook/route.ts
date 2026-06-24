@@ -25,7 +25,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const payload = await req.json().catch(() => ({}));
+    const payload = await readPayload(req);
 
     const messages = await alibabaAdapter.parseInbound(payload);
     if (!messages.length) return NextResponse.json({ ok: true });
@@ -55,4 +55,38 @@ export async function POST(req: Request) {
     console.error('[alibaba-webhook]', err);
     return NextResponse.json({ error: String(err?.message || err) }, { status: 200 });
   }
+}
+
+async function readPayload(req: Request): Promise<unknown> {
+  const contentType = req.headers.get('content-type') || '';
+  const text = await req.text().catch(() => '');
+  if (!text.trim()) return {};
+
+  if (contentType.includes('application/x-www-form-urlencoded') || text.includes('=') && !text.trim().startsWith('{')) {
+    const form = Object.fromEntries(new URLSearchParams(text).entries());
+    return expandJsonFields(form);
+  }
+
+  try {
+    return expandJsonFields(JSON.parse(text));
+  } catch {
+    return { raw: text };
+  }
+}
+
+function expandJsonFields(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const obj = value as Record<string, unknown>;
+  for (const key of ['message', 'msg', 'data', 'body', 'payload', 'value']) {
+    const v = obj[key];
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if ((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('[') && s.endsWith(']'))) {
+        try {
+          obj[key] = JSON.parse(s);
+        } catch {}
+      }
+    }
+  }
+  return obj;
 }
