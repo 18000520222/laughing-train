@@ -39,10 +39,18 @@ function signParams(params: Record<string, string>, appSecret: string, apiPath: 
   return crypto.createHmac('sha256', appSecret).update(base, 'utf8').digest('hex').toUpperCase();
 }
 
+function formatAlibabaError(data: any): string | null {
+  const code = data?.code ?? data?.error_code ?? data?.result_code ?? data?.resultCode;
+  if (code === undefined || code === null || code === '0' || code === 0) return null;
+  const message = data?.message || data?.error_message || data?.sub_msg || data?.msg || 'Alibaba API error';
+  return `${code}: ${message}`;
+}
+
 async function callAlibaba(
   apiPath: string,
   bizParams: Record<string, string>,
-  creds: AlibabaCreds
+  creds: AlibabaCreds,
+  method: 'GET' | 'POST' = 'POST'
 ): Promise<any> {
   const sysParams: Record<string, string> = {
     app_key: creds.appKey,
@@ -53,14 +61,21 @@ async function callAlibaba(
   const allParams = { ...sysParams, ...bizParams };
   const sign = signParams(allParams, creds.appSecret, apiPath);
 
-  const body = new URLSearchParams({ ...allParams, sign });
-  const res = await fetch(`${ALIBABA_GATEWAY}${apiPath}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-    signal: AbortSignal.timeout(20000),
-  });
-  return res.json();
+  const params = new URLSearchParams({ ...allParams, sign });
+  const res = await fetch(
+    method === 'GET' ? `${ALIBABA_GATEWAY}${apiPath}?${params.toString()}` : `${ALIBABA_GATEWAY}${apiPath}`,
+    {
+      method,
+      headers: method === 'POST' ? { 'Content-Type': 'application/x-www-form-urlencoded' } : undefined,
+      body: method === 'POST' ? params.toString() : undefined,
+      signal: AbortSignal.timeout(20000),
+    }
+  );
+  const data = await res.json();
+  if (!res.ok) throw new Error(`Alibaba HTTP ${res.status}`);
+  const apiError = formatAlibabaError(data);
+  if (apiError) throw new Error(apiError);
+  return data;
 }
 
 export class AlibabaAdapter implements ChannelAdapter {
@@ -87,26 +102,42 @@ export class AlibabaAdapter implements ChannelAdapter {
     const out: NormalizedMessage[] = [];
 
     // 尝试从常见结构里取消息数组
+    const orderList = payload?.value?.order_list || payload?.value?.orderList || [];
     const list: any[] =
       payload?.messages ||
       payload?.data?.messages ||
       payload?.data?.list ||
+      payload?.result?.list ||
+      payload?.result?.items ||
+      orderList ||
       (Array.isArray(payload) ? payload : []) ||
       [];
 
     for (const m of list) {
       const text =
-        m.content || m.body || m.messageContent || m.subject || m.inquirySubject || '';
+        m.content ||
+        m.body ||
+        m.messageContent ||
+        m.subject ||
+        m.inquirySubject ||
+        (m.trade_id || m.tradeId
+          ? `Alibaba order ${m.trade_id || m.tradeId} status: ${m.trade_status || m.tradeStatus || 'unknown'}`
+          : '');
+      const externalId = m.id || m.messageId || m.inquiryId || m.tradeId || m.trade_id || '';
       out.push({
         channel: 'ALIBABA',
         direction: 'IN',
-        externalId: String(m.id || m.messageId || m.inquiryId || m.tradeId || ''),
-        threadId: String(m.threadId || m.conversationId || m.buyerId || m.senderId || ''),
-        senderId: String(m.buyerId || m.senderId || m.fromUserId || ''),
-        senderName: m.buyerName || m.senderName || m.contactName || undefined,
+        externalId: String(externalId),
+        threadId: String(m.threadId || m.conversationId || m.buyerId || m.senderId || m.tradeId || m.trade_id || ''),
+        senderId: String(m.buyerId || m.senderId || m.fromUserId || m.sales_man_login_id || 'alibaba'),
+        senderName: m.buyerName || m.senderName || m.contactName || m.sales_man_login_id || 'Alibaba',
         text: String(text),
         sentAt: m.gmtCreate
           ? new Date(m.gmtCreate)
+          : m.create_date?.timestamp
+          ? new Date(Number(m.create_date.timestamp))
+          : m.createDate?.timestamp
+          ? new Date(Number(m.createDate.timestamp))
           : m.timestamp
           ? new Date(Number(m.timestamp))
           : undefined,
@@ -148,18 +179,15 @@ export class AlibabaAdapter implements ChannelAdapter {
     const creds = await this.creds();
     if (!creds) return [];
 
-    try {
-      // 询盘列表(ICBU)。路径规则同上：method → /icbu/.../...
-      // 真实 method 名以控制台授权的 ICBU 询盘/消息 API 为准(如 alibaba.icbu.message.list)。
-      const data = await callAlibaba(
-        '/icbu/message/list',
-        { page_size: '50', current_page: '1' },
-        creds
-      );
-      return this.parseInbound(data);
-    } catch {
-      return [];
-    }
+    // 当前阿里开放平台未给此 App 暴露站内信/询盘列表 API；已授权且官方可用的
+    // 交易同步入口是 /alibaba/order/list。后续如阿里开通消息 API，只需替换这里。
+    const data = await callAlibaba(
+      '/alibaba/order/list',
+      { role: 'seller', start_page: '0', page_size: '50' },
+      creds,
+      'POST'
+    );
+    return this.parseInbound(data);
   }
 }
 

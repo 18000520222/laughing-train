@@ -42,8 +42,12 @@ export async function GET(req: NextRequest) {
           if (res.created) channelReport.ingested++;
           else if (res.skippedReason === 'duplicate') channelReport.duplicate++;
           else channelReport.skipped++;
-        } catch {
+        } catch (err: any) {
           channelReport.errors++;
+          channelReport.errorSamples ||= [];
+          if (channelReport.errorSamples.length < 3) {
+            channelReport.errorSamples.push(String(err?.message || err).slice(0, 200));
+          }
         }
       }
     } catch (err: any) {
