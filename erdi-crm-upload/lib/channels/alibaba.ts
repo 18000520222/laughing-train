@@ -105,6 +105,9 @@ function collectMessageCandidates(payload: any): any[] {
       payload?.text ||
       payload?.subject ||
       payload?.inquirySubject ||
+      payload?.messageType ||
+      payload?.msgType ||
+      payload?.eventType ||
       payload?.trade_id ||
       payload?.tradeId ||
       payload?.orderId
@@ -198,6 +201,10 @@ export class AlibabaAdapter implements ChannelAdapter {
         m.subject ||
         m.inquirySubject ||
         m.inquiryName ||
+        m.description ||
+        m.messageType ||
+        m.msgType ||
+        m.eventType ||
         (m.trade_id || m.tradeId
           ? `Alibaba order ${m.trade_id || m.tradeId} status: ${m.trade_status || m.tradeStatus || 'unknown'}`
           : '');
