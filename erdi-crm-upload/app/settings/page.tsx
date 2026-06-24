@@ -5,6 +5,23 @@ import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
+const SECRET_FIELDS = new Set([
+  'whatsappToken',
+  'fbAppSecret',
+  'linkedinClientSecret',
+  'alibabaAppSecret',
+  'alibabaAccessToken',
+  'alibabaRefreshToken',
+  'amazonLwaClientSecret',
+  'amazonAwsAccessKeyId',
+  'amazonAwsSecretAccessKey',
+  'amazonRefreshToken',
+  'shopeePartnerKey',
+  'shopeeAccessToken',
+  'shopeeRefreshToken',
+  'aftershipApiKey',
+]);
+
 
 export default async function SettingsPage() {
   const role = cookies().get('auth_role')?.value;
@@ -47,45 +64,48 @@ export default async function SettingsPage() {
     'use server';
     const r = cookies().get('auth_role')?.value;
     if (r !== 'SUPER_ADMIN' && r !== 'ADMIN') return;
+    const g = (key: string, fallback?: string | null) => {
+      const value = String(formData.get(key) || '').trim();
+      if (!value) return SECRET_FIELDS.has(key) ? undefined : fallback ?? null;
+      return value;
+    };
+    const rawData: any = {
+      whatsappToken: g('whatsappToken'),
+      whatsappPhoneId: g('whatsappPhoneId'),
+      whatsappVerifyToken: g('whatsappVerifyToken'),
+      whatsapp360ApiKey: g('whatsapp360ApiKey'),
+      fbAppId: g('fbAppId'),
+      fbAppSecret: g('fbAppSecret'),
+      fbVerifyToken: g('fbVerifyToken'),
+      linkedinClientId: g('linkedinClientId'),
+      linkedinClientSecret: g('linkedinClientSecret'),
+      aftershipApiKey: g('aftershipApiKey'),
+      libretranslateUrl: g('libretranslateUrl', 'https://libretranslate.com'),
+      autoReplyMode: g('autoReplyMode', 'DRAFT'),
+      aiBusinessInfo: g('aiBusinessInfo'),
+      alibabaAppKey: g('alibabaAppKey'),
+      alibabaAppSecret: g('alibabaAppSecret'),
+      alibabaAccessToken: g('alibabaAccessToken'),
+      alibabaRefreshToken: g('alibabaRefreshToken'),
+      amazonRefreshToken: g('amazonRefreshToken'),
+      amazonLwaClientId: g('amazonLwaClientId'),
+      amazonLwaClientSecret: g('amazonLwaClientSecret'),
+      amazonAwsAccessKeyId: g('amazonAwsAccessKeyId'),
+      amazonAwsSecretAccessKey: g('amazonAwsSecretAccessKey'),
+      amazonSellerId: g('amazonSellerId'),
+      amazonMarketplaceId: g('amazonMarketplaceId', 'ATVPDKIKX0DER'),
+      amazonRegion: g('amazonRegion', 'na'),
+      shopeePartnerId: g('shopeePartnerId'),
+      shopeePartnerKey: g('shopeePartnerKey'),
+      shopeeShopId: g('shopeeShopId'),
+      shopeeAccessToken: g('shopeeAccessToken'),
+      shopeeRefreshToken: g('shopeeRefreshToken'),
+    };
+    const data = Object.fromEntries(Object.entries(rawData).filter(([, v]) => v !== undefined));
     await prisma.systemSettings.upsert({
       where: { id: 'default' },
-      update: {
-        whatsappToken: (formData.get('whatsappToken') as string) || null,
-        whatsappPhoneId: (formData.get('whatsappPhoneId') as string) || null,
-        whatsappVerifyToken: (formData.get('whatsappVerifyToken') as string) || null,
-        whatsapp360ApiKey: (formData.get('whatsapp360ApiKey') as string) || null,
-        fbAppId: (formData.get('fbAppId') as string) || null,
-        fbAppSecret: (formData.get('fbAppSecret') as string) || null,
-        fbVerifyToken: (formData.get('fbVerifyToken') as string) || null,
-        linkedinClientId: (formData.get('linkedinClientId') as string) || null,
-        linkedinClientSecret: (formData.get('linkedinClientSecret') as string) || null,
-        aftershipApiKey: (formData.get('aftershipApiKey') as string) || null,
-        libretranslateUrl: (formData.get('libretranslateUrl') as string) || 'https://libretranslate.com',
-        // AI 智能客服
-        autoReplyMode: (formData.get('autoReplyMode') as string) || 'DRAFT',
-        aiBusinessInfo: (formData.get('aiBusinessInfo') as string) || null,
-        // 阿里国际站
-        alibabaAppKey: (formData.get('alibabaAppKey') as string) || null,
-        alibabaAppSecret: (formData.get('alibabaAppSecret') as string) || null,
-        alibabaAccessToken: (formData.get('alibabaAccessToken') as string) || null,
-        alibabaRefreshToken: (formData.get('alibabaRefreshToken') as string) || null,
-        // 亚马逊 SP-API
-        amazonRefreshToken: (formData.get('amazonRefreshToken') as string) || null,
-        amazonLwaClientId: (formData.get('amazonLwaClientId') as string) || null,
-        amazonLwaClientSecret: (formData.get('amazonLwaClientSecret') as string) || null,
-        amazonAwsAccessKeyId: (formData.get('amazonAwsAccessKeyId') as string) || null,
-        amazonAwsSecretAccessKey: (formData.get('amazonAwsSecretAccessKey') as string) || null,
-        amazonSellerId: (formData.get('amazonSellerId') as string) || null,
-        amazonMarketplaceId: (formData.get('amazonMarketplaceId') as string) || 'ATVPDKIKX0DER',
-        amazonRegion: (formData.get('amazonRegion') as string) || 'na',
-        // 虾皮 Shopee
-        shopeePartnerId: (formData.get('shopeePartnerId') as string) || null,
-        shopeePartnerKey: (formData.get('shopeePartnerKey') as string) || null,
-        shopeeShopId: (formData.get('shopeeShopId') as string) || null,
-        shopeeAccessToken: (formData.get('shopeeAccessToken') as string) || null,
-        shopeeRefreshToken: (formData.get('shopeeRefreshToken') as string) || null,
-      },
-      create: { id: 'default' } as any,
+      update: data,
+      create: { id: 'default', ...data } as any,
     });
     redirect('/settings');
   }
@@ -215,7 +235,7 @@ export default async function SettingsPage() {
               </p>
               <Field name="amazonLwaClientId" label="LWA Client ID" def={(settings as any)?.amazonLwaClientId} />
               <Field name="amazonLwaClientSecret" label="LWA Client Secret" def={(settings as any)?.amazonLwaClientSecret} type="password" />
-              <Field name="amazonAwsAccessKeyId" label="AWS Access Key ID (SP-API SigV4)" def={(settings as any)?.amazonAwsAccessKeyId} />
+              <Field name="amazonAwsAccessKeyId" label="AWS Access Key ID (SP-API SigV4)" def={(settings as any)?.amazonAwsAccessKeyId} type="password" />
               <Field name="amazonAwsSecretAccessKey" label="AWS Secret Access Key (SP-API SigV4)" def={(settings as any)?.amazonAwsSecretAccessKey} type="password" />
               <Field name="amazonRefreshToken" label="Refresh Token" def={(settings as any)?.amazonRefreshToken} type="password" />
               <Field name="amazonSellerId" label="Seller ID (可选)" def={(settings as any)?.amazonSellerId} />
@@ -356,7 +376,7 @@ function Field({ name, label, def, type = 'text' }: { name: string; label: strin
       <input
         type={type}
         name={name}
-        defaultValue={def || ''}
+        defaultValue={type === 'password' ? '' : def || ''}
         placeholder={def && type === 'password' ? '已配置 (留空保持不变)' : ''}
         className="w-full border border-gray-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"
       />

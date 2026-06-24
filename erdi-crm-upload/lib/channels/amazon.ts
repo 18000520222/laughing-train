@@ -126,7 +126,10 @@ export class AmazonAdapter implements ChannelAdapter {
       body: bodyText || undefined,
       signal: AbortSignal.timeout(20000),
     });
-    return res.json();
+    const data = await res.json();
+    if (!res.ok) throw new Error(`Amazon SP-API HTTP ${res.status}: ${JSON.stringify(data).slice(0, 300)}`);
+    if (data?.errors?.length) throw new Error(`Amazon SP-API: ${JSON.stringify(data.errors).slice(0, 300)}`);
+    return data;
   }
 
   /**
@@ -197,15 +200,11 @@ export class AmazonAdapter implements ChannelAdapter {
   async poll(): Promise<NormalizedMessage[]> {
     const creds = await this.creds();
     if (!creds) return [];
-    try {
-      // 拉最近 24h 创建的订单
-      const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-      const path = `/orders/v0/orders?MarketplaceIds=${creds.marketplaceId}&CreatedAfter=${encodeURIComponent(since)}`;
-      const data = await this.spFetch(path, 'GET', creds);
-      return this.parseInbound(data);
-    } catch {
-      return [];
-    }
+    // 拉最近 24h 创建的订单。异常交给 channel-poll 汇总,避免把授权/签名错误伪装成 0 条。
+    const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const path = `/orders/v0/orders?MarketplaceIds=${creds.marketplaceId}&CreatedAfter=${encodeURIComponent(since)}`;
+    const data = await this.spFetch(path, 'GET', creds);
+    return this.parseInbound(data);
   }
 }
 

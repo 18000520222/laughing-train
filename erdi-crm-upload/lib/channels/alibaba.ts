@@ -148,30 +148,13 @@ export class AlibabaAdapter implements ChannelAdapter {
   }
 
   /** 通过开放平台消息 API 回复买家 */
-  async send(msg: OutboundMessage): Promise<SendResult> {
+  async send(_msg: OutboundMessage): Promise<SendResult> {
     const creds = await this.creds();
     if (!creds) return { ok: false, error: '未配置阿里国际站 AppKey/AppSecret/AccessToken' };
-
-    try {
-      // 阿里国际站新版网关路径规则：method `alibaba.icbu.xxx.yyy` → 路径 `/icbu/xxx/yyy`
-      // 买家消息回复走 ICBU 站内信 API。具体字段以控制台「API 授权」后的文档为准。
-      const data = await callAlibaba(
-        '/icbu/message/send',
-        {
-          to_user_id: msg.to,
-          content: msg.text,
-          ...(msg.threadId ? { conversation_id: msg.threadId } : {}),
-        },
-        creds
-      );
-
-      if (data?.code && data.code !== '0' && data.code !== 0) {
-        return { ok: false, error: JSON.stringify(data).slice(0, 300) };
-      }
-      return { ok: true, externalId: data?.message_id || data?.result?.messageId };
-    } catch (err: any) {
-      return { ok: false, error: String(err?.message || err) };
-    }
+    return {
+      ok: false,
+      error: '阿里当前 App 未开放站内信/询盘发送 API，不能从 CRM 直接回复；请先在阿里后台手动回复。',
+    };
   }
 
   /** 主动轮询新询盘/消息(由定时任务调用 → 交给 ingest pipeline) */

@@ -6,6 +6,23 @@ import Link from 'next/link';
 export const dynamic = 'force-dynamic';
 
 const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'];
+const SECRET_FIELDS = new Set([
+  'whatsappToken',
+  'whatsapp360ApiKey',
+  'fbAppSecret',
+  'linkedinClientSecret',
+  'aftershipApiKey',
+  'alibabaAppSecret',
+  'alibabaAccessToken',
+  'alibabaRefreshToken',
+  'amazonRefreshToken',
+  'amazonLwaClientSecret',
+  'amazonAwsAccessKeyId',
+  'amazonAwsSecretAccessKey',
+  'shopeePartnerKey',
+  'shopeeAccessToken',
+  'shopeeRefreshToken',
+]);
 
 export default async function ChannelSettingsPage({
   searchParams,
@@ -28,9 +45,11 @@ export default async function ChannelSettingsPage({
     if (!r || !ADMIN_ROLES.includes(r)) return;
     const g = (k: string) => {
       const v = formData.get(k);
-      return v === null || v === '' ? null : String(v);
+      const value = v === null ? '' : String(v).trim();
+      if (!value) return SECRET_FIELDS.has(k) ? undefined : null;
+      return value;
     };
-    const data: any = {
+    const rawData: any = {
       // WhatsApp
       whatsappToken: g('whatsappToken'),
       whatsappPhoneId: g('whatsappPhoneId'),
@@ -64,7 +83,8 @@ export default async function ChannelSettingsPage({
       shopeeAccessToken: g('shopeeAccessToken'),
       shopeeRefreshToken: g('shopeeRefreshToken'),
     };
-    // 只更新表单提交的非空字段以外的全部(允许清空)
+    const data = Object.fromEntries(Object.entries(rawData).filter(([, v]) => v !== undefined));
+    // 敏感字段留空时保持原值；普通字段留空时允许清空。
     await prisma.systemSettings.upsert({
       where: { id: 'default' },
       update: data,
@@ -98,7 +118,7 @@ export default async function ChannelSettingsPage({
       <h1 className="text-2xl font-bold text-gray-900 mb-1">🔌 渠道接入配置</h1>
       <p className="text-sm text-gray-500 mb-6">
         填写各电商/社媒渠道的开放平台凭据后，系统将自动拉取询盘并进入「统一收件箱」（含翻译 + AI 回复草稿）。
-        凭据保存在数据库，不会显示在前端明文回显之外的位置。
+        凭据保存在数据库；敏感字段不会明文回显，留空保存会保持原值。
       </p>
 
       {connected && (
@@ -183,9 +203,9 @@ export default async function ChannelSettingsPage({
           <p className="text-xs text-gray-400 mb-4">消息推送地址：<code>{baseUrl}/api/alibaba/webhook</code>　·　授权回调：<code>{baseUrl}/api/auth/alibaba/callback</code>（先填 AppKey/AppSecret 并「保存」，再点右上「一键授权」跳转阿里授权页，回来后 token 自动入库并续期）</p>
           <div className="grid grid-cols-2 gap-4">
             <Field name="alibabaAppKey" label="App Key" defaultValue={st.alibabaAppKey} />
-            <Field name="alibabaAppSecret" label="App Secret" defaultValue={st.alibabaAppSecret} />
-            <Field name="alibabaAccessToken" label="Access Token" defaultValue={st.alibabaAccessToken} />
-            <Field name="alibabaRefreshToken" label="Refresh Token" defaultValue={st.alibabaRefreshToken} />
+            <Field name="alibabaAppSecret" label="App Secret" defaultValue={st.alibabaAppSecret} type="password" />
+            <Field name="alibabaAccessToken" label="Access Token" defaultValue={st.alibabaAccessToken} type="password" />
+            <Field name="alibabaRefreshToken" label="Refresh Token" defaultValue={st.alibabaRefreshToken} type="password" />
           </div>
         </section>
 
@@ -200,10 +220,10 @@ export default async function ChannelSettingsPage({
           </div>
           <p className="text-xs text-gray-400 mb-4">亚马逊无消息 webhook，系统每 10 分钟轮询订单/消息。SP-API 正式请求需要 LWA token + AWS SigV4 签名。</p>
           <div className="grid grid-cols-2 gap-4">
-            <Field name="amazonRefreshToken" label="LWA Refresh Token" defaultValue={st.amazonRefreshToken} />
+            <Field name="amazonRefreshToken" label="LWA Refresh Token" defaultValue={st.amazonRefreshToken} type="password" />
             <Field name="amazonLwaClientId" label="LWA Client ID" defaultValue={st.amazonLwaClientId} />
-            <Field name="amazonLwaClientSecret" label="LWA Client Secret" defaultValue={st.amazonLwaClientSecret} />
-            <Field name="amazonAwsAccessKeyId" label="AWS Access Key ID" defaultValue={st.amazonAwsAccessKeyId} />
+            <Field name="amazonLwaClientSecret" label="LWA Client Secret" defaultValue={st.amazonLwaClientSecret} type="password" />
+            <Field name="amazonAwsAccessKeyId" label="AWS Access Key ID" defaultValue={st.amazonAwsAccessKeyId} type="password" />
             <Field name="amazonAwsSecretAccessKey" label="AWS Secret Access Key" defaultValue={st.amazonAwsSecretAccessKey} type="password" />
             <Field name="amazonSellerId" label="Seller ID" defaultValue={st.amazonSellerId} />
             <Field name="amazonMarketplaceId" label="Marketplace ID" defaultValue={st.amazonMarketplaceId} placeholder="ATVPDKIKX0DER（美国）" />
@@ -223,10 +243,10 @@ export default async function ChannelSettingsPage({
           <p className="text-xs text-gray-400 mb-4">Push 回调地址：<code>{baseUrl}/api/shopee/webhook</code></p>
           <div className="grid grid-cols-2 gap-4">
             <Field name="shopeePartnerId" label="Partner ID" defaultValue={st.shopeePartnerId} />
-            <Field name="shopeePartnerKey" label="Partner Key" defaultValue={st.shopeePartnerKey} />
+            <Field name="shopeePartnerKey" label="Partner Key" defaultValue={st.shopeePartnerKey} type="password" />
             <Field name="shopeeShopId" label="Shop ID" defaultValue={st.shopeeShopId} />
-            <Field name="shopeeAccessToken" label="Access Token" defaultValue={st.shopeeAccessToken} />
-            <Field name="shopeeRefreshToken" label="Refresh Token" defaultValue={st.shopeeRefreshToken} />
+            <Field name="shopeeAccessToken" label="Access Token" defaultValue={st.shopeeAccessToken} type="password" />
+            <Field name="shopeeRefreshToken" label="Refresh Token" defaultValue={st.shopeeRefreshToken} type="password" />
           </div>
         </section>
 
@@ -245,8 +265,8 @@ function Field({ name, label, defaultValue, placeholder, type = 'text' }: { name
       <input
         type={type}
         name={name}
-        defaultValue={defaultValue || ''}
-        placeholder={placeholder || ''}
+        defaultValue={type === 'password' ? '' : defaultValue || ''}
+        placeholder={placeholder || (defaultValue && type === 'password' ? '已配置，留空保持原值' : '')}
         autoComplete="off"
         className="w-full border border-gray-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"
       />
