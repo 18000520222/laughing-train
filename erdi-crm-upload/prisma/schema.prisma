@@ -11,27 +11,28 @@ datasource db {
 // --- 模块一：账号与权限 ---
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  name      String?
-  role      Role     @default(SALES)
-  isActive  Boolean  @default(true)
+  id       String  @id @default(cuid())
+  email    String  @unique
+  password String
+  name     String?
+  role     Role    @default(SALES)
+  isActive Boolean @default(true)
 
-  customers    Company[]
-  opportunities Opportunity[]
-  followUps FollowUp[]
-  expensesSubmitted ExpenseClaim[] @relation("ExpenseSubmittedBy")
-  expensesApproved  ExpenseClaim[] @relation("ExpenseApprovedBy")
-  attendancesSubmitted AttendanceRequest[] @relation("AttendanceSubmittedBy")
-  attendancesApproved  AttendanceRequest[] @relation("AttendanceApprovedBy")
-  notifications Notification[]
-  socialAccounts SocialAccount[]
-  automationRuns AutomationRun[]
-  assignmentRules SalesAssignmentRule[]
-  salesTasks SalesTask[] @relation("SalesTaskOwner")
-  createdSalesTasks SalesTask[] @relation("SalesTaskCreatedBy")
-  salesKpiTargets SalesKpiTarget[]
+  customers               Company[]
+  opportunities           Opportunity[]
+  followUps               FollowUp[]
+  expensesSubmitted       ExpenseClaim[]            @relation("ExpenseSubmittedBy")
+  expensesApproved        ExpenseClaim[]            @relation("ExpenseApprovedBy")
+  attendancesSubmitted    AttendanceRequest[]       @relation("AttendanceSubmittedBy")
+  attendancesApproved     AttendanceRequest[]       @relation("AttendanceApprovedBy")
+  notifications           Notification[]
+  socialAccounts          SocialAccount[]
+  automationRuns          AutomationRun[]
+  assignmentRules         SalesAssignmentRule[]
+  salesTasks              SalesTask[]               @relation("SalesTaskOwner")
+  createdSalesTasks       SalesTask[]               @relation("SalesTaskCreatedBy")
+  salesKpiTargets         SalesKpiTarget[]
+  opportunityStageChanges OpportunityStageHistory[] @relation("OpportunityStageChangedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -50,9 +51,9 @@ enum Role {
 // --- 模块八：系统基础配置 ---
 
 model SystemSettings {
-  id            String   @id @default("default")
-  usdToCnyRate  Float    @default(7.2)
-  companyName   String   @default("ERDI TECH LTD")
+  id           String @id @default("default")
+  usdToCnyRate Float  @default(7.2)
+  companyName  String @default("ERDI TECH LTD")
 
   // 收款银行信息(用于 PI/CI 单据)
   bankName        String? // 开户行名称
@@ -85,14 +86,14 @@ model SystemSettings {
   alibabaTokenExpiresAt DateTime? // access_token 过期时间(用于自动刷新)
 
   // 亚马逊 SP-API(LWA 授权)
-  amazonRefreshToken   String?
-  amazonLwaClientId    String?
-  amazonLwaClientSecret String?
-  amazonAwsAccessKeyId  String?
+  amazonRefreshToken       String?
+  amazonLwaClientId        String?
+  amazonLwaClientSecret    String?
+  amazonAwsAccessKeyId     String?
   amazonAwsSecretAccessKey String?
-  amazonSellerId       String?
-  amazonMarketplaceId  String? @default("ATVPDKIKX0DER") // 默认美国站
-  amazonRegion         String? @default("na")            // na / eu / fe
+  amazonSellerId           String?
+  amazonMarketplaceId      String? @default("ATVPDKIKX0DER") // 默认美国站
+  amazonRegion             String? @default("na") // na / eu / fe
 
   // 虾皮 Shopee Open Platform
   shopeePartnerId      String?
@@ -101,7 +102,7 @@ model SystemSettings {
   shopeeAccessToken    String?
   shopeeRefreshToken   String?
   shopeeTokenExpiresAt DateTime? // Shopee access_token 4h 过期,用于自动刷新
-  shopeeRegion         String? @default("https://partner.shopeemobile.com") // API base
+  shopeeRegion         String?   @default("https://partner.shopeemobile.com") // API base
 
   // AfterShip
   aftershipApiKey String?
@@ -115,44 +116,44 @@ model SystemSettings {
   // 全局自动回复模式:OFF=仅翻译 / DRAFT=AI生成草稿待人工确认 / AUTO=低风险自动发
   autoReplyMode  String  @default("DRAFT")
 
-  updatedAt     DateTime @updatedAt
+  updatedAt DateTime @updatedAt
 }
 
 // --- 模块三：客户资源 ---
 
 model Company {
-  id           String   @id @default(cuid())
-  customerCode String?  @unique
+  id           String       @id @default(cuid())
+  customerCode String?      @unique
   name         String
   website      String?
   country      String?
   industry     String?
   type         CustomerType @default(INQUIRY)
-  source       String   @default("EMAIL")
-  isPublic     Boolean  @default(false)
+  source       String       @default("EMAIL")
+  isPublic     Boolean      @default(false)
 
-  priorityScore   Int      @default(0)
-  mainProducts    String?  @db.Text
-  customerProfile String?  @db.Text
-  painPoints      String?  @db.Text
-  competitors     String?  @db.Text
-  nextAction      String?  @db.Text
+  priorityScore   Int       @default(0)
+  mainProducts    String?   @db.Text
+  customerProfile String?   @db.Text
+  painPoints      String?   @db.Text
+  competitors     String?   @db.Text
+  nextAction      String?   @db.Text
   lastProfiledAt  DateTime?
 
-  ownerId      String?
-  owner        User?    @relation(fields: [ownerId], references: [id])
+  ownerId String?
+  owner   User?   @relation(fields: [ownerId], references: [id])
 
-  contacts     Contact[]
-  opportunities Opportunity[]
-  followUps    FollowUp[]
-  attendances  AttendanceRequest[]
+  contacts         Contact[]
+  opportunities    Opportunity[]
+  followUps        FollowUp[]
+  attendances      AttendanceRequest[]
   whatsappMessages WhatsAppMessage[]
   socialMessages   SocialMessage[]
   inboxMessages    InboxMessage[]
   salesTasks       SalesTask[]
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 enum CustomerType {
@@ -168,16 +169,16 @@ enum CustomerType {
 }
 
 model Contact {
-  id         String   @id @default(cuid())
+  id         String  @id @default(cuid())
   firstName  String
   lastName   String?
-  email      String?  @unique
+  email      String? @unique
   phone      String?
   title      String?
-  externalId String?  @unique
+  externalId String? @unique
 
   companyId String
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 }
@@ -185,29 +186,29 @@ model Contact {
 // --- 模块五：产品库 ---
 
 model Product {
-  id           String   @id @default(cuid())
-  sku          String   @unique
-  name         String
-  enName       String?
-  category     String
+  id       String  @id @default(cuid())
+  sku      String  @unique
+  name     String
+  enName   String?
+  category String
 
-  wavelength   String?
-  maxRange     Int?
-  blindZone    Int?
+  wavelength String?
+  maxRange   Int?
+  blindZone  Int?
 
   basePriceUSD Float?
   basePriceCNY Float?
 
-  hsCode       String?
-  specifications String?
-  material     String?
-  usage        String?
-  brand        String?
-  origin       String?
-  unit         String?
+  hsCode           String?
+  specifications   String?
+  material         String?
+  usage            String?
+  brand            String?
+  origin           String?
+  unit             String?
   customsCondition String?
 
-  isActive     Boolean  @default(true)
+  isActive Boolean @default(true)
 
   opportunities Opportunity[]
 }
@@ -229,26 +230,27 @@ model Opportunity {
   lostReason      String?
   lostDetail      String?  @db.Text
 
-  companyId       String
-  company         Company  @relation(fields: [companyId], references: [id])
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
 
-  ownerId         String?
-  owner           User?    @relation(fields: [ownerId], references: [id])
+  ownerId String?
+  owner   User?   @relation(fields: [ownerId], references: [id])
 
-  lockedPiData    Json?
-  lockedCiData    Json?
-  lockedPlData    Json?
-  lockedContract  Json?
-  customsData     Json?
+  lockedPiData   Json?
+  lockedCiData   Json?
+  lockedPlData   Json?
+  lockedContract Json?
+  customsData    Json?
 
-  expenses      ExpenseClaim[]
-  shipments     Shipment[]
+  expenses       ExpenseClaim[]
+  shipments      Shipment[]
   salesTasks     SalesTask[]
-  carrier         String?
-  trackingNumber  String?
+  stageHistory   OpportunityStageHistory[]
+  carrier        String?
+  trackingNumber String?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 enum OppStage {
@@ -261,10 +263,32 @@ enum OppStage {
   CLOSED_LOST
 }
 
+model OpportunityStageHistory {
+  id            String      @id @default(cuid())
+  opportunityId String
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  fromStage    OppStage?
+  toStage      OppStage
+  durationDays Int?
+  amountUSD    Float?
+  note         String?   @db.Text
+
+  changedById String?
+  changedBy   User?   @relation("OpportunityStageChangedBy", fields: [changedById], references: [id], onDelete: SetNull)
+
+  changedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([opportunityId, changedAt])
+  @@index([toStage, changedAt])
+  @@index([changedById, changedAt])
+}
+
 // --- 模块七：供货商 ---
 
 model Supplier {
-  id            String   @id @default(cuid())
+  id            String  @id @default(cuid())
   name          String
   category      String?
   contactPerson String?
@@ -275,45 +299,45 @@ model Supplier {
 
   purchaseOrders PurchaseOrder[]
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model PurchaseOrder {
-  id            String   @id @default(cuid())
-  poNumber      String   @unique
-  supplierId    String
-  supplier      Supplier @relation(fields: [supplierId], references: [id])
+  id             String   @id @default(cuid())
+  poNumber       String   @unique
+  supplierId     String
+  supplier       Supplier @relation(fields: [supplierId], references: [id])
   totalAmountCNY Float
-  status        String   @default("PENDING")
-  orderDetails  Json
+  status         String   @default("PENDING")
+  orderDetails   Json
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // --- 模块十：邮箱聚合 ---
 
 model EmailAccount {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  imapHost  String   @default("imap.gmail.com")
-  imapPort  Int      @default(993)
-  isSecure  Boolean  @default(true)
-  isActive  Boolean  @default(true)
-  
-  messages  EmailMessage[]
-  
+  id       String  @id @default(cuid())
+  email    String  @unique
+  password String
+  imapHost String  @default("imap.gmail.com")
+  imapPort Int     @default(993)
+  isSecure Boolean @default(true)
+  isActive Boolean @default(true)
+
+  messages EmailMessage[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model EmailMessage {
-  id        String   @id @default(cuid())
+  id        String       @id @default(cuid())
   accountId String
   account   EmailAccount @relation(fields: [accountId], references: [id])
-  
+
   messageId String   @unique
   subject   String?
   from      String
@@ -321,37 +345,35 @@ model EmailMessage {
   date      DateTime
   textBody  String?
   htmlBody  String?
-  
-  isRead    Boolean  @default(false)
-  isLead    Boolean  @default(false)
-  category  String   @default("UNCLASSIFIED")
-  categoryReason String?
-  classificationScore Int @default(0)
-  actionRequired Boolean @default(false)
-  classifiedAt DateTime?
-  classificationTags String[] @default([])
-  
+
+  isRead              Boolean   @default(false)
+  isLead              Boolean   @default(false)
+  category            String    @default("UNCLASSIFIED")
+  categoryReason      String?
+  classificationScore Int       @default(0)
+  actionRequired      Boolean   @default(false)
+  classifiedAt        DateTime?
+  classificationTags  String[]  @default([])
+
   createdAt DateTime @default(now())
 
   @@index([category, date])
   @@index([actionRequired, date])
 }
 
-
 model FollowUp {
-  id        String   @id @default(cuid())
-  content   String
-  type      String   @default("NOTE")
-  
+  id      String @id @default(cuid())
+  content String
+  type    String @default("NOTE")
+
   companyId String
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
   createdAt DateTime @default(now())
 }
-
 
 // --- 模块二十:销售指挥台与线索分配 ---
 
@@ -362,23 +384,23 @@ enum SalesAssignmentDistribution {
 }
 
 model SalesAssignmentRule {
-  id          String @id @default(cuid())
+  id          String  @id @default(cuid())
   name        String
   description String?
   isActive    Boolean @default(true)
   priority    Int     @default(100)
 
-  customerTypes CustomerType[]
-  countries     String[]
-  sources       String[]
-  minPriorityScore Int @default(0)
+  customerTypes    CustomerType[]
+  countries        String[]
+  sources          String[]
+  minPriorityScore Int            @default(0)
 
-  ownerIds     String[]
-  distribution SalesAssignmentDistribution @default(ROUND_ROBIN)
+  ownerIds            String[]
+  distribution        SalesAssignmentDistribution @default(ROUND_ROBIN)
   lastAssignedOwnerId String?
 
   createdById String?
-  createdBy   User? @relation(fields: [createdById], references: [id])
+  createdBy   User?                @relation(fields: [createdById], references: [id])
   runs        SalesAssignmentRun[]
 
   createdAt DateTime @default(now())
@@ -388,13 +410,13 @@ model SalesAssignmentRule {
 }
 
 model SalesAssignmentRun {
-  id String @id @default(cuid())
+  id     String              @id @default(cuid())
   ruleId String
-  rule SalesAssignmentRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  rule   SalesAssignmentRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
 
-  scannedCount Int @default(0)
-  assignedCount Int @default(0)
-  summary Json?
+  scannedCount  Int   @default(0)
+  assignedCount Int   @default(0)
+  summary       Json?
 
   createdAt DateTime @default(now())
 
@@ -428,38 +450,38 @@ enum SalesTaskType {
 }
 
 model SalesTask {
-  id          String @id @default(cuid())
+  id          String            @id @default(cuid())
   title       String
-  description String? @db.Text
-  type        SalesTaskType @default(FOLLOW_UP)
+  description String?           @db.Text
+  type        SalesTaskType     @default(FOLLOW_UP)
   priority    SalesTaskPriority @default(NORMAL)
-  status      SalesTaskStatus @default(TODO)
+  status      SalesTaskStatus   @default(TODO)
 
-  dueAt       DateTime?
+  dueAt          DateTime?
   reminderSentAt DateTime?
-  escalatedAt DateTime?
-  completedAt DateTime?
+  escalatedAt    DateTime?
+  completedAt    DateTime?
 
   ownerId     String
-  owner       User @relation("SalesTaskOwner", fields: [ownerId], references: [id])
+  owner       User    @relation("SalesTaskOwner", fields: [ownerId], references: [id])
   createdById String?
-  createdBy   User? @relation("SalesTaskCreatedBy", fields: [createdById], references: [id])
+  createdBy   User?   @relation("SalesTaskCreatedBy", fields: [createdById], references: [id])
 
-  companyId   String
-  company     Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   opportunityId String?
   opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
 
-  source      String @default("MANUAL")
-  sourceRef   String?
+  source    String  @default("MANUAL")
+  sourceRef String?
 
-  draftSubject String?
-  draftBody    String? @db.Text
+  draftSubject     String?
+  draftBody        String?   @db.Text
   draftGeneratedAt DateTime?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([ownerId, status, dueAt])
   @@index([companyId, status, dueAt])
@@ -467,63 +489,62 @@ model SalesTask {
 }
 
 model SalesTaskEscalationPolicy {
-  id             String @id @default(cuid())
+  id             String            @id @default(cuid())
   priority       SalesTaskPriority @unique
-  thresholdHours Int @default(24)
-  isActive       Boolean @default(true)
-  notifyOwner    Boolean @default(true)
-  notifyAdmins   Boolean @default(true)
-  notes          String? @db.Text
+  thresholdHours Int               @default(24)
+  isActive       Boolean           @default(true)
+  notifyOwner    Boolean           @default(true)
+  notifyAdmins   Boolean           @default(true)
+  notes          String?           @db.Text
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // --- 模块二十二:销售 KPI 目标与达成 ---
 
 model SalesKpiTarget {
-  id          String @id @default(cuid())
+  id          String   @id @default(cuid())
   ownerId     String
-  owner       User @relation(fields: [ownerId], references: [id])
+  owner       User     @relation(fields: [ownerId], references: [id])
   periodStart DateTime
 
-  revenueTargetUSD   Float @default(0)
-  wonDealsTarget     Int   @default(0)
-  newCustomersTarget Int   @default(0)
-  completedTasksTarget Int @default(0)
-  onTimeRateTarget   Float @default(0.8)
-  notes       String? @db.Text
+  revenueTargetUSD     Float   @default(0)
+  wonDealsTarget       Int     @default(0)
+  newCustomersTarget   Int     @default(0)
+  completedTasksTarget Int     @default(0)
+  onTimeRateTarget     Float   @default(0.8)
+  notes                String? @db.Text
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([ownerId, periodStart])
   @@index([periodStart])
 }
 
-
 // --- 模块十一：报账 ---
 
 model ExpenseClaim {
-  id          String   @id @default(cuid())
+  id          String         @id @default(cuid())
   title       String
   amount      Float
-  currency    String   @default("CNY")
+  currency    String         @default("CNY")
   category    String
   description String?
   status      ApprovalStatus @default(PENDING)
-  
+
   submittedById String
-  submittedBy   User     @relation("ExpenseSubmittedBy", fields: [submittedById], references: [id])
-  
-  approvedById  String?
-  approvedBy    User?    @relation("ExpenseApprovedBy", fields: [approvedById], references: [id])
-  
+  submittedBy   User   @relation("ExpenseSubmittedBy", fields: [submittedById], references: [id])
+
+  approvedById String?
+  approvedBy   User?   @relation("ExpenseApprovedBy", fields: [approvedById], references: [id])
+
   opportunityId String?
   opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 enum ApprovalStatus {
@@ -536,22 +557,22 @@ enum ApprovalStatus {
 // --- 模块十二：发货 ---
 
 model Shipment {
-  id              String   @id @default(cuid())
-  opportunityId   String
-  opportunity     Opportunity @relation(fields: [opportunityId], references: [id])
-  
-  carrier         String
-  trackingNumber  String?
-  freightCost     Float?
-  status          ShipmentStatus @default(PENDING)
-  
-  shippedAt       DateTime?
+  id            String      @id @default(cuid())
+  opportunityId String
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id])
+
+  carrier        String
+  trackingNumber String?
+  freightCost    Float?
+  status         ShipmentStatus @default(PENDING)
+
+  shippedAt        DateTime?
   estimatedArrival DateTime?
 
-  trackingEvents  TrackingEvent[]
+  trackingEvents TrackingEvent[]
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 enum ShipmentStatus {
@@ -560,31 +581,29 @@ enum ShipmentStatus {
   DELIVERED
 }
 
-
 // --- 模块十三：行政考勤 ---
 
 model AttendanceRequest {
-  id          String   @id @default(cuid())
-  type        String
-  subType     String?
-  startDate   DateTime
-  endDate     DateTime
-  reason      String
-  status      ApprovalStatus @default(PENDING)
-  
+  id        String         @id @default(cuid())
+  type      String
+  subType   String?
+  startDate DateTime
+  endDate   DateTime
+  reason    String
+  status    ApprovalStatus @default(PENDING)
+
   submittedById String
-  submittedBy   User     @relation("AttendanceSubmittedBy", fields: [submittedById], references: [id])
-  
-  approvedById  String?
-  approvedBy    User?    @relation("AttendanceApprovedBy", fields: [approvedById], references: [id])
-  
-  companyId   String?
-  company     Company? @relation(fields: [companyId], references: [id])
+  submittedBy   User   @relation("AttendanceSubmittedBy", fields: [submittedById], references: [id])
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  approvedById String?
+  approvedBy   User?   @relation("AttendanceApprovedBy", fields: [approvedById], references: [id])
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
-
 
 // --- 模块十四：WhatsApp Cloud API ---
 
@@ -594,22 +613,21 @@ enum MessageDirection {
 }
 
 model WhatsAppMessage {
-  id          String   @id @default(cuid())
-  waMessageId String?  @unique
+  id          String           @id @default(cuid())
+  waMessageId String?          @unique
   direction   MessageDirection
-  phoneNumber String   // 对方手机号 (E.164)
+  phoneNumber String // 对方手机号 (E.164)
   contactName String?
   body        String
-  translated  String?  // 翻译为中文后的内容
+  translated  String? // 翻译为中文后的内容
   mediaUrl    String?
-  status      String   @default("DELIVERED") // SENT/DELIVERED/READ/FAILED
+  status      String           @default("DELIVERED") // SENT/DELIVERED/READ/FAILED
 
-  companyId   String?
-  company     Company? @relation(fields: [companyId], references: [id])
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 }
-
 
 // --- 模块十五：社交平台 (FB / LinkedIn) ---
 
@@ -619,42 +637,41 @@ enum SocialPlatform {
 }
 
 model SocialAccount {
-  id          String   @id @default(cuid())
-  platform    SocialPlatform
-  externalId  String   // FB page id 或 LinkedIn URN
-  name        String?
-  accessToken String   @db.Text
-  refreshToken String? @db.Text
-  expiresAt   DateTime?
+  id           String         @id @default(cuid())
+  platform     SocialPlatform
+  externalId   String // FB page id 或 LinkedIn URN
+  name         String?
+  accessToken  String         @db.Text
+  refreshToken String?        @db.Text
+  expiresAt    DateTime?
 
-  userId      String?
-  user        User?    @relation(fields: [userId], references: [id])
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
 
-  messages    SocialMessage[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  messages  SocialMessage[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
 
   @@unique([platform, externalId])
 }
 
 model SocialMessage {
-  id          String   @id @default(cuid())
-  accountId   String
-  account     SocialAccount @relation(fields: [accountId], references: [id])
-  platform    SocialPlatform
-  direction   MessageDirection
-  senderName  String?
-  senderId    String?
-  body        String
-  translated  String?
-  raw         Json?
+  id         String           @id @default(cuid())
+  accountId  String
+  account    SocialAccount    @relation(fields: [accountId], references: [id])
+  platform   SocialPlatform
+  direction  MessageDirection
+  senderName String?
+  senderId   String?
+  body       String
+  translated String?
+  raw        Json?
 
-  companyId   String?
-  company     Company? @relation(fields: [companyId], references: [id])
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 }
-
 
 // --- 模块十六：通知中心 ---
 
@@ -668,18 +685,17 @@ enum NotificationType {
 }
 
 model Notification {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  type      NotificationType
-  title     String
-  body      String?
-  link      String?  // 点击跳转的 URL
-  isRead    Boolean  @default(false)
+  id     String           @id @default(cuid())
+  userId String
+  user   User             @relation(fields: [userId], references: [id])
+  type   NotificationType
+  title  String
+  body   String?
+  link   String? // 点击跳转的 URL
+  isRead Boolean          @default(false)
 
   createdAt DateTime @default(now())
 }
-
 
 // --- 模块十七：物流跟踪事件 ---
 
@@ -692,9 +708,8 @@ model TrackingEvent {
   description String
   occurredAt  DateTime
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 }
-
 
 // --- 模块十八:统一自动化收件箱(全渠道) ---
 
@@ -709,41 +724,41 @@ enum InboxChannel {
 }
 
 enum InboxStatus {
-  NEW          // 新到,未处理
-  AI_DRAFTED   // AI 已生成回复草稿,待人工确认
-  REPLIED      // 已回复(自动或人工)
-  ARCHIVED     // 已归档/忽略
+  NEW // 新到,未处理
+  AI_DRAFTED // AI 已生成回复草稿,待人工确认
+  REPLIED // 已回复(自动或人工)
+  ARCHIVED // 已归档/忽略
 }
 
 model InboxMessage {
-  id          String   @id @default(cuid())
-  channel     InboxChannel
-  direction   MessageDirection
+  id        String           @id @default(cuid())
+  channel   InboxChannel
+  direction MessageDirection
 
-  externalId  String?  // 平台侧消息 id(去重)
-  threadId    String?  // 平台侧会话 id(归并同一客户对话)
-  senderId    String   // 手机号/平台用户名/店铺账号
-  senderName  String?
+  externalId String? // 平台侧消息 id(去重)
+  threadId   String? // 平台侧会话 id(归并同一客户对话)
+  senderId   String // 手机号/平台用户名/店铺账号
+  senderName String?
 
-  originalText   String  @db.Text         // 客户原文
-  detectedLang   String?                   // 检测到的客户语言
-  translatedText String? @db.Text         // 译为中文
+  originalText   String  @db.Text // 客户原文
+  detectedLang   String? // 检测到的客户语言
+  translatedText String? @db.Text // 译为中文
 
   // AI 自动回复结果
-  intent         String?                   // 意图分类
-  aiReplyZh      String? @db.Text         // AI 中文回复草稿
-  aiReplyCustomer String? @db.Text        // 译成客户语言的回复
-  aiAutoSendable Boolean @default(false)   // AI 是否建议可自动发
+  intent          String? // 意图分类
+  aiReplyZh       String? @db.Text // AI 中文回复草稿
+  aiReplyCustomer String? @db.Text // 译成客户语言的回复
+  aiAutoSendable  Boolean @default(false) // AI 是否建议可自动发
 
-  status      InboxStatus @default(NEW)
-  mediaUrl    String?
+  status   InboxStatus @default(NEW)
+  mediaUrl String?
 
-  companyId   String?
-  company     Company? @relation(fields: [companyId], references: [id])
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
 
-  sentAt      DateTime?                     // 平台原始时间
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  sentAt    DateTime? // 平台原始时间
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@unique([channel, externalId])
   @@index([channel, status])
@@ -778,22 +793,22 @@ enum AutomationRunStatus {
 }
 
 model AutomationFlow {
-  id          String @id @default(cuid())
-  flowCode    String @unique
+  id          String            @id @default(cuid())
+  flowCode    String            @unique
   name        String
   description String?
-  category    String @default("default")
+  category    String            @default("default")
   templateKey String?
   channel     AutomationChannel @default(ALL)
-  status      AutomationStatus @default(DRAFT)
+  status      AutomationStatus  @default(DRAFT)
 
-  triggerType   String
-  triggerConfig Json?
-  conditionType String?
+  triggerType     String
+  triggerConfig   Json?
+  conditionType   String?
   conditionConfig Json?
-  actionType    String
-  actionConfig  Json?
-  canvas        Json?
+  actionType      String
+  actionConfig    Json?
+  canvas          Json?
 
   triggerCount       Int   @default(0)
   uniqueContactCount Int   @default(0)
@@ -810,7 +825,7 @@ model AutomationFlow {
 }
 
 model AutomationRun {
-  id     String @id @default(cuid())
+  id     String         @id @default(cuid())
   flowId String
   flow   AutomationFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
 
@@ -818,13 +833,13 @@ model AutomationRun {
   channel        AutomationChannel
   contactKey     String?
   status         AutomationRunStatus
-  matched        Boolean @default(false)
+  matched        Boolean             @default(false)
   summary        String?
   input          Json?
   output         Json?
 
   userId String?
-  user   User? @relation(fields: [userId], references: [id])
+  user   User?   @relation(fields: [userId], references: [id])
 
   createdAt DateTime @default(now())
 

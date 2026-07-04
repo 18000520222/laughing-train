@@ -1,10 +1,21 @@
 import { prisma } from '@/lib/prisma';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import nodemailer from 'nodemailer';
 import { translateText } from '@/lib/translate';
 
 export const dynamic = 'force-dynamic';
+
+const STAGE_LABEL: Record<string, string> = {
+  UNPROCESSED: '未处理',
+  REPLIED: '已回复',
+  QUOTING: '报价中',
+  NEGOTIATING: '谈判中',
+  SPEC_CONFIRMING: '规格确认',
+  CLOSED_WON: '已成交',
+  CLOSED_LOST: '已流失',
+};
 
 
 // 动作 1：常规业务保存 (改金额、改公司、改阶段)
@@ -20,23 +31,58 @@ async function updateOpportunity(formData: FormData) {
   const lostDetail = String(formData.get('lostDetail') || '').trim();
 
   if (!oppId) return;
-  const existing = await prisma.opportunity.findUnique({ where: { id: oppId }, select: { stage: true } });
+  if (!STAGE_LABEL[stage]) return;
+  const existing = await prisma.opportunity.findUnique({
+    where: { id: oppId },
+    select: { stage: true, stageChangedAt: true, updatedAt: true },
+  });
   if (!existing) return;
 
-  await prisma.opportunity.update({
-    where: { id: oppId },
-    data: {
-      amountUSD: amount,
-      companyId,
-      stage: stage as any,
-      stageChangedAt: existing.stage === stage ? undefined : new Date(),
-      productId: productId || null,
-      nextStep: nextStep || null,
-      lostReason: stage === 'CLOSED_LOST' ? (lostReason || '未填写原因') : null,
-      lostDetail: stage === 'CLOSED_LOST' ? (lostDetail || null) : null,
-    }
-  });
-  redirect('/dashboard');
+  const changedAt = new Date();
+  const stageChanged = existing.stage !== stage;
+  const email = cookies().get('auth_email')?.value || '';
+  const actor = email ? await prisma.user.findUnique({ where: { email }, select: { id: true } }) : null;
+  const updateData = {
+    amountUSD: amount,
+    companyId,
+    stage: stage as any,
+    stageChangedAt: stageChanged ? changedAt : undefined,
+    productId: productId || null,
+    nextStep: nextStep || null,
+    lostReason: stage === 'CLOSED_LOST' ? (lostReason || '未填写原因') : null,
+    lostDetail: stage === 'CLOSED_LOST' ? (lostDetail || null) : null,
+  };
+
+  if (stageChanged) {
+    const previousStageAt = existing.stageChangedAt || existing.updatedAt;
+    const durationDays = previousStageAt
+      ? Math.max(0, Math.floor((changedAt.getTime() - new Date(previousStageAt).getTime()) / 86400000))
+      : null;
+    await prisma.$transaction([
+      prisma.opportunity.update({
+        where: { id: oppId },
+        data: updateData,
+      }),
+      prisma.opportunityStageHistory.create({
+        data: {
+          opportunityId: oppId,
+          fromStage: existing.stage as any,
+          toStage: stage as any,
+          durationDays,
+          amountUSD: amount,
+          note: nextStep || lostDetail || null,
+          changedById: actor?.id || null,
+          changedAt,
+        },
+      }),
+    ]);
+  } else {
+    await prisma.opportunity.update({
+      where: { id: oppId },
+      data: updateData,
+    });
+  }
+  redirect(`/opportunity/${oppId}`);
 }
 
 // 动作 2：发送邮件并记录到 CRM 历史
@@ -112,7 +158,17 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
     prisma.company.findMany({ orderBy: { updatedAt: 'desc' }, take: 500, select: { id: true, name: true, customerCode: true, country: true } }),
   ]);
   const opp = await prisma.opportunity.findUnique({
-    where: { id: String(oppId) }, include: { product: true, company: true, owner: true }
+    where: { id: String(oppId) },
+    include: {
+      product: true,
+      company: true,
+      owner: true,
+      stageHistory: {
+        orderBy: { changedAt: 'desc' },
+        take: 12,
+        include: { changedBy: { select: { name: true, email: true } } },
+      },
+    },
   });
 
   if (!opp) return <div className="p-10">找不到该商机</div>;
@@ -168,6 +224,36 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
                   这个商机在当前阶段已停留 {stageAgeDays} 天,需要尽快跟进或更新阶段。
                 </div>
               )}
+
+              <div className="mb-4 rounded-xl border border-gray-100 bg-gray-50 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-black text-gray-800">阶段历史快照</h3>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-gray-500">{opp.stageHistory.length} 次变更</span>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {opp.stageHistory.map((item) => (
+                    <div key={item.id} className="rounded-lg border border-gray-100 bg-white px-3 py-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-xs font-black text-gray-900">
+                          {stageLabel(item.fromStage)} → {stageLabel(item.toStage)}
+                        </div>
+                        <span className="rounded-full bg-slate-50 px-2 py-1 text-[11px] font-black text-slate-600">
+                          停留 {formatStageTransitionDuration(item.durationDays)}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-[11px] font-bold text-gray-400">
+                        {formatStageDate(item.changedAt)} · {item.changedBy?.name || item.changedBy?.email || '系统记录'} · 金额 ${(item.amountUSD || 0).toLocaleString()}
+                      </div>
+                      {item.note && <div className="mt-1 line-clamp-2 text-xs font-medium text-gray-500">{item.note}</div>}
+                    </div>
+                  ))}
+                  {opp.stageHistory.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-gray-200 bg-white p-4 text-center text-xs font-bold text-gray-400">
+                      暂无阶段变更历史。下次推进阶段时会自动沉淀快照。
+                    </div>
+                  )}
+                </div>
+              </div>
               
               {/* 正文与智能翻译阅读区 */}
               {translatedDesc ? (
@@ -370,4 +456,23 @@ function StatusCard({ label, value, tone = 'slate' }: { label: string; value: st
       <div className="mt-1 text-sm font-bold line-clamp-2">{value}</div>
     </div>
   );
+}
+
+function stageLabel(stage: string | null | undefined) {
+  if (!stage) return '初始';
+  return STAGE_LABEL[stage] || stage;
+}
+
+function formatStageTransitionDuration(days: number | null | undefined) {
+  if (days === null || days === undefined) return '-';
+  return `${days} 天`;
+}
+
+function formatStageDate(date: Date) {
+  return new Date(date).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }

@@ -310,6 +310,7 @@ export default async function SalesCommandPage() {
     .sort((a, b) => b.radar.score - a.radar.score)
     .slice(0, 6);
   const actionAttribution = await buildSalesActionAttributionReport({ since: thirtyDaysAgo, until: new Date() });
+  const stageVelocity = await buildOpportunityStageVelocityReport({ since: thirtyDaysAgo, until: new Date() });
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
@@ -394,6 +395,57 @@ export default async function SalesCommandPage() {
                 </div>
               ))}
               {actionAttribution.topOutcomes.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无近期推进结果。</div>}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">商机阶段速度复盘</h2>
+            <p className="mt-1 text-xs text-gray-400">近 30 天阶段变更历史,按进入阶段统计停留时长、赢单前速度和慢流转商机。</p>
+          </div>
+          <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">Stage velocity</span>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <AttributionMetric label="阶段变更" value={stageVelocity.totalChanges} detail={`覆盖 ${stageVelocity.opportunityCount} 个商机`} tone={stageVelocity.totalChanges > 0 ? 'blue' : 'gray'} />
+          <AttributionMetric label="平均停留" value={stageVelocity.avgDurationLabel} detail="变更前所在阶段" tone={stageVelocity.avgDurationDays > 0 ? 'amber' : 'gray'} />
+          <AttributionMetric label="赢单前平均" value={stageVelocity.wonAvgDurationLabel} detail={`${stageVelocity.wonChanges} 次赢单变更`} tone={stageVelocity.wonChanges > 0 ? 'emerald' : 'gray'} />
+          <AttributionMetric label="超7天变更" value={stageVelocity.slowChanges} detail="需要复盘堵点" tone={stageVelocity.slowChanges > 0 ? 'violet' : 'gray'} />
+          <AttributionMetric label="历史金额" value={`$${Math.round(stageVelocity.snapshotRevenue).toLocaleString()}`} detail="变更时金额快照" tone={stageVelocity.snapshotRevenue > 0 ? 'emerald' : 'gray'} />
+        </div>
+        <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{stageVelocity.recommendation}</div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_1.2fr]">
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">按进入阶段</h3>
+            <div className="mt-3 space-y-3">
+              {stageVelocity.byStage.map((item) => (
+                <AttributionBar
+                  key={item.stage}
+                  label={item.stageLabel}
+                  value={item.avgDurationDays}
+                  max={stageVelocity.maxStageDuration}
+                  detail={`${item.changes} 次 · 赢单 ${item.wonChanges} · 金额 $${Math.round(item.revenue).toLocaleString()}`}
+                />
+              ))}
+              {stageVelocity.byStage.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无阶段历史。推进阶段后自动生成速度复盘。</div>}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">慢流转商机</h3>
+            <div className="mt-3 space-y-2">
+              {stageVelocity.slowTransitions.map((item) => (
+                <div key={item.id} className="rounded-lg bg-gray-50 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Link href={`/opportunity/${item.opportunityId}`} className="min-w-0 truncate text-xs font-black text-indigo-700 hover:underline">{item.title}</Link>
+                    <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] font-black text-rose-600">{item.durationDays} 天</span>
+                  </div>
+                  <div className="mt-1 text-[11px] font-bold text-gray-500">{item.companyName} · {item.ownerName}</div>
+                  <div className="mt-1 text-[11px] font-bold text-gray-400">{item.fromStageLabel} → {item.toStageLabel} · {item.changedAtLabel} · ${Math.round(item.amountUSD).toLocaleString()}</div>
+                </div>
+              ))}
+              {stageVelocity.slowTransitions.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">近 30 天暂无超过 7 天才推进的阶段变更。</div>}
             </div>
           </div>
         </div>
@@ -723,6 +775,114 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: st
       <div className="mt-1 text-2xl font-black">{value}</div>
     </div>
   );
+}
+
+async function buildOpportunityStageVelocityReport({ since, until }: { since: Date; until: Date }) {
+  const rows = await prisma.opportunityStageHistory.findMany({
+    where: { changedAt: { gte: since, lt: until } },
+    include: {
+      opportunity: { include: { company: true, owner: true } },
+      changedBy: { select: { name: true, email: true } },
+    },
+    orderBy: { changedAt: 'desc' },
+    take: 500,
+  });
+  if (rows.length === 0) return emptyOpportunityStageVelocity();
+
+  const opportunityCount = new Set(rows.map((row) => row.opportunityId)).size;
+  const durationRows = rows.filter((row) => typeof row.durationDays === 'number');
+  const totalDuration = durationRows.reduce((sum, row) => sum + (row.durationDays || 0), 0);
+  const avgDurationDays = durationRows.length > 0 ? totalDuration / durationRows.length : 0;
+  const wonRows = rows.filter((row) => row.toStage === 'CLOSED_WON' && typeof row.durationDays === 'number');
+  const wonAvgDurationDays = wonRows.length > 0 ? wonRows.reduce((sum, row) => sum + (row.durationDays || 0), 0) / wonRows.length : 0;
+  const slowRows = rows.filter((row) => (row.durationDays || 0) >= 7);
+  const snapshotRevenue = rows.reduce((sum, row) => sum + (row.amountUSD || 0), 0);
+
+  const byStage = new Map<string, any>();
+  for (const row of rows) {
+    const key = row.toStage;
+    const current = byStage.get(key) || {
+      stage: key,
+      stageLabel: STAGE_LABEL[key] || key,
+      changes: 0,
+      durationTotal: 0,
+      durationCount: 0,
+      avgDurationDays: 0,
+      wonChanges: 0,
+      revenue: 0,
+    };
+    current.changes += 1;
+    if (typeof row.durationDays === 'number') {
+      current.durationTotal += row.durationDays;
+      current.durationCount += 1;
+    }
+    if (row.toStage === 'CLOSED_WON') current.wonChanges += 1;
+    current.revenue += row.amountUSD || 0;
+    current.avgDurationDays = current.durationCount > 0 ? current.durationTotal / current.durationCount : 0;
+    byStage.set(key, current);
+  }
+
+  const byStageRows = Array.from(byStage.values())
+    .map((row) => ({ ...row, avgDurationDays: Number(formatLocalNumber(row.avgDurationDays)) }))
+    .sort((a, b) => b.avgDurationDays - a.avgDurationDays || b.changes - a.changes);
+
+  const slowTransitions = slowRows
+    .sort((a, b) => (b.durationDays || 0) - (a.durationDays || 0))
+    .slice(0, 8)
+    .map((row) => ({
+      id: row.id,
+      opportunityId: row.opportunityId,
+      title: row.opportunity.title,
+      companyName: row.opportunity.company.name,
+      ownerName: row.opportunity.owner?.name || row.opportunity.owner?.email || row.changedBy?.name || row.changedBy?.email || '未分配',
+      fromStageLabel: row.fromStage ? STAGE_LABEL[row.fromStage] || row.fromStage : '初始',
+      toStageLabel: STAGE_LABEL[row.toStage] || row.toStage,
+      durationDays: row.durationDays || 0,
+      amountUSD: row.amountUSD || 0,
+      changedAtLabel: row.changedAt.toLocaleDateString('zh-CN'),
+    }));
+
+  return {
+    totalChanges: rows.length,
+    opportunityCount,
+    avgDurationDays,
+    avgDurationLabel: `${formatLocalNumber(avgDurationDays)} 天`,
+    wonChanges: wonRows.length,
+    wonAvgDurationLabel: wonRows.length > 0 ? `${formatLocalNumber(wonAvgDurationDays)} 天` : '-',
+    slowChanges: slowRows.length,
+    snapshotRevenue,
+    byStage: byStageRows,
+    slowTransitions,
+    maxStageDuration: Math.max(1, ...byStageRows.map((row) => row.avgDurationDays)),
+    recommendation: stageVelocityRecommendation({ totalChanges: rows.length, avgDurationDays, wonChanges: wonRows.length, slowChanges: slowRows.length, slowTransitions }),
+  };
+}
+
+function emptyOpportunityStageVelocity() {
+  return {
+    totalChanges: 0,
+    opportunityCount: 0,
+    avgDurationDays: 0,
+    avgDurationLabel: '-',
+    wonChanges: 0,
+    wonAvgDurationLabel: '-',
+    slowChanges: 0,
+    snapshotRevenue: 0,
+    byStage: [],
+    slowTransitions: [],
+    maxStageDuration: 1,
+    recommendation: '暂无阶段历史数据。后续每次在商机详情页推进阶段,系统都会自动沉淀阶段快照,用于判断漏斗速度。',
+  };
+}
+
+function stageVelocityRecommendation(input: { totalChanges: number; avgDurationDays: number; wonChanges: number; slowChanges: number; slowTransitions: any[] }) {
+  if (input.totalChanges === 0) return '暂无阶段历史数据。先从商机详情页维护阶段,系统会自动记录从哪个阶段推进、停留多久。';
+  if (input.slowChanges > 0) {
+    const top = input.slowTransitions[0];
+    return `近 30 天有 ${input.slowChanges} 次阶段变更停留超过 7 天;最慢的是“${top?.title || '未知商机'}”,建议复盘报价、样品、规格或付款条件堵点。`;
+  }
+  if (input.wonChanges > 0) return `近 30 天已有 ${input.wonChanges} 次赢单阶段变更,平均阶段停留 ${formatLocalNumber(input.avgDurationDays)} 天;继续沉淀每次阶段推进原因,后续可反推出最佳销售节奏。`;
+  return `近 30 天有 ${input.totalChanges} 次阶段推进,平均停留 ${formatLocalNumber(input.avgDurationDays)} 天;下一步重点把报价到谈判、谈判到赢单的动作写进 CRM。`;
 }
 
 async function buildSalesActionAttributionReport({ since, until }: { since: Date; until: Date }) {
