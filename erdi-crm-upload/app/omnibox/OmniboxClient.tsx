@@ -16,7 +16,13 @@ interface Msg {
   aiAutoSendable: boolean;
   status: string;
   createdAt: string;
-  company?: { id: string; name: string; country?: string | null } | null;
+  company?: {
+    id: string;
+    name: string;
+    country?: string | null;
+    customerCode?: string | null;
+    owner?: { name?: string | null; email?: string | null } | null;
+  } | null;
 }
 
 const CHANNEL_LABEL: Record<string, string> = {
@@ -26,6 +32,7 @@ const CHANNEL_LABEL: Record<string, string> = {
   AMAZON: '亚马逊',
   SHOPEE: '虾皮',
   FACEBOOK: 'Facebook',
+  LINKEDIN: 'LinkedIn',
 };
 const CHANNEL_COLOR: Record<string, string> = {
   EMAIL: 'bg-indigo-100 text-indigo-700',
@@ -34,6 +41,7 @@ const CHANNEL_COLOR: Record<string, string> = {
   AMAZON: 'bg-yellow-100 text-yellow-700',
   SHOPEE: 'bg-red-100 text-red-700',
   FACEBOOK: 'bg-blue-100 text-blue-700',
+  LINKEDIN: 'bg-sky-100 text-sky-700',
 };
 const INTENT_LABEL: Record<string, string> = {
   PRICE_INQUIRY: '询价',
@@ -106,7 +114,7 @@ export default function OmniboxClient({
     }
   }
 
-  const channels = ['', 'EMAIL', 'WHATSAPP', 'ALIBABA', 'AMAZON', 'SHOPEE', 'FACEBOOK'];
+  const channels = ['', 'EMAIL', 'WHATSAPP', 'ALIBABA', 'AMAZON', 'SHOPEE', 'FACEBOOK', 'LINKEDIN'];
   const statuses = ['', 'NEW', 'AI_DRAFTED', 'REPLIED'];
 
   return (
@@ -154,10 +162,18 @@ export default function OmniboxClient({
                   <span className={`text-xs font-bold px-2 py-1 rounded ${CHANNEL_COLOR[m.channel] || 'bg-gray-100 text-gray-600'}`}>
                     {CHANNEL_LABEL[m.channel] || m.channel}
                   </span>
+                  <span className="text-xs font-mono px-2 py-1 rounded bg-slate-100 text-slate-500">
+                    INQ-{new Date(m.createdAt).getFullYear()}-{m.id.slice(-6).toUpperCase()}
+                  </span>
                   <span className="font-bold text-gray-800">{m.senderName || m.senderId}</span>
                   {m.company && (
                     <span className="text-xs px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded">
-                      🏢 {m.company.name}
+                      🏢 {m.company.customerCode ? `${m.company.customerCode} · ` : ''}{m.company.name}
+                    </span>
+                  )}
+                  {m.company?.owner && (
+                    <span className="text-xs px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded">
+                      负责人:{m.company.owner.name || m.company.owner.email}
                     </span>
                   )}
                   {m.detectedLang && m.detectedLang !== 'auto' && (

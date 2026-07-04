@@ -16,7 +16,7 @@ export default async function OmniboxPage() {
     where: { direction: 'IN' },
     orderBy: { createdAt: 'desc' },
     take: 100,
-    include: { company: { select: { id: true, name: true, country: true } } },
+    include: { company: { select: { id: true, name: true, country: true, customerCode: true, owner: { select: { name: true, email: true } } } } },
   });
 
   const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });

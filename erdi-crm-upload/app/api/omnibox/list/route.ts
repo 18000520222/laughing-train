@@ -17,7 +17,7 @@ export async function GET(req: Request) {
     where,
     orderBy: { createdAt: 'desc' },
     take: 100,
-    include: { company: { select: { id: true, name: true, country: true } } },
+    include: { company: { select: { id: true, name: true, country: true, customerCode: true, owner: { select: { name: true, email: true } } } } },
   });
 
   return NextResponse.json({ ok: true, messages });

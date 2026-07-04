@@ -10,10 +10,18 @@ const PAGE_SIZE = 30;
 
 const TYPE_LABEL: Record<string, string> = {
   NEW: '新客户',
-  EXISTING: '老客户',
+  EXISTING: '已成交/老客户',
   PROSPECT: '潜在客户',
-  KEY_ACCOUNT: '重点客户',
+  KEY_ACCOUNT: '大客户',
   LOST: '流失客户',
+};
+
+const TYPE_STYLE: Record<string, string> = {
+  NEW: 'bg-sky-50 text-sky-700 border-sky-100',
+  EXISTING: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+  PROSPECT: 'bg-indigo-50 text-indigo-700 border-indigo-100',
+  KEY_ACCOUNT: 'bg-amber-50 text-amber-700 border-amber-100',
+  LOST: 'bg-rose-50 text-rose-700 border-rose-100',
 };
 
 async function addCustomer(formData: FormData) {
@@ -74,39 +82,55 @@ export default async function CustomersPage(props: any) {
 
   const sp = props.searchParams || {};
   const q = String(sp.q || '').trim();
+  const type = String(sp.type || '').trim();
   const page = Math.max(1, parseInt(String(sp.page || '1'), 10) || 1);
 
-  const where = q
-    ? {
-        OR: [
-          { name: { contains: q, mode: 'insensitive' as const } },
-          { customerCode: { contains: q, mode: 'insensitive' as const } },
-          { country: { contains: q, mode: 'insensitive' as const } },
-          { contacts: { some: { email: { contains: q, mode: 'insensitive' as const } } } },
-        ],
-      }
-    : {};
+  const where: any = {};
+  if (q) {
+    where.OR = [
+      { name: { contains: q, mode: 'insensitive' as const } },
+      { customerCode: { contains: q, mode: 'insensitive' as const } },
+      { country: { contains: q, mode: 'insensitive' as const } },
+      { source: { contains: q, mode: 'insensitive' as const } },
+      { owner: { email: { contains: q, mode: 'insensitive' as const } } },
+      { contacts: { some: { email: { contains: q, mode: 'insensitive' as const } } } },
+    ];
+  }
+  if (type) where.type = type;
 
-  const [total, customers] = await Promise.all([
+  const [total, customers, typeCounts, unassignedCount] = await Promise.all([
     prisma.company.count({ where }),
     prisma.company.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      include: { contacts: true, _count: { select: { opportunities: true } } },
+      include: { contacts: true, owner: true, _count: { select: { opportunities: true, inboxMessages: true } } },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
+    prisma.company.groupBy({ by: ['type'], _count: { _all: true } }),
+    prisma.company.count({ where: { ownerId: null } }),
   ]);
 
+  const countByType = Object.fromEntries(typeCounts.map((item) => [item.type, item._count._all]));
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const mkHref = (p: number) => `/customers?${q ? `q=${encodeURIComponent(q)}&` : ''}page=${p}`;
+  const qs = (extra: Record<string, string | number | undefined>) => {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (type) params.set('type', type);
+    Object.entries(extra).forEach(([key, value]) => {
+      if (value !== undefined && value !== '') params.set(key, String(value));
+      if (value === '') params.delete(key);
+    });
+    return params.toString();
+  };
+  const mkHref = (p: number) => `/customers?${qs({ page: p })}`;
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
       <header className="mb-6 flex flex-wrap justify-between items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 tracking-tight">👥 客户管理中心</h1>
-          <p className="text-sm text-gray-500 mt-1">共 {total} 家客户{q ? `（搜索 “${q}”）` : ''}</p>
+          <p className="text-sm text-gray-500 mt-1">共 {total} 家客户{q ? `（搜索 “${q}”）` : ''}{type ? ` · ${TYPE_LABEL[type] || type}` : ''}</p>
         </div>
         <div className="flex gap-2">
           <Link href="/import" className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-2 rounded-lg font-bold hover:bg-blue-100 transition-all">
@@ -142,8 +166,8 @@ export default async function CustomersPage(props: any) {
               <select name="type" defaultValue="PROSPECT" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white">
                 <option value="PROSPECT">潜在客户</option>
                 <option value="NEW">新客户</option>
-                <option value="EXISTING">老客户</option>
-                <option value="KEY_ACCOUNT">重点客户</option>
+                <option value="EXISTING">已成交/老客户</option>
+                <option value="KEY_ACCOUNT">大客户</option>
                 <option value="LOST">流失客户</option>
               </select>
             </div>
@@ -178,8 +202,18 @@ export default async function CustomersPage(props: any) {
         </form>
       </details>
 
+      <section className="mb-6 grid grid-cols-2 md:grid-cols-6 gap-3">
+        <SegmentCard href={`/customers?${qs({ type: '' })}`} active={!type} label="全部客户" value={Object.values(countByType).reduce((sum, n) => sum + n, 0)} />
+        <SegmentCard href={`/customers?${qs({ type: 'PROSPECT', page: 1 })}`} active={type === 'PROSPECT'} label="潜在客户" value={countByType.PROSPECT || 0} />
+        <SegmentCard href={`/customers?${qs({ type: 'NEW', page: 1 })}`} active={type === 'NEW'} label="新客户" value={countByType.NEW || 0} />
+        <SegmentCard href={`/customers?${qs({ type: 'EXISTING', page: 1 })}`} active={type === 'EXISTING'} label="已成交/老客户" value={countByType.EXISTING || 0} />
+        <SegmentCard href={`/customers?${qs({ type: 'KEY_ACCOUNT', page: 1 })}`} active={type === 'KEY_ACCOUNT'} label="大客户" value={countByType.KEY_ACCOUNT || 0} />
+        <SegmentCard href="/omnibox" active={false} label="待分配客户" value={unassignedCount} />
+      </section>
+
       {/* 搜索栏 */}
       <form action="/customers" method="get" className="mb-6 flex gap-3">
+        {type && <input type="hidden" name="type" value={type} />}
         <input
           name="q"
           defaultValue={q}
@@ -204,8 +238,9 @@ export default async function CustomersPage(props: any) {
               <th className="p-4 font-bold text-gray-600 text-sm">公司名称</th>
               <th className="p-4 font-bold text-gray-600 text-sm">类型</th>
               <th className="p-4 font-bold text-gray-600 text-sm">国家</th>
+              <th className="p-4 font-bold text-gray-600 text-sm">来源/负责人</th>
               <th className="p-4 font-bold text-gray-600 text-sm">主要联系人</th>
-              <th className="p-4 font-bold text-gray-600 text-sm">商机数</th>
+              <th className="p-4 font-bold text-gray-600 text-sm">邮件/商机</th>
               <th className="p-4 font-bold text-gray-600 text-sm">操作</th>
             </tr>
           </thead>
@@ -223,19 +258,26 @@ export default async function CustomersPage(props: any) {
                   </Link>
                 </td>
                 <td className="p-4">
-                  <span className="bg-indigo-50 text-indigo-700 px-2 py-1 rounded text-xs font-bold">
+                  <span className={`px-2 py-1 rounded border text-xs font-bold ${TYPE_STYLE[c.type] || 'bg-gray-50 text-gray-600 border-gray-100'}`}>
                     {TYPE_LABEL[c.type] || c.type}
                   </span>
                 </td>
                 <td className="p-4 text-gray-600 text-sm">{c.country || '-'}</td>
                 <td className="p-4 text-gray-600 text-sm">
+                  <div>{c.source || '-'}</div>
+                  <div className="text-xs text-gray-400">{c.owner?.name || c.owner?.email || '未分配'}</div>
+                </td>
+                <td className="p-4 text-gray-600 text-sm">
                   {c.contacts[0]?.firstName || '-'}
                   {c.contacts[0]?.email ? <span className="text-gray-400"> · {c.contacts[0].email}</span> : ''}
                 </td>
-                <td className="p-4">
-                  <span className="bg-green-50 text-green-700 px-2 py-1 rounded text-xs font-bold">
+                <td className="p-4 space-y-1">
+                  <div className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-bold w-fit">
+                    {c._count.inboxMessages} 封/条
+                  </div>
+                  <div className="bg-green-50 text-green-700 px-2 py-1 rounded text-xs font-bold w-fit">
                     {c._count.opportunities} 个商机
-                  </span>
+                  </div>
                 </td>
                 <td className="p-4">
                   <Link href={`/customers/${c.id}`} className="text-blue-600 hover:underline text-sm font-medium">
@@ -272,5 +314,19 @@ export default async function CustomersPage(props: any) {
         </div>
       )}
     </div>
+  );
+}
+
+function SegmentCard({ href, active, label, value }: { href: string; active: boolean; label: string; value: number }) {
+  return (
+    <Link
+      href={href}
+      className={`rounded-xl border p-4 shadow-sm transition-colors ${
+        active ? 'border-indigo-300 bg-indigo-50 text-indigo-900' : 'border-gray-100 bg-white text-gray-700 hover:border-indigo-200'
+      }`}
+    >
+      <div className="text-xs font-bold text-gray-500">{label}</div>
+      <div className="mt-1 text-2xl font-bold">{value}</div>
+    </Link>
   );
 }
