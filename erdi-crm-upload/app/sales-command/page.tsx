@@ -3,8 +3,8 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createDefaultSalesAssignmentRules, executeSalesAssignmentRules } from '@/lib/sales-assignment';
-import { emailCategoryLabel } from '@/lib/email-classifier';
 import { buildSalesRadar } from '@/lib/sales-radar';
+import { buildEmailClassificationAudit, reclassifyEmailMessages } from '@/lib/email-audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -130,6 +130,15 @@ async function executeAssignmentRules() {
   redirect('/sales-command');
 }
 
+async function rerunEmailClassification(formData: FormData) {
+  'use server';
+  await requireAdminUser();
+  const limit = Math.max(1, Math.min(2000, parseInt(String(formData.get('limit') || '500'), 10) || 500));
+  const includeClassified = String(formData.get('includeClassified') || '') === 'true';
+  await reclassifyEmailMessages({ limit, includeClassified });
+  redirect('/sales-command');
+}
+
 async function createRadarTask(formData: FormData) {
   'use server';
   const user = await requireSalesUser();
@@ -237,10 +246,6 @@ export default async function SalesCommandPage() {
     topQueue,
     staleOpportunities,
     lostReasonRows,
-    emailCategoryRows,
-    actionEmailCount,
-    leadEmailCount,
-    unclassifiedEmailCount,
     openTaskCount,
     overdueTaskCount,
     todayTaskCount,
@@ -281,15 +286,6 @@ export default async function SalesCommandPage() {
       orderBy: { _count: { lostReason: 'desc' } },
       take: 8,
     }),
-    prisma.emailMessage.groupBy({
-      by: ['category'],
-      _count: { _all: true },
-      orderBy: { _count: { category: 'desc' } },
-      take: 12,
-    }),
-    prisma.emailMessage.count({ where: { actionRequired: true } }),
-    prisma.emailMessage.count({ where: { isLead: true } }),
-    prisma.emailMessage.count({ where: { category: 'UNCLASSIFIED' } }),
     prisma.salesTask.count({ where: { status: 'TODO' } }),
     prisma.salesTask.count({ where: { status: 'TODO', dueAt: { lt: new Date() } } }),
     prisma.salesTask.count({ where: { status: 'TODO', dueAt: { gte: new Date(), lt: tomorrow } } }),
@@ -311,6 +307,7 @@ export default async function SalesCommandPage() {
     .slice(0, 6);
   const actionAttribution = await buildSalesActionAttributionReport({ since: thirtyDaysAgo, until: new Date() });
   const stageVelocity = await buildOpportunityStageVelocityReport({ since: thirtyDaysAgo, until: new Date() });
+  const emailAudit = await buildEmailClassificationAudit({ sampleLimit: 8 });
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
@@ -455,22 +452,81 @@ export default async function SalesCommandPage() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-bold text-gray-900">Gmail / 邮件分类审计</h2>
-            <p className="text-xs text-gray-400 mt-1">从 EmailMessage 表统计,用于区分询盘、报价、订单、财务、物流、平台通知和营销噪音</p>
+            <p className="text-xs text-gray-400 mt-1">按外贸销售动作审计 CRM 邮件表:询盘、报价、订单、财务、物流、平台通知、营销噪音和低置信复核。</p>
           </div>
-          <div className="flex gap-2 text-xs font-bold">
-            <span className="rounded-lg bg-rose-50 px-3 py-2 text-rose-700">待处理 {actionEmailCount}</span>
-            <span className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-700">线索 {leadEmailCount}</span>
-            <span className="rounded-lg bg-gray-100 px-3 py-2 text-gray-600">未分类 {unclassifiedEmailCount}</span>
+          {canManage && (
+            <div className="flex flex-wrap gap-2">
+              <form action={rerunEmailClassification}>
+                <input type="hidden" name="limit" value="500" />
+                <button className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-100">重跑未分类 500 封</button>
+              </form>
+              <form action={rerunEmailClassification}>
+                <input type="hidden" name="limit" value="500" />
+                <input type="hidden" name="includeClassified" value="true" />
+                <button className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black text-amber-700 hover:bg-amber-100">复核最近 500 封</button>
+              </form>
+            </div>
+          )}
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <AttributionMetric label="邮件总量" value={emailAudit.total} detail={`覆盖率 ${formatLocalPercent(emailAudit.classificationCoverage)}`} tone={emailAudit.total > 0 ? 'blue' : 'gray'} />
+          <AttributionMetric label="待销售动作" value={emailAudit.actionRequired} detail={`动作率 ${formatLocalPercent(emailAudit.actionRate)}`} tone={emailAudit.actionRequired > 0 ? 'rose' : 'gray'} />
+          <AttributionMetric label="线索邮件" value={emailAudit.leads} detail={`线索率 ${formatLocalPercent(emailAudit.leadRate)}`} tone={emailAudit.leads > 0 ? 'emerald' : 'gray'} />
+          <AttributionMetric label="未分类" value={emailAudit.unclassified} detail={`${emailAudit.staleUnclassified} 封超过2天`} tone={emailAudit.unclassified > 0 ? 'amber' : 'gray'} />
+          <AttributionMetric label="低置信" value={emailAudit.lowConfidence} detail="需人工复核" tone={emailAudit.lowConfidence > 0 ? 'violet' : 'gray'} />
+        </div>
+        <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{emailAudit.recommendation}</div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr_1.1fr]">
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">分类分布</h3>
+            <div className="mt-3 space-y-3">
+              {emailAudit.categories.map((row) => (
+                <AttributionBar key={row.category} label={row.label} value={row.count} max={emailAudit.maxCategoryCount} detail={`${formatLocalPercent(row.share)} · ${row.category}`} />
+              ))}
+              {emailAudit.categories.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无邮件分类数据。</div>}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">待动作邮件</h3>
+            <div className="mt-3 space-y-2">
+              {emailAudit.recentActionMessages.map((msg) => (
+                <EmailAuditItem key={msg.id} msg={msg} />
+              ))}
+              {emailAudit.recentActionMessages.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无需要动作的邮件。</div>}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">复核队列</h3>
+            <div className="mt-3 space-y-2">
+              {emailAudit.reviewQueue.map((msg) => (
+                <EmailAuditItem key={msg.id} msg={msg} />
+              ))}
+              {emailAudit.reviewQueue.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无未分类或低置信邮件。</div>}
+            </div>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-          {emailCategoryRows.map((row) => (
-            <div key={row.category} className="rounded-xl border border-gray-100 bg-gray-50 p-4">
-              <div className="text-xs font-bold text-gray-500">{emailCategoryLabel(row.category)}</div>
-              <div className="mt-1 text-2xl font-black text-gray-900">{row._count._all}</div>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">同步邮箱账号</h3>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {emailAudit.accounts.map((account) => (
+                <div key={account.id} className="rounded-lg bg-gray-50 px-3 py-2">
+                  <div className="truncate text-xs font-black text-gray-900">{account.email}</div>
+                  <div className="mt-1 text-[11px] font-bold text-gray-400">{account.isActive ? '启用' : '停用'} · {account.messageCount} 封 · 更新 {account.updatedAtLabel}</div>
+                </div>
+              ))}
+              {emailAudit.accounts.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无同步邮箱账号。</div>}
             </div>
-          ))}
-          {emailCategoryRows.length === 0 && <div className="text-sm text-gray-400">暂无邮件分类数据。</div>}
+          </div>
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">线索邮箱域名</h3>
+            <div className="mt-3 space-y-3">
+              {emailAudit.leadDomains.map((item) => (
+                <AttributionBar key={item.domain} label={item.domain} value={item.count} max={Math.max(1, ...emailAudit.leadDomains.map((row) => row.count))} detail="近 300 封线索邮件抽样" />
+              ))}
+              {emailAudit.leadDomains.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无可统计的线索域名。</div>}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -1069,21 +1125,43 @@ function formatLocalNumber(value: number) {
   return value.toFixed(1).replace(/\\.0$/, '');
 }
 
-function AttributionMetric({ label, value, detail, tone }: { label: string; value: string | number; detail: string; tone: 'blue' | 'emerald' | 'amber' | 'violet' | 'gray' }) {
+function AttributionMetric({ label, value, detail, tone }: { label: string; value: string | number; detail: string; tone: 'blue' | 'emerald' | 'amber' | 'violet' | 'rose' | 'gray' }) {
   const color = tone === 'emerald'
     ? 'border-emerald-100 bg-emerald-50 text-emerald-800'
     : tone === 'amber'
       ? 'border-amber-100 bg-amber-50 text-amber-800'
       : tone === 'violet'
         ? 'border-violet-100 bg-violet-50 text-violet-800'
-        : tone === 'blue'
-          ? 'border-blue-100 bg-blue-50 text-blue-800'
-          : 'border-gray-100 bg-gray-50 text-gray-700';
+        : tone === 'rose'
+          ? 'border-rose-100 bg-rose-50 text-rose-800'
+          : tone === 'blue'
+            ? 'border-blue-100 bg-blue-50 text-blue-800'
+            : 'border-gray-100 bg-gray-50 text-gray-700';
   return (
     <div className={`rounded-xl border p-4 ${color}`}>
       <div className="text-xs font-black opacity-75">{label}</div>
       <div className="mt-1 truncate text-2xl font-black">{value}</div>
       <div className="mt-1 text-xs font-bold opacity-70">{detail}</div>
+    </div>
+  );
+}
+
+function EmailAuditItem({ msg }: { msg: any }) {
+  return (
+    <div className="rounded-lg bg-gray-50 px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 truncate text-xs font-black text-gray-900">{msg.subject}</div>
+        <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] font-black text-gray-600">{msg.classificationScore}</span>
+      </div>
+      <div className="mt-1 truncate text-[11px] font-bold text-gray-500">{msg.from}</div>
+      <div className="mt-1 flex flex-wrap gap-1 text-[11px] font-bold text-gray-400">
+        <span>{msg.categoryLabel}</span>
+        <span>·</span>
+        <span>{msg.dateLabel}</span>
+        <span>·</span>
+        <span>{msg.accountEmail}</span>
+      </div>
+      <div className="mt-1 truncate text-[11px] font-medium text-gray-400">{msg.categoryReason}</div>
     </div>
   );
 }

@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { prisma } from '@/lib/prisma';
-import { classifyEmail } from '@/lib/email-classifier';
+import { reclassifyEmailMessages } from '@/lib/email-audit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -25,43 +24,10 @@ export async function GET(req: Request) {
   const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '500', 10) || 500, 1), 2000);
   const includeClassified = searchParams.get('all') === '1';
 
-  const where = includeClassified ? {} : { category: 'UNCLASSIFIED' };
-  const messages = await prisma.emailMessage.findMany({
-    where,
-    orderBy: { date: 'desc' },
-    take: limit,
-    select: { id: true, from: true, subject: true, textBody: true, htmlBody: true },
-  });
-
-  const counts: Record<string, number> = {};
-  let actionRequired = 0;
-  let leads = 0;
-
-  for (const msg of messages) {
-    const classification = classifyEmail(msg);
-    counts[classification.category] = (counts[classification.category] || 0) + 1;
-    if (classification.actionRequired) actionRequired++;
-    if (classification.isLead) leads++;
-
-    await prisma.emailMessage.update({
-      where: { id: msg.id },
-      data: {
-        isLead: classification.isLead,
-        category: classification.category,
-        categoryReason: classification.categoryReason,
-        classificationScore: classification.classificationScore,
-        actionRequired: classification.actionRequired,
-        classifiedAt: new Date(),
-        classificationTags: classification.classificationTags,
-      },
-    });
-  }
+  const result = await reclassifyEmailMessages({ limit, includeClassified });
 
   return NextResponse.json({
     ok: true,
-    scanned: messages.length,
-    actionRequired,
-    leads,
-    counts,
+    ...result,
   });
 }
