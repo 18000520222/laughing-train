@@ -367,7 +367,7 @@ export default async function TasksPage(props: any) {
     if (view === 'drafted') where.draftGeneratedAt = { not: null };
   }
 
-  const [tasks, openCount, overdueCount, todayCount, doneWeekCount, weekCount, noDueCount, escalatedCount, users, companies, opportunities, weekTasks, ownerTaskRows, ownerDoneRows, completedReportTasks, nextTaskCandidates, escalationPolicies] = await Promise.all([
+  const [tasks, openCount, overdueCount, todayCount, doneWeekCount, weekCount, noDueCount, escalatedCount, users, companies, opportunities, weekTasks, ownerTaskRows, ownerDoneRows, completedReportTasks, nextTaskCandidates, escalationPolicies, openReportTasks, escalatedReportTasks] = await Promise.all([
     prisma.salesTask.findMany({
       where,
       orderBy: [{ dueAt: 'asc' }, { priority: 'desc' }, { createdAt: 'desc' }],
@@ -410,6 +410,18 @@ export default async function TasksPage(props: any) {
       take: 60,
     }),
     canSeeAll ? getSalesTaskEscalationPolicies() : Promise.resolve([]),
+    prisma.salesTask.findMany({
+      where: { ...baseWhere, status: 'TODO' },
+      orderBy: [{ dueAt: 'asc' }, { priority: 'desc' }, { createdAt: 'desc' }],
+      include: { owner: true, company: true },
+      take: 500,
+    }),
+    prisma.salesTask.findMany({
+      where: { ...baseWhere, escalatedAt: { gte: reportStart } },
+      orderBy: { escalatedAt: 'desc' },
+      include: { owner: true, company: true },
+      take: 300,
+    }),
   ]);
 
   const doneByOwner = new Map(ownerDoneRows.map((row) => [row.ownerId, row._count._all]));
@@ -430,6 +442,8 @@ export default async function TasksPage(props: any) {
   const maxOwnerOpen = Math.max(1, ...ownerStats.map((item) => item.open));
   const bulkFormId = 'sales-task-bulk-form';
   const taskReport = buildTaskReport(completedReportTasks, users, { openCount, overdueCount, reportStart });
+  const rhythmReport = buildTaskRhythmReport(completedReportTasks, openReportTasks, { reportStart, now });
+  const slaPolicyEffect = buildSlaPolicyEffectReport(openReportTasks, escalatedReportTasks, escalationPolicies, now);
   const nextTask = pickNextTask(nextTaskCandidates);
   const calendarToken = createTaskCalendarToken({ userId: user.id, email: user.email, role });
   const calendarDownloadParams = new URLSearchParams();
@@ -644,6 +658,68 @@ export default async function TasksPage(props: any) {
               ))}
               {taskReport.ownerRows.length === 0 && <div className="rounded-lg bg-gray-50 p-4 text-center text-xs text-gray-400">近 14 天暂无完成任务。</div>}
             </div>
+          </div>
+        </section>
+      </section>
+
+      <section className="mb-6 grid gap-4 xl:grid-cols-2">
+        <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-black text-gray-900">任务执行节奏</h2>
+              <p className="mt-1 text-xs text-gray-400">看任务在哪些类型、优先级和时段被完成,避免销售动作集中在少数人或临近逾期才处理。</p>
+            </div>
+            <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-600">近14天</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <ReportMetric label="最高完成日" value={rhythmReport.peakDayLabel} />
+            <ReportMetric label="高峰时段" value={rhythmReport.peakHourLabel} />
+            <ReportMetric label="未排期占比" value={formatPercent(rhythmReport.unscheduledRate)} />
+            <ReportMetric label="逾期积压" value={rhythmReport.overdueOpenCount} />
+          </div>
+          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+            <MiniRank title="按任务类型完成" rows={rhythmReport.typeRows} />
+            <MiniRank title="按优先级完成" rows={rhythmReport.priorityRows} />
+          </div>
+          <div className="mt-5">
+            <div className="mb-2 text-xs font-black text-gray-500">完成时段分布</div>
+            <div className="grid gap-2 sm:grid-cols-4">
+              {rhythmReport.hourRows.map((row) => (
+                <div key={row.key} className="rounded-xl bg-gray-50 p-3">
+                  <div className="text-xs font-black text-gray-500">{row.label}</div>
+                  <div className="mt-1 text-xl font-black text-gray-900">{row.count}</div>
+                  <ProgressMini rate={row.rate} />
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-black text-gray-900">SLA 策略效果</h2>
+              <p className="mt-1 text-xs text-gray-400">把策略阈值、当前逾期、已到升级窗口和近14天升级量放在一起看。</p>
+            </div>
+            <Link href="/tasks?view=escalated" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 hover:bg-rose-100">查看升级队列</Link>
+          </div>
+          <div className="space-y-2">
+            {slaPolicyEffect.rows.map((row) => (
+              <div key={row.priority} className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <TaskPriority priority={row.priority} />
+                  <span className={`rounded-full px-2 py-1 text-xs font-black ${row.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>{row.isActive ? `${row.thresholdHours}小时升级` : '已停用'}</span>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                  <TinyMetric label="当前逾期" value={row.overdueCount} tone={row.overdueCount > 0 ? 'amber' : 'slate'} />
+                  <TinyMetric label="已到窗口" value={row.eligibleCount} tone={row.eligibleCount > 0 ? 'rose' : 'slate'} />
+                  <TinyMetric label="14天升级" value={row.escalated14d} tone={row.escalated14d > 0 ? 'rose' : 'slate'} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 rounded-xl bg-rose-50 p-3 text-xs font-bold text-rose-700">
+            {slaPolicyEffect.recommendation}
           </div>
         </section>
       </section>
@@ -977,6 +1053,61 @@ function buildTaskReport(tasks: any[], users: any[], totals: { openCount: number
   };
 }
 
+function buildTaskRhythmReport(completedTasks: any[], openTasks: any[], options: { reportStart: Date; now: Date }) {
+  const dailyTrend = buildCompletionTrend(completedTasks, options.reportStart);
+  const peakDay = [...dailyTrend].sort((a, b) => b.count - a.count)[0];
+  const typeRows = rankCounts(completedTasks.map((task) => TYPE_LABEL[task.type] || task.type), 5);
+  const priorityRows = rankCounts(completedTasks.map((task) => PRIORITY_LABEL[task.priority] || task.priority), 5);
+  const hourRows = buildHourBuckets(completedTasks);
+  const peakHour = [...hourRows].sort((a, b) => b.count - a.count)[0];
+  const unscheduledOpen = openTasks.filter((task) => !task.dueAt).length;
+  const overdueOpen = openTasks.filter((task) => task.dueAt && new Date(task.dueAt).getTime() < options.now.getTime()).length;
+
+  return {
+    peakDayLabel: peakDay && peakDay.count > 0 ? `${peakDay.label} · ${peakDay.count}` : '-',
+    peakHourLabel: peakHour && peakHour.count > 0 ? `${peakHour.label} · ${peakHour.count}` : '-',
+    unscheduledRate: openTasks.length > 0 ? unscheduledOpen / openTasks.length : 0,
+    overdueOpenCount: overdueOpen,
+    typeRows,
+    priorityRows,
+    hourRows,
+  };
+}
+
+function buildSlaPolicyEffectReport(openTasks: any[], escalatedTasks: any[], policies: any[], now: Date) {
+  const rows = ['URGENT', 'HIGH', 'NORMAL', 'LOW'].map((priority) => {
+    const policy = policies.find((item) => item.priority === priority) || {
+      priority,
+      thresholdHours: priority === 'URGENT' ? 2 : priority === 'HIGH' ? 8 : priority === 'NORMAL' ? 24 : 48,
+      isActive: true,
+    };
+    const priorityOpen = openTasks.filter((task) => task.priority === priority);
+    const overdueTasks = priorityOpen.filter((task) => task.dueAt && new Date(task.dueAt).getTime() < now.getTime());
+    const threshold = new Date(now.getTime() - Number(policy.thresholdHours || 24) * 3600000);
+    const eligible = policy.isActive ? overdueTasks.filter((task) => task.dueAt && new Date(task.dueAt).getTime() < threshold.getTime()) : [];
+    return {
+      priority,
+      thresholdHours: Number(policy.thresholdHours || 24),
+      isActive: Boolean(policy.isActive),
+      overdueCount: overdueTasks.length,
+      eligibleCount: eligible.length,
+      escalated14d: escalatedTasks.filter((task) => task.priority === priority).length,
+    };
+  });
+  const eligibleTotal = rows.reduce((sum, row) => sum + row.eligibleCount, 0);
+  const overdueTotal = rows.reduce((sum, row) => sum + row.overdueCount, 0);
+  const escalatedTotal = rows.reduce((sum, row) => sum + row.escalated14d, 0);
+  const recommendation = eligibleTotal > 0
+    ? `当前有 ${eligibleTotal} 个任务已经达到升级窗口,建议立即按策略升级并检查负责人负载。`
+    : overdueTotal > 0
+      ? `当前有 ${overdueTotal} 个逾期任务,但还未达到策略升级窗口;建议先让负责人在任务中心处理。`
+      : escalatedTotal > 0
+        ? `近14天发生 ${escalatedTotal} 次升级,当前无新增升级窗口任务;策略暂时有效。`
+        : '当前没有逾期升级压力,继续保持任务准时完成。';
+
+  return { rows, recommendation };
+}
+
 function buildCompletionTrend(tasks: any[], reportStart: Date) {
   return Array.from({ length: 14 }, (_, index) => {
     const date = new Date(reportStart);
@@ -988,6 +1119,33 @@ function buildCompletionTrend(tasks: any[], reportStart: Date) {
       count: tasks.filter((task) => task.completedAt && dateKey(new Date(task.completedAt)) === key).length,
     };
   });
+}
+
+function buildHourBuckets(tasks: any[]) {
+  const buckets = [
+    { key: 'morning', label: '上午', start: 6, end: 12, count: 0 },
+    { key: 'afternoon', label: '下午', start: 12, end: 18, count: 0 },
+    { key: 'evening', label: '晚上', start: 18, end: 24, count: 0 },
+    { key: 'night', label: '深夜', start: 0, end: 6, count: 0 },
+  ];
+  for (const task of tasks) {
+    if (!task.completedAt) continue;
+    const hour = new Date(task.completedAt).getHours();
+    const bucket = buckets.find((item) => hour >= item.start && hour < item.end) || buckets[3];
+    bucket.count++;
+  }
+  const max = Math.max(1, ...buckets.map((bucket) => bucket.count));
+  return buckets.map((bucket) => ({ ...bucket, rate: bucket.count / max }));
+}
+
+function rankCounts(labels: string[], limit: number) {
+  const counts = new Map<string, number>();
+  labels.forEach((label) => counts.set(label || '未分类', (counts.get(label || '未分类') || 0) + 1));
+  const max = Math.max(1, ...Array.from(counts.values()));
+  return Array.from(counts.entries())
+    .map(([label, count]) => ({ label, count, rate: count / max }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
 }
 
 function average(values: number[]) {
@@ -1080,6 +1238,44 @@ function QueueCard({ href, label, count, note, tone }: { href: string; label: st
         <div className="text-2xl font-black">{count}</div>
       </div>
     </Link>
+  );
+}
+
+function MiniRank({ title, rows }: { title: string; rows: Array<{ label: string; count: number; rate: number }> }) {
+  return (
+    <div>
+      <div className="mb-2 text-xs font-black text-gray-500">{title}</div>
+      <div className="space-y-2">
+        {rows.map((row) => (
+          <div key={row.label} className="rounded-lg bg-gray-50 px-3 py-2">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="truncate font-black text-gray-700">{row.label}</span>
+              <span className="font-bold text-gray-400">{row.count}</span>
+            </div>
+            <ProgressMini rate={row.rate} />
+          </div>
+        ))}
+        {rows.length === 0 && <div className="rounded-lg bg-gray-50 p-4 text-center text-xs text-gray-400">暂无完成记录。</div>}
+      </div>
+    </div>
+  );
+}
+
+function ProgressMini({ rate }: { rate: number }) {
+  return (
+    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-200">
+      <div className="h-full rounded-full bg-indigo-500" style={{ width: `${Math.max(3, Math.round(Math.min(1, rate || 0) * 100))}%` }} />
+    </div>
+  );
+}
+
+function TinyMetric({ label, value, tone }: { label: string; value: number; tone: 'rose' | 'amber' | 'slate' }) {
+  const style = tone === 'rose' ? 'bg-rose-50 text-rose-700' : tone === 'amber' ? 'bg-amber-50 text-amber-700' : 'bg-white text-gray-600';
+  return (
+    <div className={`rounded-lg px-2 py-2 ${style}`}>
+      <div className="text-[11px] font-black opacity-70">{label}</div>
+      <div className="mt-1 text-lg font-black">{value}</div>
+    </div>
   );
 }
 
