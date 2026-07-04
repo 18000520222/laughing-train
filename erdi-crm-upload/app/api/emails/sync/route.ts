@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
+import { classifyEmail } from '@/lib/email-classifier';
 
 
 
@@ -52,11 +53,25 @@ export async function POST() {
           for await (let msg of messages) {
             if (count > 5) break; // Demo/Sync limit
             const parsed = await simpleParser(msg.source as any) as any;
+            const classification = classifyEmail({
+              from: parsed.from?.text || '未知发送者',
+              subject: parsed.subject || '无主题',
+              textBody: parsed.text || '',
+              htmlBody: parsed.html || '',
+            });
             
             // 存入数据库
             await prisma.emailMessage.upsert({
               where: { messageId: parsed.messageId || String(msg.uid) },
-              update: {},
+              update: {
+                isLead: classification.isLead,
+                category: classification.category,
+                categoryReason: classification.categoryReason,
+                classificationScore: classification.classificationScore,
+                actionRequired: classification.actionRequired,
+                classifiedAt: new Date(),
+                classificationTags: classification.classificationTags,
+              },
               create: {
                 accountId: acc.id,
                 messageId: parsed.messageId || String(msg.uid),
@@ -65,7 +80,14 @@ export async function POST() {
                 to: parsed.to?.text || acc.email,
                 date: parsed.date || new Date(),
                 textBody: parsed.text || '',
-                htmlBody: parsed.html || ''
+                htmlBody: parsed.html || '',
+                isLead: classification.isLead,
+                category: classification.category,
+                categoryReason: classification.categoryReason,
+                classificationScore: classification.classificationScore,
+                actionRequired: classification.actionRequired,
+                classifiedAt: new Date(),
+                classificationTags: classification.classificationTags,
               }
             });
             count++;

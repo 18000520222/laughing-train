@@ -4,6 +4,7 @@ import { simpleParser } from 'mailparser';
 import { prisma } from '@/lib/prisma';
 import { ingestInbound } from '@/lib/inbox';
 import type { NormalizedMessage } from '@/lib/channels/types';
+import { classifyEmail } from '@/lib/email-classifier';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -153,6 +154,12 @@ export async function GET(req: Request) {
               const fromName: string = parsed.from?.value?.[0]?.name || parsed.from?.text || fromAddr;
               const subject: string = parsed.subject || '(无主题)';
               const body: string = (parsed.text || '').trim() || subject;
+              const classification = classifyEmail({
+                from: parsed.from?.text || fromAddr,
+                subject,
+                textBody: parsed.text || '',
+                htmlBody: parsed.html || '',
+              });
 
               // 垃圾/营销邮件:不存档、不进 CRM、不建客户。只记 messageId 防下次重复判定。
               const reason = spamReason(parsed);
@@ -167,6 +174,13 @@ export async function GET(req: Request) {
                     date: parsed.date || new Date(),
                     textBody: '', // 垃圾邮件不留正文,只占位去重
                     htmlBody: '',
+                    category: reason === 'spam-subject' ? 'SEO_SPAM' : classification.category,
+                    categoryReason: reason,
+                    classificationScore: Math.min(classification.classificationScore, 20),
+                    actionRequired: false,
+                    isLead: false,
+                    classifiedAt: new Date(),
+                    classificationTags: ['噪音邮件', ...classification.classificationTags],
                   },
                 });
                 stat.noise++;
@@ -185,6 +199,13 @@ export async function GET(req: Request) {
                   date: parsed.date || new Date(),
                   textBody: parsed.text || '',
                   htmlBody: parsed.html || '',
+                  isLead: classification.isLead,
+                  category: classification.category,
+                  categoryReason: classification.categoryReason,
+                  classificationScore: classification.classificationScore,
+                  actionRequired: classification.actionRequired,
+                  classifiedAt: new Date(),
+                  classificationTags: classification.classificationTags,
                 },
               });
 

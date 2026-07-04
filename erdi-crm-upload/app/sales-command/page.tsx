@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createDefaultSalesAssignmentRules, executeSalesAssignmentRules } from '@/lib/sales-assignment';
+import { emailCategoryLabel } from '@/lib/email-classifier';
 
 export const dynamic = 'force-dynamic';
 
@@ -140,6 +141,10 @@ export default async function SalesCommandPage() {
     topQueue,
     staleOpportunities,
     lostReasonRows,
+    emailCategoryRows,
+    actionEmailCount,
+    leadEmailCount,
+    unclassifiedEmailCount,
     ownerRows,
     sourceRows,
   ] = await Promise.all([
@@ -169,6 +174,15 @@ export default async function SalesCommandPage() {
       orderBy: { _count: { lostReason: 'desc' } },
       take: 8,
     }),
+    prisma.emailMessage.groupBy({
+      by: ['category'],
+      _count: { _all: true },
+      orderBy: { _count: { category: 'desc' } },
+      take: 12,
+    }),
+    prisma.emailMessage.count({ where: { actionRequired: true } }),
+    prisma.emailMessage.count({ where: { isLead: true } }),
+    prisma.emailMessage.count({ where: { category: 'UNCLASSIFIED' } }),
     prisma.company.groupBy({ by: ['ownerId'], _count: { _all: true } }),
     prisma.company.groupBy({ by: ['source'], _count: { _all: true }, orderBy: { _count: { source: 'desc' } }, take: 8 }),
   ]);
@@ -200,6 +214,29 @@ export default async function SalesCommandPage() {
         <Metric label="缺下一步动作" value={needsNextAction} tone="amber" />
         <Metric label="7天未动客户" value={staleCustomers} tone="violet" />
         <Metric label="已分配客户" value={assignedTotal} tone="emerald" />
+      </section>
+
+      <section className="mb-6 bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">Gmail / 邮件分类审计</h2>
+            <p className="text-xs text-gray-400 mt-1">从 EmailMessage 表统计,用于区分询盘、报价、订单、财务、物流、平台通知和营销噪音</p>
+          </div>
+          <div className="flex gap-2 text-xs font-bold">
+            <span className="rounded-lg bg-rose-50 px-3 py-2 text-rose-700">待处理 {actionEmailCount}</span>
+            <span className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-700">线索 {leadEmailCount}</span>
+            <span className="rounded-lg bg-gray-100 px-3 py-2 text-gray-600">未分类 {unclassifiedEmailCount}</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          {emailCategoryRows.map((row) => (
+            <div key={row.category} className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+              <div className="text-xs font-bold text-gray-500">{emailCategoryLabel(row.category)}</div>
+              <div className="mt-1 text-2xl font-black text-gray-900">{row._count._all}</div>
+            </div>
+          ))}
+          {emailCategoryRows.length === 0 && <div className="text-sm text-gray-400">暂无邮件分类数据。</div>}
+        </div>
       </section>
 
       <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-6">

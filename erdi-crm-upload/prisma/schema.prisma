@@ -319,8 +319,17 @@ model EmailMessage {
   
   isRead    Boolean  @default(false)
   isLead    Boolean  @default(false)
+  category  String   @default("UNCLASSIFIED")
+  categoryReason String?
+  classificationScore Int @default(0)
+  actionRequired Boolean @default(false)
+  classifiedAt DateTime?
+  classificationTags String[] @default([])
   
   createdAt DateTime @default(now())
+
+  @@index([category, date])
+  @@index([actionRequired, date])
 }
 
 
