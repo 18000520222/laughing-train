@@ -9,20 +9,36 @@ export const dynamic = 'force-dynamic';
 const PAGE_SIZE = 30;
 
 const TYPE_LABEL: Record<string, string> = {
+  INQUIRY: '询盘客户',
+  QUOTED: '已报价客户',
+  CONTRACT_SENT: '已发合同客户',
+  DEAL_WON: '已成交客户',
   NEW: '新客户',
   EXISTING: '已成交/老客户',
   PROSPECT: '潜在客户',
-  KEY_ACCOUNT: '大客户',
+  KEY_ACCOUNT: '老客户/大客户',
   LOST: '流失客户',
 };
 
 const TYPE_STYLE: Record<string, string> = {
+  INQUIRY: 'bg-blue-50 text-blue-700 border-blue-100',
+  QUOTED: 'bg-violet-50 text-violet-700 border-violet-100',
+  CONTRACT_SENT: 'bg-orange-50 text-orange-700 border-orange-100',
+  DEAL_WON: 'bg-emerald-50 text-emerald-700 border-emerald-100',
   NEW: 'bg-sky-50 text-sky-700 border-sky-100',
   EXISTING: 'bg-emerald-50 text-emerald-700 border-emerald-100',
   PROSPECT: 'bg-indigo-50 text-indigo-700 border-indigo-100',
   KEY_ACCOUNT: 'bg-amber-50 text-amber-700 border-amber-100',
   LOST: 'bg-rose-50 text-rose-700 border-rose-100',
 };
+
+const CUSTOMER_SEGMENTS = [
+  { key: 'inquiry', label: '询盘客户', types: ['INQUIRY', 'PROSPECT', 'NEW'] },
+  { key: 'quoted', label: '已报价客户', types: ['QUOTED'] },
+  { key: 'contract', label: '已发合同客户', types: ['CONTRACT_SENT'] },
+  { key: 'won', label: '已成交客户', types: ['DEAL_WON', 'EXISTING'] },
+  { key: 'key', label: '老客户/大客户', types: ['KEY_ACCOUNT'] },
+];
 
 async function addCustomer(formData: FormData) {
   'use server';
@@ -44,7 +60,7 @@ async function addCustomer(formData: FormData) {
     data: {
       name,
       customerCode,
-      type: (s('type') as any) || 'PROSPECT',
+      type: (s('type') as any) || 'INQUIRY',
       country: s('country'),
       industry: s('industry'),
       website: s('website'),
@@ -82,8 +98,9 @@ export default async function CustomersPage(props: any) {
 
   const sp = props.searchParams || {};
   const q = String(sp.q || '').trim();
-  const type = String(sp.type || '').trim();
+  const segment = String(sp.segment || '').trim();
   const page = Math.max(1, parseInt(String(sp.page || '1'), 10) || 1);
+  const activeSegment = CUSTOMER_SEGMENTS.find((item) => item.key === segment);
 
   const where: any = {};
   if (q) {
@@ -96,7 +113,7 @@ export default async function CustomersPage(props: any) {
       { contacts: { some: { email: { contains: q, mode: 'insensitive' as const } } } },
     ];
   }
-  if (type) where.type = type;
+  if (activeSegment) where.type = { in: activeSegment.types as any };
 
   const [total, customers, typeCounts, unassignedCount] = await Promise.all([
     prisma.company.count({ where }),
@@ -112,11 +129,14 @@ export default async function CustomersPage(props: any) {
   ]);
 
   const countByType = Object.fromEntries(typeCounts.map((item) => [item.type, item._count._all]));
+  const countBySegment = Object.fromEntries(
+    CUSTOMER_SEGMENTS.map((item) => [item.key, item.types.reduce((sum, t) => sum + (countByType[t] || 0), 0)])
+  );
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const qs = (extra: Record<string, string | number | undefined>) => {
     const params = new URLSearchParams();
     if (q) params.set('q', q);
-    if (type) params.set('type', type);
+    if (segment) params.set('segment', segment);
     Object.entries(extra).forEach(([key, value]) => {
       if (value !== undefined && value !== '') params.set(key, String(value));
       if (value === '') params.delete(key);
@@ -130,7 +150,7 @@ export default async function CustomersPage(props: any) {
       <header className="mb-6 flex flex-wrap justify-between items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 tracking-tight">👥 客户管理中心</h1>
-          <p className="text-sm text-gray-500 mt-1">共 {total} 家客户{q ? `（搜索 “${q}”）` : ''}{type ? ` · ${TYPE_LABEL[type] || type}` : ''}</p>
+          <p className="text-sm text-gray-500 mt-1">共 {total} 家客户{q ? `（搜索 “${q}”）` : ''}{activeSegment ? ` · ${activeSegment.label}` : ''}</p>
         </div>
         <div className="flex gap-2">
           <Link href="/import" className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-2 rounded-lg font-bold hover:bg-blue-100 transition-all">
@@ -163,11 +183,15 @@ export default async function CustomersPage(props: any) {
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-500 mb-1">客户类型</label>
-              <select name="type" defaultValue="PROSPECT" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white">
-                <option value="PROSPECT">潜在客户</option>
-                <option value="NEW">新客户</option>
-                <option value="EXISTING">已成交/老客户</option>
-                <option value="KEY_ACCOUNT">大客户</option>
+              <select name="type" defaultValue="INQUIRY" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                <option value="INQUIRY">询盘客户</option>
+                <option value="QUOTED">已报价客户</option>
+                <option value="CONTRACT_SENT">已发合同客户</option>
+                <option value="DEAL_WON">已成交客户</option>
+                <option value="KEY_ACCOUNT">老客户/大客户</option>
+                <option value="PROSPECT">潜在客户(旧)</option>
+                <option value="NEW">新客户(旧)</option>
+                <option value="EXISTING">老客户(旧)</option>
                 <option value="LOST">流失客户</option>
               </select>
             </div>
@@ -202,18 +226,17 @@ export default async function CustomersPage(props: any) {
         </form>
       </details>
 
-      <section className="mb-6 grid grid-cols-2 md:grid-cols-6 gap-3">
-        <SegmentCard href={`/customers?${qs({ type: '' })}`} active={!type} label="全部客户" value={Object.values(countByType).reduce((sum, n) => sum + n, 0)} />
-        <SegmentCard href={`/customers?${qs({ type: 'PROSPECT', page: 1 })}`} active={type === 'PROSPECT'} label="潜在客户" value={countByType.PROSPECT || 0} />
-        <SegmentCard href={`/customers?${qs({ type: 'NEW', page: 1 })}`} active={type === 'NEW'} label="新客户" value={countByType.NEW || 0} />
-        <SegmentCard href={`/customers?${qs({ type: 'EXISTING', page: 1 })}`} active={type === 'EXISTING'} label="已成交/老客户" value={countByType.EXISTING || 0} />
-        <SegmentCard href={`/customers?${qs({ type: 'KEY_ACCOUNT', page: 1 })}`} active={type === 'KEY_ACCOUNT'} label="大客户" value={countByType.KEY_ACCOUNT || 0} />
+      <section className="mb-6 grid grid-cols-2 md:grid-cols-7 gap-3">
+        <SegmentCard href={`/customers?${qs({ segment: '', page: 1 })}`} active={!segment} label="全部客户" value={Object.values(countByType).reduce((sum, n) => sum + n, 0)} />
+        {CUSTOMER_SEGMENTS.map((item) => (
+          <SegmentCard key={item.key} href={`/customers?${qs({ segment: item.key, page: 1 })}`} active={segment === item.key} label={item.label} value={countBySegment[item.key] || 0} />
+        ))}
         <SegmentCard href="/omnibox" active={false} label="待分配客户" value={unassignedCount} />
       </section>
 
       {/* 搜索栏 */}
       <form action="/customers" method="get" className="mb-6 flex gap-3">
-        {type && <input type="hidden" name="type" value={type} />}
+        {segment && <input type="hidden" name="segment" value={segment} />}
         <input
           name="q"
           defaultValue={q}

@@ -36,10 +36,14 @@ const CHANNEL_LABEL: Record<string, string> = {
 };
 
 const TYPE_LABEL: Record<string, string> = {
+  INQUIRY: '询盘客户',
+  QUOTED: '已报价客户',
+  CONTRACT_SENT: '已发合同客户',
+  DEAL_WON: '已成交客户',
   NEW: '新客户',
-  EXISTING: '老客户',
+  EXISTING: '已成交/老客户',
   PROSPECT: '潜在客户',
-  KEY_ACCOUNT: '重点客户',
+  KEY_ACCOUNT: '老客户/大客户',
   LOST: '流失客户',
 };
 
@@ -68,7 +72,7 @@ async function updateCustomer(formData: FormData) {
     data: {
       name,
       customerCode: s('customerCode'),
-      type: (s('type') as any) || 'PROSPECT',
+      type: (s('type') as any) || 'INQUIRY',
       country: s('country'),
       industry: s('industry'),
       website: s('website'),
@@ -318,10 +322,14 @@ export default async function CustomerDetailPage(props: any) {
             <div>
               <label className="block text-xs font-semibold text-gray-500 mb-1">客户类型</label>
               <select name="type" defaultValue={company.type} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white">
-                <option value="PROSPECT">潜在客户</option>
-                <option value="NEW">新客户</option>
-                <option value="EXISTING">老客户</option>
-                <option value="KEY_ACCOUNT">重点客户</option>
+                <option value="INQUIRY">询盘客户</option>
+                <option value="QUOTED">已报价客户</option>
+                <option value="CONTRACT_SENT">已发合同客户</option>
+                <option value="DEAL_WON">已成交客户</option>
+                <option value="KEY_ACCOUNT">老客户/大客户</option>
+                <option value="PROSPECT">潜在客户(旧)</option>
+                <option value="NEW">新客户(旧)</option>
+                <option value="EXISTING">老客户(旧)</option>
                 <option value="LOST">流失客户</option>
               </select>
             </div>

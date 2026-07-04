@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       data: {
         title: `新询盘 来自 ${source}`,
         stage: 'SPEC_CONFIRMING', // 默认进入“新询盘确认”阶段
-        company: { create: { name: customerName, source: source, type: 'PROSPECT' } },
+        company: { create: { name: customerName, source: source, type: 'INQUIRY' } },
         description: `🌍 来源平台: ${source}\n👤 客户姓名: ${customerName}\n📧 联系邮箱: ${customerEmail}\n\n📝 留言内容:\n${message}\n\n---\n系统自动接收于: ${new Date().toLocaleString()}`,
         amountUSD: 0,
       }

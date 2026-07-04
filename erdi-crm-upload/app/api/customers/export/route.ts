@@ -5,7 +5,8 @@ import { toCsv } from '@/lib/csv';
 export const dynamic = 'force-dynamic';
 
 const TYPE_LABEL: Record<string, string> = {
-  NEW: '新客户', EXISTING: '老客户', PROSPECT: '潜在客户', KEY_ACCOUNT: '重点客户', LOST: '流失客户',
+  INQUIRY: '询盘客户', QUOTED: '已报价客户', CONTRACT_SENT: '已发合同客户', DEAL_WON: '已成交客户',
+  NEW: '新客户', EXISTING: '已成交/老客户', PROSPECT: '潜在客户', KEY_ACCOUNT: '老客户/大客户', LOST: '流失客户',
 };
 
 export async function GET(req: Request) {

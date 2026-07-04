@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       data: {
         title: `官网新询盘 (Shopline)`,
         stage: 'SPEC_CONFIRMING' as any,
-        company: { create: { name: customerName, source: 'SHOPLINE', type: 'PROSPECT' } },
+        company: { create: { name: customerName, source: 'SHOPLINE', type: 'INQUIRY' } },
         description: `🌍 来源平台: SHOPLINE (erdicn.com)\n👤 客户姓名: ${customerName}\n📧 联系邮箱: ${customerEmail}\n📞 联系电话: ${phone}\n\n📝 备注/留言:\n${note}\n\n---\n接收时间: ${new Date().toLocaleString()}`,
         amountUSD: 0
       }

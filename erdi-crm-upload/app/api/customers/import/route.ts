@@ -7,7 +7,10 @@ import { ensureCustomerCode } from '@/lib/customer-code';
 export const dynamic = 'force-dynamic';
 
 const TYPE_MAP: Record<string, string> = {
+  '询盘客户': 'INQUIRY', '已报价客户': 'QUOTED', '已发合同客户': 'CONTRACT_SENT', '已成交客户': 'DEAL_WON', '老客户/大客户': 'KEY_ACCOUNT',
+  '发合同客户': 'CONTRACT_SENT', '合同客户': 'CONTRACT_SENT', '成交客户': 'DEAL_WON', '大客户': 'KEY_ACCOUNT',
   '新客户': 'NEW', '老客户': 'EXISTING', '潜在客户': 'PROSPECT', '重点客户': 'KEY_ACCOUNT', '流失客户': 'LOST',
+  'INQUIRY': 'INQUIRY', 'QUOTED': 'QUOTED', 'CONTRACT_SENT': 'CONTRACT_SENT', 'DEAL_WON': 'DEAL_WON',
   'NEW': 'NEW', 'EXISTING': 'EXISTING', 'PROSPECT': 'PROSPECT', 'KEY_ACCOUNT': 'KEY_ACCOUNT', 'LOST': 'LOST',
 };
 
@@ -43,7 +46,7 @@ export async function POST(req: Request) {
 
       const codeIn = pick(o, '客户编号', 'customerCode', 'code');
       const typeRaw = pick(o, '客户类型', 'type');
-      const type = TYPE_MAP[typeRaw] || 'PROSPECT';
+      const type = TYPE_MAP[typeRaw] || 'INQUIRY';
       const country = pick(o, '国家', 'country');
       const industry = pick(o, '行业', 'industry');
       const website = pick(o, '官网', 'website');

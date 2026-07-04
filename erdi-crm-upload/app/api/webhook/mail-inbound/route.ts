@@ -119,7 +119,7 @@ ${body_content}`;
           name: aiResult.companyName,
           source: 'EMAIL_INBOUND',
           ownerId: ownerId,
-          type: 'PROSPECT'
+          type: 'INQUIRY'
         }
       });
     }

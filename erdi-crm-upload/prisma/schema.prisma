@@ -123,7 +123,7 @@ model Company {
   website      String?
   country      String?
   industry     String?
-  type         CustomerType @default(PROSPECT)
+  type         CustomerType @default(INQUIRY)
   source       String   @default("EMAIL")
   isPublic     Boolean  @default(false)
 
@@ -143,6 +143,10 @@ model Company {
 }
 
 enum CustomerType {
+  INQUIRY
+  QUOTED
+  CONTRACT_SENT
+  DEAL_WON
   NEW
   EXISTING
   PROSPECT

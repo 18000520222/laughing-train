@@ -61,7 +61,7 @@ export async function POST(req: Request) {
             name: company,
             country: answers['COUNTRY'] || null,
             source: 'LINKEDIN',
-            type: 'PROSPECT',
+            type: 'INQUIRY',
           },
         });
         await prisma.contact.create({

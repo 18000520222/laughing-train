@@ -142,7 +142,7 @@ async function matchOrCreateCompany(msg: NormalizedMessage) {
         data: {
           name: companyName,
           source: 'EMAIL',
-          type: 'PROSPECT',
+          type: 'INQUIRY',
           isPublic: false,
           ownerId: admin?.id ?? undefined,
         },
@@ -188,7 +188,7 @@ async function matchOrCreateCompany(msg: NormalizedMessage) {
     data: {
       name: displayName,
       source: channelSource,
-      type: 'PROSPECT',
+      type: 'INQUIRY',
       isPublic: false,
       ownerId: admin?.id ?? undefined,
     },
