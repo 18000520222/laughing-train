@@ -3,6 +3,7 @@ import { chat, isLLMAvailable } from '@/lib/llm';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { sendSalesTaskReminders } from '@/lib/sales-task-reminders';
 
 export const dynamic = 'force-dynamic';
 
@@ -200,39 +201,89 @@ async function createManualTask(formData: FormData) {
 async function sendDueTaskReminders() {
   'use server';
   const { user, role } = await currentUser();
-  const now = new Date();
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const where: any = {
-    status: 'TODO',
-    dueAt: { lt: tomorrow },
-    reminderSentAt: null,
-  };
-  if (role === 'SALES') where.ownerId = user.id;
+  await sendSalesTaskReminders({ ownerId: role === 'SALES' ? user.id : undefined, limit: 100 });
+  redirect('/tasks');
+}
+
+async function bulkUpdateTasks(formData: FormData) {
+  'use server';
+  const { user, role } = await currentUser();
+  const canSeeAll = role === 'SUPER_ADMIN' || role === 'ADMIN';
+  const ids = formData.getAll('taskId').map((id) => String(id)).filter(Boolean);
+  const action = String(formData.get('bulkAction') || '');
+  if (ids.length === 0 || !action) return;
 
   const tasks = await prisma.salesTask.findMany({
-    where,
+    where: {
+      id: { in: ids },
+      status: 'TODO',
+      ...(canSeeAll ? {} : { ownerId: user.id }),
+    },
+    include: { company: true },
     take: 100,
-    include: { company: true, owner: true },
-    orderBy: [{ dueAt: 'asc' }, { createdAt: 'asc' }],
   });
+  if (tasks.length === 0) return;
 
-  for (const task of tasks) {
-    const overdue = task.dueAt && task.dueAt < now;
-    await prisma.notification.create({
-      data: {
-        userId: task.ownerId,
-        type: 'SYSTEM',
-        title: overdue ? '销售任务已逾期' : '销售任务即将到期',
-        body: `${task.company.name}: ${task.title}`,
-        link: `/tasks`,
-      },
+  const taskIds = tasks.map((task) => task.id);
+  const now = new Date();
+  if (action === 'COMPLETE') {
+    await prisma.salesTask.updateMany({
+      where: { id: { in: taskIds } },
+      data: { status: 'DONE', completedAt: now },
     });
-    await prisma.salesTask.update({
-      where: { id: task.id },
-      data: { reminderSentAt: now },
+    await prisma.followUp.createMany({
+      data: tasks.map((task) => ({
+        companyId: task.companyId,
+        userId: user.id,
+        type: 'TASK',
+        content: `批量完成销售任务: ${task.title}`,
+      })),
     });
   }
+
+  if (action === 'SNOOZE_1' || action === 'SNOOZE_3') {
+    const days = action === 'SNOOZE_1' ? 1 : 3;
+    await Promise.all(tasks.map((task) => {
+      const base = task.dueAt && task.dueAt > now ? new Date(task.dueAt) : new Date(now);
+      base.setDate(base.getDate() + days);
+      return prisma.salesTask.update({
+        where: { id: task.id },
+        data: { dueAt: base, reminderSentAt: null },
+      });
+    }));
+  }
+
+  if (action === 'SET_DUE') {
+    const dueRaw = String(formData.get('bulkDueAt') || '');
+    const dueAt = dueRaw ? new Date(dueRaw) : null;
+    if (dueAt && !Number.isNaN(dueAt.getTime())) {
+      await prisma.salesTask.updateMany({
+        where: { id: { in: taskIds } },
+        data: { dueAt, reminderSentAt: null },
+      });
+    }
+  }
+
+  if (action === 'ASSIGN_OWNER' && canSeeAll) {
+    const ownerId = String(formData.get('bulkOwnerId') || '');
+    const owner = ownerId ? await prisma.user.findUnique({ where: { id: ownerId } }) : null;
+    if (owner) {
+      await prisma.salesTask.updateMany({
+        where: { id: { in: taskIds } },
+        data: { ownerId: owner.id, reminderSentAt: null },
+      });
+      await prisma.notification.createMany({
+        data: tasks.map((task) => ({
+          userId: owner.id,
+          type: 'SYSTEM' as any,
+          title: '销售任务已转派给你',
+          body: `${task.company.name}: ${task.title}`,
+          link: '/tasks',
+        })),
+      });
+    }
+  }
+
   redirect('/tasks');
 }
 
@@ -263,10 +314,12 @@ export default async function TasksPage(props: any) {
     where.status = 'TODO';
     if (view === 'overdue') where.dueAt = { lt: now };
     if (view === 'today') where.dueAt = { gte: now, lt: tomorrow };
+    if (view === 'week') where.dueAt = { gte: now, lt: weekEnd };
+    if (view === 'unscheduled') where.dueAt = null;
     if (view === 'drafted') where.draftGeneratedAt = { not: null };
   }
 
-  const [tasks, openCount, overdueCount, todayCount, doneWeekCount, users, companies, opportunities, weekTasks, ownerTaskRows, ownerDoneRows] = await Promise.all([
+  const [tasks, openCount, overdueCount, todayCount, doneWeekCount, weekCount, noDueCount, users, companies, opportunities, weekTasks, ownerTaskRows, ownerDoneRows] = await Promise.all([
     prisma.salesTask.findMany({
       where,
       orderBy: [{ dueAt: 'asc' }, { priority: 'desc' }, { createdAt: 'desc' }],
@@ -277,6 +330,8 @@ export default async function TasksPage(props: any) {
     prisma.salesTask.count({ where: { ...baseWhere, status: 'TODO', dueAt: { lt: now } } }),
     prisma.salesTask.count({ where: { ...baseWhere, status: 'TODO', dueAt: { gte: now, lt: tomorrow } } }),
     prisma.salesTask.count({ where: { ...baseWhere, status: 'DONE', completedAt: { gte: weekAgo } } }),
+    prisma.salesTask.count({ where: { ...baseWhere, status: 'TODO', dueAt: { gte: now, lt: weekEnd } } }),
+    prisma.salesTask.count({ where: { ...baseWhere, status: 'TODO', dueAt: null } }),
     prisma.user.findMany({ where: { role: { in: ['SUPER_ADMIN', 'ADMIN', 'SALES'] as any }, isActive: true }, orderBy: [{ role: 'asc' }, { createdAt: 'asc' }] }),
     prisma.company.findMany({ orderBy: { updatedAt: 'desc' }, take: 120, select: { id: true, name: true, ownerId: true } }),
     prisma.opportunity.findMany({
@@ -311,6 +366,7 @@ export default async function TasksPage(props: any) {
   const weekBuckets = buildWeekBuckets(weekTasks);
   const companyNameById = new Map(companies.map((company) => [company.id, company.name]));
   const maxOwnerOpen = Math.max(1, ...ownerStats.map((item) => item.open));
+  const bulkFormId = 'sales-task-bulk-form';
 
   const qs = (extra: Record<string, string>) => {
     const params = new URLSearchParams();
@@ -345,6 +401,13 @@ export default async function TasksPage(props: any) {
         <Metric label="已逾期" value={overdueCount} tone="rose" />
         <Metric label="24小时内到期" value={todayCount} tone="amber" />
         <Metric label="本周完成" value={doneWeekCount} tone="emerald" />
+      </section>
+
+      <section className="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <QueueCard href={`/tasks?${qs({ view: 'overdue' })}`} label="逾期队列" count={overdueCount} note="先处理客户已在等的任务" tone="rose" />
+        <QueueCard href={`/tasks?${qs({ view: 'today' })}`} label="今日队列" count={todayCount} note="今天必须完成或顺延" tone="amber" />
+        <QueueCard href={`/tasks?${qs({ view: 'week' })}`} label="7天排程" count={weekCount} note="本周要推进的跟进动作" tone="blue" />
+        <QueueCard href={`/tasks?${qs({ view: 'unscheduled' })}`} label="未排期队列" count={noDueCount} note="需要补截止时间" tone="slate" />
       </section>
 
       <section className="mb-6 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
@@ -476,6 +539,8 @@ export default async function TasksPage(props: any) {
         <FilterLink href={`/tasks?${qs({ view: 'todo' })}`} active={view === 'todo'}>待办</FilterLink>
         <FilterLink href={`/tasks?${qs({ view: 'overdue' })}`} active={view === 'overdue'}>逾期</FilterLink>
         <FilterLink href={`/tasks?${qs({ view: 'today' })}`} active={view === 'today'}>今日到期</FilterLink>
+        <FilterLink href={`/tasks?${qs({ view: 'week' })}`} active={view === 'week'}>7天排程</FilterLink>
+        <FilterLink href={`/tasks?${qs({ view: 'unscheduled' })}`} active={view === 'unscheduled'}>未排期</FilterLink>
         <FilterLink href={`/tasks?${qs({ view: 'drafted' })}`} active={view === 'drafted'}>已有邮件草稿</FilterLink>
         <FilterLink href={`/tasks?${qs({ view: 'done' })}`} active={view === 'done'}>已完成</FilterLink>
         <div className="mx-2 h-9 w-px bg-gray-100" />
@@ -493,12 +558,43 @@ export default async function TasksPage(props: any) {
 
       <section className="rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="border-b border-gray-100 px-6 py-4">
-          <h2 className="font-bold text-gray-900">任务列表</h2>
-          <p className="mt-1 text-xs text-gray-400">当前显示 {tasks.length} 条。邮件草稿只生成草稿,不会自动发送。</p>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="font-bold text-gray-900">任务列表</h2>
+              <p className="mt-1 text-xs text-gray-400">当前显示 {tasks.length} 条。邮件草稿只生成草稿,不会自动发送。</p>
+            </div>
+            <form id={bulkFormId} action={bulkUpdateTasks} className="flex flex-wrap items-end gap-2">
+              <label className="text-xs font-black text-gray-500">
+                批量动作
+                <select name="bulkAction" defaultValue="SNOOZE_1" className="mt-1 w-32 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-800 outline-none focus:border-indigo-400">
+                  <option value="SNOOZE_1">顺延1天</option>
+                  <option value="SNOOZE_3">顺延3天</option>
+                  <option value="SET_DUE">设截止</option>
+                  <option value="COMPLETE">标记完成</option>
+                  {canSeeAll && <option value="ASSIGN_OWNER">转派负责人</option>}
+                </select>
+              </label>
+              <label className="text-xs font-black text-gray-500">
+                截止时间
+                <input name="bulkDueAt" type="datetime-local" className="mt-1 w-44 rounded-lg border border-gray-200 px-3 py-2 text-xs font-bold text-gray-900 outline-none focus:border-indigo-400" />
+              </label>
+              {canSeeAll && (
+                <label className="text-xs font-black text-gray-500">
+                  负责人
+                  <select name="bulkOwnerId" defaultValue={user.id} className="mt-1 w-40 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-800 outline-none focus:border-indigo-400">
+                    {users.map((item) => (
+                      <option key={item.id} value={item.id}>{item.name || item.email}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <button className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-700 hover:bg-indigo-100">执行批量操作</button>
+            </form>
+          </div>
         </div>
         <div className="divide-y divide-gray-50">
           {tasks.map((task) => (
-            <TaskRow key={task.id} task={task} canComplete={view !== 'done'} />
+            <TaskRow key={task.id} task={task} canComplete={view !== 'done'} bulkFormId={bulkFormId} canBulk={view !== 'done'} />
           ))}
           {tasks.length === 0 && <div className="p-12 text-center text-sm text-gray-400">暂无任务。</div>}
         </div>
@@ -507,11 +603,16 @@ export default async function TasksPage(props: any) {
   );
 }
 
-function TaskRow({ task, canComplete }: { task: any; canComplete: boolean }) {
+function TaskRow({ task, canComplete, bulkFormId, canBulk }: { task: any; canComplete: boolean; bulkFormId: string; canBulk: boolean }) {
   const overdue = task.status === 'TODO' && task.dueAt && new Date(task.dueAt).getTime() < Date.now();
   return (
     <div className="p-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
+        {canBulk && (
+          <label className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white">
+            <input form={bulkFormId} type="checkbox" name="taskId" value={task.id} className="h-4 w-4 accent-indigo-600" />
+          </label>
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <TaskPriority priority={task.priority} />
@@ -612,6 +713,26 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: st
       <div className="text-xs font-bold text-gray-500">{label}</div>
       <div className="mt-1 text-2xl font-black">{value}</div>
     </div>
+  );
+}
+
+function QueueCard({ href, label, count, note, tone }: { href: string; label: string; count: number; note: string; tone: string }) {
+  const style: Record<string, string> = {
+    rose: 'border-rose-100 bg-rose-50 text-rose-700',
+    amber: 'border-amber-100 bg-amber-50 text-amber-700',
+    blue: 'border-blue-100 bg-blue-50 text-blue-700',
+    slate: 'border-slate-100 bg-slate-50 text-slate-700',
+  };
+  return (
+    <Link href={href} className={`rounded-xl border p-4 shadow-sm hover:shadow ${style[tone] || style.blue}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-black">{label}</div>
+          <div className="mt-1 text-xs font-bold opacity-70">{note}</div>
+        </div>
+        <div className="text-2xl font-black">{count}</div>
+      </div>
+    </Link>
   );
 }
 

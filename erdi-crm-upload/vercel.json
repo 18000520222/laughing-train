@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/mail-pull",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/task-reminders",
+      "schedule": "0 9 * * *"
     }
   ]
 }
