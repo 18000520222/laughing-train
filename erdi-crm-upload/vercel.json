@@ -5,6 +5,10 @@
       "schedule": "0 8 * * *"
     },
     {
+      "path": "/api/cron/email-audit-watch",
+      "schedule": "30 8 * * *"
+    },
+    {
       "path": "/api/cron/task-reminders",
       "schedule": "0 9 * * *"
     },
