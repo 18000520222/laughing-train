@@ -186,7 +186,7 @@ export default async function SettingsPage() {
                 <p className="text-xs text-green-700 mt-1 leading-snug">
                   在 360dialog Hub 完成 Embedded Signup 后会拿到一个 API Key，填入下方即可。
                   填了这个 Key，系统会自动走 360dialog 网关，<b>无需</b>再填下面的 Meta Phone ID / Token。
-                  <br />Webhook 在 360dialog Hub 里设为：<code>https://crm.erdicn.com/api/whatsapp/webhook</code>
+                  <br />Webhook 在 360dialog Hub 里设为：<code>https://erdicrm.com/api/whatsapp/webhook</code>
                 </p>
               </div>
               <Field name="whatsapp360ApiKey" label="360dialog API Key" def={(settings as any)?.whatsapp360ApiKey} type="password" />
@@ -194,7 +194,7 @@ export default async function SettingsPage() {
               <div className="border-t border-gray-200 my-4" />
               <p className="text-xs text-gray-500 mb-2">
                 — 或 — 原生 Meta Cloud API（业务组合未被封时用；当前你的 ERDI 组合已被封，建议走上面的 360dialog）
-                <br />Webhook URL：<code>https://crm.erdicn.com/api/whatsapp/webhook</code>（Verify Token 与下方一致）
+                <br />Webhook URL：<code>https://erdicrm.com/api/whatsapp/webhook</code>（Verify Token 与下方一致）
               </p>
               <Field name="whatsappPhoneId" label="Phone Number ID" def={(settings as any)?.whatsappPhoneId} />
               <Field name="whatsappToken" label="Permanent Access Token" def={(settings as any)?.whatsappToken} type="password" />
@@ -212,7 +212,7 @@ export default async function SettingsPage() {
 
             <Section title="👔 LinkedIn (OAuth + Lead Gen)">
               <p className="text-xs text-gray-500 -mt-2 mb-3">
-                Redirect URL：<code>https://crm.erdicn.com/api/auth/linkedin/callback</code> ·
+                Redirect URL：<code>https://erdicrm.com/api/auth/linkedin/callback</code> ·
                 授权入口：<Link href="/api/auth/linkedin/start" className="text-blue-600 underline">/api/auth/linkedin/start</Link>
               </p>
               <Field name="linkedinClientId" label="Client ID" def={(settings as any)?.linkedinClientId} />
@@ -245,7 +245,7 @@ export default async function SettingsPage() {
 
             <Section title="🛍️ 虾皮 Shopee (Open Platform)">
               <p className="text-xs text-gray-500 -mt-2 mb-3">
-                在 Shopee 开放平台创建应用并授权店铺后填入。聊天消息将通过 webhook 汇入统一收件箱。Push URL:<code>https://crm.erdicn.com/api/shopee/webhook</code>
+                在 Shopee 开放平台创建应用并授权店铺后填入。聊天消息将通过 webhook 汇入统一收件箱。Push URL:<code>https://erdicrm.com/api/shopee/webhook</code>
               </p>
               <Field name="shopeePartnerId" label="Partner ID" def={(settings as any)?.shopeePartnerId} />
               <Field name="shopeePartnerKey" label="Partner Key" def={(settings as any)?.shopeePartnerKey} type="password" />

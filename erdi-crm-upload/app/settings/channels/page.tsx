@@ -108,7 +108,7 @@ export default async function ChannelSettingsPage({
   const amzOk = !!(st.amazonRefreshToken && st.amazonLwaClientId && st.amazonLwaClientSecret && st.amazonAwsAccessKeyId && st.amazonAwsSecretAccessKey);
   const spOk = !!(st.shopeePartnerId && st.shopeePartnerKey && st.shopeeShopId);
 
-  const baseUrl = 'https://crm.erdicn.com';
+  const baseUrl = 'https://erdicrm.com';
 
   return (
     <div className="max-w-4xl mx-auto p-6 md:p-10">
