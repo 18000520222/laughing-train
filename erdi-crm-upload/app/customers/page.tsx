@@ -115,7 +115,7 @@ export default async function CustomersPage(props: any) {
   }
   if (activeSegment) where.type = { in: activeSegment.types as any };
 
-  const [total, customers, typeCounts, unassignedCount] = await Promise.all([
+  const [total, customers, typeCounts, unassignedCount, healthCustomers] = await Promise.all([
     prisma.company.count({ where }),
     prisma.company.findMany({
       where,
@@ -126,6 +126,23 @@ export default async function CustomersPage(props: any) {
     }),
     prisma.company.groupBy({ by: ['type'], _count: { _all: true } }),
     prisma.company.count({ where: { ownerId: null } }),
+    prisma.company.findMany({
+      where,
+      orderBy: { updatedAt: 'desc' },
+      take: 500,
+      include: {
+        contacts: { orderBy: { createdAt: 'asc' }, take: 3 },
+        owner: true,
+        opportunities: {
+          orderBy: { updatedAt: 'desc' },
+          take: 8,
+          select: { id: true, title: true, stage: true, amountUSD: true, stageChangedAt: true, updatedAt: true },
+        },
+        followUps: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } },
+        inboxMessages: { orderBy: { createdAt: 'desc' }, take: 3, select: { direction: true, sentAt: true, createdAt: true } },
+        salesTasks: { where: { status: 'TODO' }, orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }], take: 3, select: { dueAt: true, priority: true } },
+      },
+    }),
   ]);
 
   const countByType = Object.fromEntries(typeCounts.map((item) => [item.type, item._count._all]));
@@ -144,6 +161,7 @@ export default async function CustomersPage(props: any) {
     return params.toString();
   };
   const mkHref = (p: number) => `/customers?${qs({ page: p })}`;
+  const healthReport = buildCustomerHealthReport(healthCustomers);
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
@@ -164,6 +182,65 @@ export default async function CustomersPage(props: any) {
           </Link>
         </div>
       </header>
+
+      <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">客户五点体检</h2>
+            <p className="mt-1 text-xs text-gray-500">按资料完整、联系人、互动热度、商机推进、下一步/负责人五个维度给客户打分,优先处理最影响成交的缺口。</p>
+          </div>
+          <span className={`rounded-lg px-3 py-2 text-xs font-black ${healthReport.avgScore >= 75 ? 'bg-emerald-50 text-emerald-700' : healthReport.avgScore >= 55 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>
+            平均健康度 {healthReport.avgScore}
+          </span>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <HealthMetric label="体检客户" value={healthReport.customerCount} detail="当前筛选样本" tone="blue" />
+          <HealthMetric label="高意向客户" value={healthReport.hotCount} detail="高分且有近期信号" tone={healthReport.hotCount > 0 ? 'emerald' : 'slate'} />
+          <HealthMetric label="需补资料" value={healthReport.missingProfileCount} detail="画像/产品/国家/行业缺口" tone={healthReport.missingProfileCount > 0 ? 'amber' : 'emerald'} />
+          <HealthMetric label="未分配" value={healthReport.unassignedCount} detail="没有负责人" tone={healthReport.unassignedCount > 0 ? 'rose' : 'emerald'} />
+          <HealthMetric label="无下一步" value={healthReport.noNextActionCount} detail="缺少可执行动作" tone={healthReport.noNextActionCount > 0 ? 'amber' : 'emerald'} />
+          <HealthMetric label="沉睡/停滞" value={healthReport.staleCount} detail="互动或商机超过30天" tone={healthReport.staleCount > 0 ? 'rose' : 'emerald'} />
+        </div>
+        <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{healthReport.recommendation}</div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+          <div className="overflow-hidden rounded-xl border border-gray-100">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-gray-50 text-xs font-black text-gray-500">
+                <tr>
+                  <th className="p-3">重点客户</th>
+                  <th className="p-3">健康度</th>
+                  <th className="p-3">五点短板</th>
+                  <th className="p-3">建议动作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {healthReport.priorityRows.map((row) => (
+                  <tr key={row.id} className="hover:bg-gray-50">
+                    <td className="p-3">
+                      <Link href={`/customers/${row.id}`} className="font-black text-gray-900 hover:text-indigo-700">{row.name}</Link>
+                      <div className="mt-0.5 text-[11px] font-bold text-gray-400">{row.typeLabel} · {row.ownerLabel}</div>
+                    </td>
+                    <td className="p-3">
+                      <div className={`inline-flex min-w-12 justify-center rounded-full px-2 py-1 text-xs font-black ${row.score >= 75 ? 'bg-emerald-50 text-emerald-700' : row.score >= 55 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>{row.score}</div>
+                    </td>
+                    <td className="p-3 text-xs font-bold text-gray-600">{row.shortfalls.join('、') || '无明显短板'}</td>
+                    <td className="p-3 text-xs font-bold text-gray-600">{row.action}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {healthReport.priorityRows.length === 0 && <div className="p-8 text-center text-sm font-bold text-gray-400">当前筛选下暂无可体检客户。</div>}
+          </div>
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">五点覆盖</h3>
+            <div className="mt-3 space-y-3">
+              {healthReport.dimensionRows.map((row) => (
+                <HealthBar key={row.key} label={row.label} value={row.avgScore} max={100} detail={`${row.passCount}/${healthReport.customerCount || 0} 达标`} />
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* 手动新增客户 */}
       <details className="mb-6 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden group">
@@ -357,4 +434,197 @@ function SegmentCard({ href, active, label, value }: { href: string; active: boo
       <div className="mt-1 text-2xl font-bold">{value}</div>
     </Link>
   );
+}
+
+function buildCustomerHealthReport(customers: any[]) {
+  const rows = customers.map(customerHealthRow);
+  const customerCount = rows.length;
+  const avgScore = customerCount ? Math.round(rows.reduce((sum, row) => sum + row.score, 0) / customerCount) : 0;
+  const hotCount = rows.filter((row) => row.score >= 75 && (row.openOpportunityCount > 0 || row.daysSinceLastInteraction <= 14)).length;
+  const missingProfileCount = rows.filter((row) => row.fitScore < 14).length;
+  const unassignedCount = rows.filter((row) => row.ownerScore < 8).length;
+  const noNextActionCount = rows.filter((row) => row.noNextAction).length;
+  const staleCount = rows.filter((row) => row.isStale || row.stalledOpportunityCount > 0).length;
+  const priorityRows = rows
+    .filter((row) => row.shortfalls.length > 0 || row.score >= 75)
+    .sort((a, b) => b.priorityWeight - a.priorityWeight || b.score - a.score || a.daysSinceLastInteraction - b.daysSinceLastInteraction)
+    .slice(0, 8);
+  const dimensionRows = [
+    dimensionSummary(rows, 'fitScore', '资料完整'),
+    dimensionSummary(rows, 'contactScore', '联系人'),
+    dimensionSummary(rows, 'engagementScore', '互动热度'),
+    dimensionSummary(rows, 'pipelineScore', '商机推进'),
+    dimensionSummary(rows, 'ownerScore', '下一步/负责人'),
+  ];
+
+  return {
+    customerCount,
+    avgScore,
+    hotCount,
+    missingProfileCount,
+    unassignedCount,
+    noNextActionCount,
+    staleCount,
+    priorityRows,
+    dimensionRows,
+    recommendation: customerHealthRecommendation({ customerCount, avgScore, hotCount, missingProfileCount, unassignedCount, noNextActionCount, staleCount }),
+  };
+}
+
+function customerHealthRow(customer: any) {
+  const now = new Date();
+  const latestInboxAt = latestDate(customer.inboxMessages.map((m: any) => m.sentAt || m.createdAt));
+  const latestFollowUpAt = latestDate(customer.followUps.map((f: any) => f.createdAt));
+  const lastInteractionAt = latestDate([latestInboxAt, latestFollowUpAt, customer.updatedAt, customer.createdAt]);
+  const daysSinceLastInteraction = daysSince(lastInteractionAt, now);
+  const openOpportunities = customer.opportunities.filter((opp: any) => opp.stage !== 'CLOSED_WON' && opp.stage !== 'CLOSED_LOST');
+  const stalledOpportunityCount = openOpportunities.filter((opp: any) => daysSince(opp.stageChangedAt || opp.updatedAt, now) >= 14).length;
+  const hasEmailContact = customer.contacts.some((contact: any) => Boolean(contact.email));
+  const hasPhoneContact = customer.contacts.some((contact: any) => Boolean(contact.phone));
+  const hasRecentInbound = customer.inboxMessages.some((msg: any) => msg.direction === 'IN' && daysSince(msg.sentAt || msg.createdAt, now) <= 14);
+  const overdueTaskCount = customer.salesTasks.filter((task: any) => task.dueAt && new Date(task.dueAt).getTime() < now.getTime()).length;
+  const noNextAction = !String(customer.nextAction || '').trim();
+
+  const fitScore =
+    points(customer.customerCode, 3) +
+    points(customer.country, 3) +
+    points(customer.industry, 3) +
+    points(customer.website, 2) +
+    points(customer.mainProducts, 4) +
+    points(customer.customerProfile || customer.painPoints || customer.competitors, 5);
+  const contactScore = Math.min(20, customer.contacts.length * 5 + (hasEmailContact ? 8 : 0) + (hasPhoneContact ? 4 : 0) + (customer.contacts.length > 1 ? 3 : 0));
+  const engagementScore = daysSinceLastInteraction <= 7 ? 20 : daysSinceLastInteraction <= 14 ? 17 : daysSinceLastInteraction <= 30 ? 12 : daysSinceLastInteraction <= 90 ? 6 : 0;
+  const pipelineScore = Math.min(
+    20,
+    (openOpportunities.length > 0 ? 10 : 0) +
+      (customer.opportunities.some((opp: any) => opp.stage === 'CLOSED_WON') ? 7 : 0) +
+      (customer.opportunities.length > 0 ? 3 : 0) -
+      Math.min(8, stalledOpportunityCount * 4)
+  );
+  const ownerScore = Math.min(20, (customer.ownerId ? 8 : 0) + (!noNextAction ? 8 : 0) + (customer.salesTasks.length > 0 ? 4 : 0) - Math.min(8, overdueTaskCount * 4));
+  const score = Math.max(0, Math.min(100, fitScore + contactScore + engagementScore + pipelineScore + ownerScore));
+
+  const shortfalls: string[] = [];
+  if (fitScore < 14) shortfalls.push('资料');
+  if (contactScore < 14) shortfalls.push('联系人');
+  if (engagementScore < 12) shortfalls.push('互动');
+  if (pipelineScore < 10) shortfalls.push('商机');
+  if (ownerScore < 14) shortfalls.push('下一步');
+  if (stalledOpportunityCount > 0) shortfalls.push('停滞');
+  if (overdueTaskCount > 0) shortfalls.push('逾期任务');
+
+  const isStale = daysSinceLastInteraction >= 30;
+  const priorityWeight =
+    (score >= 75 ? 18 : 0) +
+    (hasRecentInbound ? 16 : 0) +
+    (openOpportunities.length > 0 ? 12 : 0) +
+    stalledOpportunityCount * 10 +
+    overdueTaskCount * 9 +
+    (isStale ? 8 : 0) +
+    (!customer.ownerId ? 7 : 0) +
+    (noNextAction ? 5 : 0);
+
+  return {
+    id: customer.id,
+    name: customer.name,
+    typeLabel: TYPE_LABEL[customer.type] || customer.type,
+    ownerLabel: customer.owner?.name || customer.owner?.email || '未分配',
+    score,
+    fitScore,
+    contactScore,
+    engagementScore,
+    pipelineScore,
+    ownerScore,
+    shortfalls,
+    action: customerHealthAction({ hasRecentInbound, openOpportunityCount: openOpportunities.length, stalledOpportunityCount, overdueTaskCount, isStale, noNextAction, hasOwner: Boolean(customer.ownerId), score }),
+    daysSinceLastInteraction,
+    openOpportunityCount: openOpportunities.length,
+    stalledOpportunityCount,
+    noNextAction,
+    isStale,
+    priorityWeight,
+  };
+}
+
+function dimensionSummary(rows: any[], key: string, label: string) {
+  const avgScore = rows.length ? Math.round(rows.reduce((sum, row) => sum + row[key], 0) / rows.length) : 0;
+  return {
+    key,
+    label,
+    avgScore,
+    passCount: rows.filter((row) => row[key] >= 14).length,
+  };
+}
+
+function customerHealthAction(input: { hasRecentInbound: boolean; openOpportunityCount: number; stalledOpportunityCount: number; overdueTaskCount: number; isStale: boolean; noNextAction: boolean; hasOwner: boolean; score: number }) {
+  if (!input.hasOwner) return '先分配负责人,否则任何线索都没有闭环责任人。';
+  if (input.overdueTaskCount > 0) return '先处理逾期任务,补跟进记录并更新下一步。';
+  if (input.stalledOpportunityCount > 0) return '先推进停滞商机,更新阶段、报价或丢单原因。';
+  if (input.hasRecentInbound) return '客户近期有来信,优先回复并把意向转成商机/报价。';
+  if (input.noNextAction) return '补一条明确下一步动作,例如发资料、报价或约测试反馈。';
+  if (input.isStale) return '客户已沉睡,发送激活邮件或释放到公海重分配。';
+  if (input.openOpportunityCount > 0) return '继续推进当前商机,保持 7 天内有阶段动作。';
+  if (input.score >= 75) return '资料和互动质量较好,可以创建商机或加入重点开发名单。';
+  return '先补客户资料、联系人和画像,再判断是否值得继续开发。';
+}
+
+function customerHealthRecommendation(input: { customerCount: number; avgScore: number; hotCount: number; missingProfileCount: number; unassignedCount: number; noNextActionCount: number; staleCount: number }) {
+  if (input.customerCount === 0) return '当前筛选下暂无客户。先导入/同步客户,再做五点体检。';
+  if (input.unassignedCount > 0) return `有 ${input.unassignedCount} 个客户未分配负责人。先分配责任人,否则后续跟进和自动化都无法闭环。`;
+  if (input.staleCount > 0) return `有 ${input.staleCount} 个客户存在沉睡或商机停滞。优先处理这些客户,避免询盘变成无效库存。`;
+  if (input.missingProfileCount > 0) return `有 ${input.missingProfileCount} 个客户资料/画像不足。补齐国家、行业、关注产品、痛点和竞品后,AI 跟进会更准。`;
+  if (input.noNextActionCount > 0) return `有 ${input.noNextActionCount} 个客户没有下一步动作。每个有效客户至少要有一个可执行动作。`;
+  if (input.hotCount > 0) return `当前有 ${input.hotCount} 个高意向客户。建议销售主管优先检查是否已报价、建商机和安排下一轮跟进。`;
+  return `客户平均健康度 ${input.avgScore},整体稳定。下一步可以把高分客户沉淀为重点账户运营。`;
+}
+
+function HealthMetric({ label, value, detail, tone }: { label: string; value: number | string; detail: string; tone: string }) {
+  const color: Record<string, string> = {
+    blue: 'border-blue-100 bg-blue-50 text-blue-800',
+    emerald: 'border-emerald-100 bg-emerald-50 text-emerald-800',
+    amber: 'border-amber-100 bg-amber-50 text-amber-800',
+    rose: 'border-rose-100 bg-rose-50 text-rose-800',
+    slate: 'border-slate-100 bg-slate-50 text-slate-800',
+  };
+  return (
+    <div className={`rounded-xl border p-3 ${color[tone] || color.slate}`}>
+      <div className="text-xs font-bold opacity-70">{label}</div>
+      <div className="mt-1 text-xl font-black">{value}</div>
+      <div className="mt-1 text-[11px] font-bold opacity-70">{detail}</div>
+    </div>
+  );
+}
+
+function HealthBar({ label, value, max, detail }: { label: string; value: number; max: number; detail: string }) {
+  const width = Math.max(3, Math.round((value / Math.max(1, max)) * 100));
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <div className="truncate text-xs font-black text-gray-700">{label}</div>
+        <div className="text-xs font-bold text-gray-400">{value}</div>
+      </div>
+      <div className="h-2 rounded-full bg-gray-100">
+        <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${width}%` }} />
+      </div>
+      <div className="mt-1 text-[11px] font-bold text-gray-400">{detail}</div>
+    </div>
+  );
+}
+
+function points(value: unknown, score: number) {
+  return String(value || '').trim() ? score : 0;
+}
+
+function latestDate(values: Array<Date | string | null | undefined>) {
+  const times = values
+    .filter(Boolean)
+    .map((value) => new Date(value as Date | string).getTime())
+    .filter((time) => Number.isFinite(time));
+  if (!times.length) return null;
+  return new Date(Math.max(...times));
+}
+
+function daysSince(value: Date | string | null | undefined, now = new Date()) {
+  if (!value) return 999;
+  return Math.max(0, Math.floor((now.getTime() - new Date(value).getTime()) / 86400000));
 }
