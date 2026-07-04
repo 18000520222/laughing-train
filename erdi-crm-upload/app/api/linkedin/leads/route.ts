@@ -9,6 +9,8 @@ import { ingestInbound } from '@/lib/inbox';
 export async function POST(req: Request) {
   const accounts = await prisma.socialAccount.findMany({ where: { platform: 'LINKEDIN' } });
   let imported = 0;
+  const errors: Array<{ accountId: string; status?: number; message: string }> = [];
+  const apiVersion = process.env.LINKEDIN_API_VERSION || '202606';
 
   for (const acc of accounts) {
     try {
@@ -17,11 +19,19 @@ export async function POST(req: Request) {
       const res = await fetch('https://api.linkedin.com/rest/leadFormResponses?q=owner&owner.type=ORGANIZATION', {
         headers: {
           Authorization: `Bearer ${acc.accessToken}`,
-          'LinkedIn-Version': '202401',
+          'LinkedIn-Version': apiVersion,
           'X-Restli-Protocol-Version': '2.0.0',
         },
       });
       const data = await res.json();
+      if (!res.ok) {
+        errors.push({
+          accountId: acc.id,
+          status: res.status,
+          message: data?.message || data?.code || 'LinkedIn API request failed',
+        });
+        continue;
+      }
 
       for (const lead of data.elements || []) {
         const answers: Record<string, string> = {};
@@ -67,8 +77,12 @@ export async function POST(req: Request) {
       }
     } catch (e) {
       console.error('[li-leads]', acc.id, e);
+      errors.push({
+        accountId: acc.id,
+        message: e instanceof Error ? e.message : 'Unknown LinkedIn sync error',
+      });
     }
   }
 
-  return NextResponse.json({ ok: true, imported });
+  return NextResponse.json({ ok: errors.length === 0, imported, errors }, { status: errors.length ? 502 : 200 });
 }
