@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { sendSalesTaskReminders } from '@/lib/sales-task-reminders';
+import { escalateOverdueSalesTasks } from '@/lib/sales-task-escalations';
 
 export const dynamic = 'force-dynamic';
 
@@ -212,6 +213,14 @@ async function sendDueTaskReminders() {
   redirect('/tasks');
 }
 
+async function escalateDueTasks() {
+  'use server';
+  const { role } = await currentUser();
+  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
+  await escalateOverdueSalesTasks({ thresholdHours: 24, limit: 100 });
+  redirect('/tasks?view=escalated');
+}
+
 async function bulkUpdateTasks(formData: FormData) {
   'use server';
   const { user, role } = await currentUser();
@@ -255,7 +264,7 @@ async function bulkUpdateTasks(formData: FormData) {
       base.setDate(base.getDate() + days);
       return prisma.salesTask.update({
         where: { id: task.id },
-        data: { dueAt: base, reminderSentAt: null },
+        data: { dueAt: base, reminderSentAt: null, escalatedAt: null },
       });
     }));
   }
@@ -266,7 +275,7 @@ async function bulkUpdateTasks(formData: FormData) {
     if (dueAt && !Number.isNaN(dueAt.getTime())) {
       await prisma.salesTask.updateMany({
         where: { id: { in: taskIds } },
-        data: { dueAt, reminderSentAt: null },
+        data: { dueAt, reminderSentAt: null, escalatedAt: null },
       });
     }
   }
@@ -277,7 +286,7 @@ async function bulkUpdateTasks(formData: FormData) {
     if (owner) {
       await prisma.salesTask.updateMany({
         where: { id: { in: taskIds } },
-        data: { ownerId: owner.id, reminderSentAt: null },
+        data: { ownerId: owner.id, reminderSentAt: null, escalatedAt: null },
       });
       await prisma.notification.createMany({
         data: tasks.map((task) => ({
@@ -325,10 +334,11 @@ export default async function TasksPage(props: any) {
     if (view === 'today') where.dueAt = { gte: now, lt: tomorrow };
     if (view === 'week') where.dueAt = { gte: now, lt: weekEnd };
     if (view === 'unscheduled') where.dueAt = null;
+    if (view === 'escalated') where.escalatedAt = { not: null };
     if (view === 'drafted') where.draftGeneratedAt = { not: null };
   }
 
-  const [tasks, openCount, overdueCount, todayCount, doneWeekCount, weekCount, noDueCount, users, companies, opportunities, weekTasks, ownerTaskRows, ownerDoneRows, completedReportTasks, nextTaskCandidates] = await Promise.all([
+  const [tasks, openCount, overdueCount, todayCount, doneWeekCount, weekCount, noDueCount, escalatedCount, users, companies, opportunities, weekTasks, ownerTaskRows, ownerDoneRows, completedReportTasks, nextTaskCandidates] = await Promise.all([
     prisma.salesTask.findMany({
       where,
       orderBy: [{ dueAt: 'asc' }, { priority: 'desc' }, { createdAt: 'desc' }],
@@ -341,6 +351,7 @@ export default async function TasksPage(props: any) {
     prisma.salesTask.count({ where: { ...baseWhere, status: 'DONE', completedAt: { gte: weekAgo } } }),
     prisma.salesTask.count({ where: { ...baseWhere, status: 'TODO', dueAt: { gte: now, lt: weekEnd } } }),
     prisma.salesTask.count({ where: { ...baseWhere, status: 'TODO', dueAt: null } }),
+    prisma.salesTask.count({ where: { ...baseWhere, status: 'TODO', escalatedAt: { not: null } } }),
     prisma.user.findMany({ where: { role: { in: ['SUPER_ADMIN', 'ADMIN', 'SALES'] as any }, isActive: true }, orderBy: [{ role: 'asc' }, { createdAt: 'asc' }] }),
     prisma.company.findMany({ orderBy: { updatedAt: 'desc' }, take: 120, select: { id: true, name: true, ownerId: true } }),
     prisma.opportunity.findMany({
@@ -414,6 +425,11 @@ export default async function TasksPage(props: any) {
           <form action={sendDueTaskReminders}>
             <button className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-700 hover:bg-amber-100">发送到期提醒</button>
           </form>
+          {canSeeAll && (
+            <form action={escalateDueTasks}>
+              <button className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-bold text-rose-700 hover:bg-rose-100">升级SLA异常</button>
+            </form>
+          )}
           <Link href="/sales-command" className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-bold text-indigo-700 hover:bg-indigo-100">销售指挥台</Link>
           <Link href="/customers" className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50">客户列表</Link>
         </div>
@@ -426,11 +442,12 @@ export default async function TasksPage(props: any) {
         <Metric label="本周完成" value={doneWeekCount} tone="emerald" />
       </section>
 
-      <section className="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <section className="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <QueueCard href={`/tasks?${qs({ view: 'overdue' })}`} label="逾期队列" count={overdueCount} note="先处理客户已在等的任务" tone="rose" />
         <QueueCard href={`/tasks?${qs({ view: 'today' })}`} label="今日队列" count={todayCount} note="今天必须完成或顺延" tone="amber" />
         <QueueCard href={`/tasks?${qs({ view: 'week' })}`} label="7天排程" count={weekCount} note="本周要推进的跟进动作" tone="blue" />
         <QueueCard href={`/tasks?${qs({ view: 'unscheduled' })}`} label="未排期队列" count={noDueCount} note="需要补截止时间" tone="slate" />
+        <QueueCard href={`/tasks?${qs({ view: 'escalated' })}`} label="SLA升级" count={escalatedCount} note="管理层已收到异常" tone="rose" />
       </section>
 
       <section className="mb-6 grid gap-4 xl:grid-cols-[minmax(320px,0.85fr)_minmax(0,1.15fr)]">
@@ -645,6 +662,7 @@ export default async function TasksPage(props: any) {
         <FilterLink href={`/tasks?${qs({ view: 'today' })}`} active={view === 'today'}>今日到期</FilterLink>
         <FilterLink href={`/tasks?${qs({ view: 'week' })}`} active={view === 'week'}>7天排程</FilterLink>
         <FilterLink href={`/tasks?${qs({ view: 'unscheduled' })}`} active={view === 'unscheduled'}>未排期</FilterLink>
+        <FilterLink href={`/tasks?${qs({ view: 'escalated' })}`} active={view === 'escalated'}>SLA升级</FilterLink>
         <FilterLink href={`/tasks?${qs({ view: 'drafted' })}`} active={view === 'drafted'}>已有邮件草稿</FilterLink>
         <FilterLink href={`/tasks?${qs({ view: 'done' })}`} active={view === 'done'}>已完成</FilterLink>
         <div className="mx-2 h-9 w-px bg-gray-100" />
@@ -722,6 +740,7 @@ function TaskRow({ task, canComplete, bulkFormId, canBulk }: { task: any; canCom
             <TaskPriority priority={task.priority} />
             <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">{TYPE_LABEL[task.type] || task.type}</span>
             {overdue && <span className="rounded-full bg-rose-50 px-2 py-1 text-xs font-bold text-rose-700">已逾期</span>}
+            {task.escalatedAt && <span className="rounded-full bg-fuchsia-50 px-2 py-1 text-xs font-bold text-fuchsia-700">SLA已升级</span>}
           </div>
           <div className="mt-3 text-lg font-black text-gray-900">{task.title}</div>
           <div className="mt-1 text-sm leading-relaxed text-gray-600">{task.description || '暂无说明'}</div>
@@ -729,6 +748,7 @@ function TaskRow({ task, canComplete, bulkFormId, canBulk }: { task: any; canCom
             <span>客户:<Link href={`/customers/${task.companyId}`} className="ml-1 text-indigo-600 hover:underline">{task.company.name}</Link></span>
             <span>负责人:{task.owner.name || task.owner.email}</span>
             <span>截止:{task.dueAt ? new Date(task.dueAt).toLocaleString('zh-CN') : '-'}</span>
+            {task.escalatedAt && <span>升级:{new Date(task.escalatedAt).toLocaleString('zh-CN')}</span>}
             {task.opportunity && <span>商机:{task.opportunity.title}</span>}
           </div>
         </div>
