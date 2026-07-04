@@ -232,6 +232,8 @@ export default async function SalesCommandPage() {
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
 
@@ -308,6 +310,7 @@ export default async function SalesCommandPage() {
   const actionAttribution = await buildSalesActionAttributionReport({ since: thirtyDaysAgo, until: new Date() });
   const stageVelocity = await buildOpportunityStageVelocityReport({ since: thirtyDaysAgo, until: new Date() });
   const emailAudit = await buildEmailClassificationAudit({ sampleLimit: 8 });
+  const channelQuality = await buildChannelQualityReport({ since: ninetyDaysAgo });
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
@@ -525,6 +528,67 @@ export default async function SalesCommandPage() {
                 <AttributionBar key={item.domain} label={item.domain} value={item.count} max={Math.max(1, ...emailAudit.leadDomains.map((row) => row.count))} detail="近 300 封线索邮件抽样" />
               ))}
               {emailAudit.leadDomains.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无可统计的线索域名。</div>}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">渠道质量与转化漏斗</h2>
+            <p className="mt-1 text-xs text-gray-400">近 90 天按客户来源复盘客户数、商机数、打开商机、赢单、收入、转化率和停滞风险。</p>
+          </div>
+          <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">Lead source ROI</span>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <AttributionMetric label="来源客户" value={channelQuality.customerCount} detail={`${channelQuality.sourceCount} 个来源`} tone={channelQuality.customerCount > 0 ? 'blue' : 'gray'} />
+          <AttributionMetric label="客户转商机" value={formatLocalPercent(channelQuality.opportunityRate)} detail={`${channelQuality.companyWithOpportunity} 个客户有商机`} tone={channelQuality.companyWithOpportunity > 0 ? 'amber' : 'gray'} />
+          <AttributionMetric label="赢单来源" value={channelQuality.wonDeals} detail={`赢单率 ${formatLocalPercent(channelQuality.winRate)}`} tone={channelQuality.wonDeals > 0 ? 'emerald' : 'gray'} />
+          <AttributionMetric label="渠道收入" value={`$${Math.round(channelQuality.revenue).toLocaleString()}`} detail={channelQuality.bestSource ? `最佳 ${channelQuality.bestSource.sourceLabel}` : '等待数据'} tone={channelQuality.revenue > 0 ? 'emerald' : 'gray'} />
+          <AttributionMetric label="停滞商机" value={channelQuality.stalledOpenDeals} detail="超过7天未推进" tone={channelQuality.stalledOpenDeals > 0 ? 'rose' : 'gray'} />
+        </div>
+        <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{channelQuality.recommendation}</div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="overflow-hidden rounded-xl border border-gray-100">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-gray-50 text-xs font-black text-gray-500">
+                <tr>
+                  <th className="p-3">来源</th>
+                  <th className="p-3">客户</th>
+                  <th className="p-3">商机</th>
+                  <th className="p-3">打开</th>
+                  <th className="p-3">赢单</th>
+                  <th className="p-3">收入</th>
+                  <th className="p-3">停滞</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {channelQuality.rows.map((row) => (
+                  <tr key={row.source} className="hover:bg-gray-50">
+                    <td className="p-3">
+                      <div className="font-black text-gray-900">{row.sourceLabel}</div>
+                      <div className="mt-0.5 text-[11px] font-bold text-gray-400">转商机 {formatLocalPercent(row.opportunityRate)} · 赢单 {formatLocalPercent(row.winRate)}</div>
+                    </td>
+                    <td className="p-3 font-bold text-gray-700">{row.customers}</td>
+                    <td className="p-3 font-bold text-gray-700">{row.opportunities}</td>
+                    <td className="p-3 font-bold text-gray-700">{row.openDeals}</td>
+                    <td className="p-3 font-bold text-emerald-700">{row.wonDeals}</td>
+                    <td className="p-3 font-bold text-gray-700">${Math.round(row.revenue).toLocaleString()}</td>
+                    <td className="p-3 font-bold text-rose-600">{row.stalledOpenDeals}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {channelQuality.rows.length === 0 && <div className="p-10 text-center text-sm font-bold text-gray-400">近 90 天暂无来源客户。</div>}
+          </div>
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">来源收入排行</h3>
+            <div className="mt-3 space-y-3">
+              {channelQuality.rows.map((row) => (
+                <AttributionBar key={row.source} label={row.sourceLabel} value={row.revenue} max={channelQuality.maxRevenue} detail={`${row.customers} 客户 · ${row.wonDeals} 赢单 · 均单 $${Math.round(row.avgWonRevenue).toLocaleString()}`} />
+              ))}
+              {channelQuality.rows.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无可排行来源。</div>}
             </div>
           </div>
         </div>
@@ -831,6 +895,188 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: st
       <div className="mt-1 text-2xl font-black">{value}</div>
     </div>
   );
+}
+
+type ChannelQualityRow = {
+  source: string;
+  sourceLabel: string;
+  customers: number;
+  companyWithOpportunity: number;
+  opportunities: number;
+  openDeals: number;
+  wonDeals: number;
+  lostDeals: number;
+  stalledOpenDeals: number;
+  revenue: number;
+  avgWonRevenue: number;
+  opportunityRate: number | null;
+  winRate: number | null;
+};
+
+type ChannelQualityReport = {
+  rows: ChannelQualityRow[];
+  customerCount: number;
+  sourceCount: number;
+  companyWithOpportunity: number;
+  opportunityCount: number;
+  opportunityRate: number | null;
+  wonDeals: number;
+  winRate: number | null;
+  revenue: number;
+  stalledOpenDeals: number;
+  bestSource: ChannelQualityRow | null;
+  maxRevenue: number;
+  recommendation: string;
+};
+
+async function buildChannelQualityReport({ since }: { since: Date }): Promise<ChannelQualityReport> {
+  const companies = await prisma.company.findMany({
+    where: { createdAt: { gte: since } },
+    include: {
+      opportunities: {
+        select: {
+          id: true,
+          stage: true,
+          amountUSD: true,
+          stageChangedAt: true,
+          updatedAt: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 1000,
+  });
+  if (companies.length === 0) return emptyChannelQuality();
+
+  const buckets = new Map<string, ChannelQualityRow>();
+  for (const company of companies) {
+    const source = normalizeSource(company.source);
+    const current = buckets.get(source) || {
+      source,
+      sourceLabel: sourceLabel(source),
+      customers: 0,
+      companyWithOpportunity: 0,
+      opportunities: 0,
+      openDeals: 0,
+      wonDeals: 0,
+      lostDeals: 0,
+      stalledOpenDeals: 0,
+      revenue: 0,
+      avgWonRevenue: 0,
+      opportunityRate: 0,
+      winRate: 0,
+    };
+    current.customers += 1;
+    if (company.opportunities.length > 0) current.companyWithOpportunity += 1;
+    current.opportunities += company.opportunities.length;
+    for (const opp of company.opportunities) {
+      if (opp.stage === 'CLOSED_WON') {
+        current.wonDeals += 1;
+        current.revenue += opp.amountUSD || 0;
+      } else if (opp.stage === 'CLOSED_LOST') {
+        current.lostDeals += 1;
+      } else {
+        current.openDeals += 1;
+        const stageDate = opp.stageChangedAt || opp.updatedAt;
+        if (stageDate && daysBetween(stageDate, new Date()) >= 7) current.stalledOpenDeals += 1;
+      }
+    }
+    current.opportunityRate = current.customers > 0 ? current.companyWithOpportunity / current.customers : null;
+    current.winRate = current.opportunities > 0 ? current.wonDeals / current.opportunities : null;
+    current.avgWonRevenue = current.wonDeals > 0 ? current.revenue / current.wonDeals : 0;
+    buckets.set(source, current);
+  }
+
+  const allRows = Array.from(buckets.values());
+  const rows = allRows
+    .sort((a, b) => b.revenue - a.revenue || b.wonDeals - a.wonDeals || b.opportunities - a.opportunities || b.customers - a.customers)
+    .slice(0, 10);
+  const customerCount = companies.length;
+  const companyWithOpportunity = allRows.reduce((sum, row) => sum + row.companyWithOpportunity, 0);
+  const opportunityCount = allRows.reduce((sum, row) => sum + row.opportunities, 0);
+  const wonDeals = allRows.reduce((sum, row) => sum + row.wonDeals, 0);
+  const revenue = allRows.reduce((sum, row) => sum + row.revenue, 0);
+  const stalledOpenDeals = allRows.reduce((sum, row) => sum + row.stalledOpenDeals, 0);
+  const bestSource = rows.find((row) => row.revenue > 0) || rows[0] || null;
+
+  return {
+    rows,
+    customerCount,
+    sourceCount: buckets.size,
+    companyWithOpportunity,
+    opportunityCount,
+    opportunityRate: customerCount > 0 ? companyWithOpportunity / customerCount : null,
+    wonDeals,
+    winRate: opportunityCount > 0 ? wonDeals / opportunityCount : null,
+    revenue,
+    stalledOpenDeals,
+    bestSource,
+    maxRevenue: Math.max(1, ...rows.map((row) => row.revenue)),
+    recommendation: channelQualityRecommendation({ customerCount, companyWithOpportunity, revenue, stalledOpenDeals, bestSource }),
+  };
+}
+
+function emptyChannelQuality(): ChannelQualityReport {
+  return {
+    rows: [],
+    customerCount: 0,
+    sourceCount: 0,
+    companyWithOpportunity: 0,
+    opportunityCount: 0,
+    opportunityRate: null,
+    wonDeals: 0,
+    winRate: null,
+    revenue: 0,
+    stalledOpenDeals: 0,
+    bestSource: null,
+    maxRevenue: 1,
+    recommendation: '近 90 天暂无来源客户。先确保邮箱、阿里、WhatsApp、官网和手工导入都写入客户来源字段。',
+  };
+}
+
+function channelQualityRecommendation(input: { customerCount: number; companyWithOpportunity: number; revenue: number; stalledOpenDeals: number; bestSource: ChannelQualityRow | null }) {
+  if (input.customerCount === 0) return '近 90 天暂无来源客户。先恢复渠道同步,并保证每个客户都有来源字段。';
+  if (input.companyWithOpportunity === 0) return `近 90 天有 ${input.customerCount} 个来源客户,但还没有转成商机。优先把询盘/报价邮件转为商机,否则来源质量无法复盘。`;
+  if (input.stalledOpenDeals > 0) return `有 ${input.stalledOpenDeals} 个来源商机停滞超过 7 天。先处理停滞渠道,避免来源看似有效但实际不推进。`;
+  if (input.revenue > 0) return `当前最佳来源是“${input.bestSource?.sourceLabel || '未知来源'}”,近 90 天贡献 $${Math.round(input.bestSource?.revenue || 0).toLocaleString()}。建议把分配规则和广告/平台投入向高转化来源倾斜。`;
+  return `近 90 天已有 ${input.companyWithOpportunity} 个来源客户转成商机,但暂无赢单收入。下一步重点看报价到谈判、谈判到赢单的转化。`;
+}
+
+function normalizeSource(source: string | null | undefined) {
+  const raw = String(source || 'UNKNOWN').trim().toUpperCase();
+  if (!raw) return 'UNKNOWN';
+  if (raw.includes('GMAIL')) return 'GMAIL_INBOX';
+  if (raw.includes('EMAIL') || raw.includes('MAIL')) return 'EMAIL';
+  if (raw.includes('ALIBABA')) return 'ALIBABA';
+  if (raw.includes('WHATSAPP')) return 'WHATSAPP';
+  if (raw.includes('LINKEDIN')) return 'LINKEDIN';
+  if (raw.includes('FACEBOOK')) return 'FACEBOOK';
+  if (raw.includes('SHOPEE')) return 'SHOPEE';
+  if (raw.includes('AMAZON')) return 'AMAZON';
+  if (raw.includes('MANUAL')) return 'MANUAL';
+  if (raw.includes('WEB') || raw.includes('SITE')) return 'WEBSITE';
+  return raw;
+}
+
+function sourceLabel(source: string) {
+  const labels: Record<string, string> = {
+    EMAIL: '邮件',
+    GMAIL_INBOX: 'Gmail 收件箱',
+    ALIBABA: '阿里国际站',
+    WHATSAPP: 'WhatsApp',
+    LINKEDIN: 'LinkedIn',
+    FACEBOOK: 'Facebook',
+    SHOPEE: 'Shopee',
+    AMAZON: 'Amazon',
+    MANUAL: '手工录入',
+    WEBSITE: '官网',
+    UNKNOWN: '未知来源',
+  };
+  return labels[source] || source;
+}
+
+function daysBetween(from: Date, to: Date) {
+  return Math.max(0, Math.floor((to.getTime() - from.getTime()) / 86400000));
 }
 
 async function buildOpportunityStageVelocityReport({ since, until }: { since: Date; until: Date }) {
