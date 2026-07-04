@@ -13,7 +13,7 @@ export async function GET(req: Request) {
   }
 
   const redirectUri = `${canonicalOrigin()}/api/auth/linkedin/callback`;
-  const scope = 'openid profile email r_organization_social rw_organization_admin r_ads_leadgen_automation';
+  const scope = process.env.LINKEDIN_OAUTH_SCOPE || 'openid profile email';
   const state = Math.random().toString(36).slice(2);
 
   const url = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=${encodeURIComponent(scope)}`;
