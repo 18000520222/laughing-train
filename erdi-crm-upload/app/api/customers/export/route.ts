@@ -26,11 +26,11 @@ export async function GET(req: Request) {
     include: { contacts: { take: 1, orderBy: { createdAt: 'asc' } } },
   });
 
-  const headers = ['客户编号', '公司名称', '客户类型', '国家', '行业', '官网', '联系人名', '联系人姓', '职位', '邮箱', '电话', '创建时间'];
+  const headers = ['客户编号', '公司名称', '客户类型', '优先级评分', '主营/关注产品', '客户画像', '痛点', '竞品/竞争对手', '下一步动作', '国家', '行业', '官网', '联系人名', '联系人姓', '职位', '邮箱', '电话', '创建时间'];
   const rows = companies.map((c: any) => {
     const ct = c.contacts?.[0];
     return [
-      c.customerCode || '', c.name, TYPE_LABEL[c.type] || c.type, c.country || '', c.industry || '', c.website || '',
+      c.customerCode || '', c.name, TYPE_LABEL[c.type] || c.type, c.priorityScore || 0, c.mainProducts || '', c.customerProfile || '', c.painPoints || '', c.competitors || '', c.nextAction || '', c.country || '', c.industry || '', c.website || '',
       ct?.firstName || '', ct?.lastName || '', ct?.title || '', ct?.email || '', ct?.phone || '',
       new Date(c.createdAt).toISOString().slice(0, 10),
     ];

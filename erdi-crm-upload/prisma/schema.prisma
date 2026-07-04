@@ -127,6 +127,14 @@ model Company {
   source       String   @default("EMAIL")
   isPublic     Boolean  @default(false)
 
+  priorityScore   Int      @default(0)
+  mainProducts    String?  @db.Text
+  customerProfile String?  @db.Text
+  painPoints      String?  @db.Text
+  competitors     String?  @db.Text
+  nextAction      String?  @db.Text
+  lastProfiledAt  DateTime?
+
   ownerId      String?
   owner        User?    @relation(fields: [ownerId], references: [id])
 

@@ -76,6 +76,14 @@ async function updateCustomer(formData: FormData) {
       country: s('country'),
       industry: s('industry'),
       website: s('website'),
+      ownerId: s('ownerId'),
+      priorityScore: Math.max(0, Math.min(100, parseInt(String(formData.get('priorityScore') || '0'), 10) || 0)),
+      mainProducts: s('mainProducts'),
+      customerProfile: s('customerProfile'),
+      painPoints: s('painPoints'),
+      competitors: s('competitors'),
+      nextAction: s('nextAction'),
+      lastProfiledAt: new Date(),
     },
   });
   redirect(`/customers/${id}`);
@@ -136,6 +144,13 @@ async function getAICustomerInsights(company: any) {
 国家/地区: ${company.country || '未知'}
 行业: ${company.industry || '未知'}
 客户类型: ${company.type}
+负责人: ${company.owner?.name || company.owner?.email || '未分配'}
+优先级评分: ${company.priorityScore || 0}/100
+主营/关注产品: ${company.mainProducts || '未知'}
+客户画像备注: ${company.customerProfile || '无'}
+痛点/采购关注点: ${company.painPoints || '未知'}
+竞品/竞争对手: ${company.competitors || '未知'}
+下一步动作: ${company.nextAction || '未填写'}
 
 最近 3 条往来消息：
 ${JSON.stringify(recentMsgs, null, 2)}
@@ -187,6 +202,12 @@ export default async function CustomerDetailPage(props: any) {
   });
 
   if (!company) notFound();
+
+  const salesUsers = await prisma.user.findMany({
+    where: { role: { in: ['SUPER_ADMIN', 'ADMIN', 'SALES'] as any }, isActive: true },
+    orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
+    select: { id: true, email: true, name: true },
+  });
 
   const aiInsights = await getAICustomerInsights(company);
 
@@ -289,6 +310,7 @@ export default async function CustomerDetailPage(props: any) {
                 </a>
               )}
               <span>👤 负责人：{company.owner?.name || company.owner?.email || '未分配'}</span>
+              <span>⭐ 优先级：{company.priorityScore}/100</span>
               <span>🕒 创建：{fmtDate(company.createdAt)}</span>
             </div>
           </div>
@@ -345,6 +367,31 @@ export default async function CustomerDetailPage(props: any) {
               <label className="block text-xs font-semibold text-gray-500 mb-1">官网</label>
               <input name="website" defaultValue={company.website || ''} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
             </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">负责人</label>
+              <select name="ownerId" defaultValue={company.ownerId || ''} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                <option value="">未分配</option>
+                {salesUsers.map((u) => (
+                  <option key={u.id} value={u.id}>{u.name || u.email}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">优先级评分(0-100)</label>
+              <input name="priorityScore" type="number" min={0} max={100} defaultValue={company.priorityScore || 0} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div className="md:col-span-3 border-t border-gray-100 pt-4">
+              <h3 className="text-sm font-bold text-gray-800 mb-3">客户画像与竞争情报</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldTextArea name="mainProducts" label="主营/关注产品" value={company.mainProducts} placeholder="如: 905nm/1535nm 测距模块、无人机吊舱、手持测距仪" />
+                <FieldTextArea name="competitors" label="竞品/竞争对手" value={company.competitors} placeholder="如: 已在对比某品牌,或客户提到的供应商/价格" />
+                <FieldTextArea name="painPoints" label="痛点/采购关注点" value={company.painPoints} placeholder="如: 交期、价格、认证、尺寸、功耗、测距精度" />
+                <FieldTextArea name="nextAction" label="下一步动作" value={company.nextAction} placeholder="如: 明天发送 PI, 周五跟进样品测试反馈" />
+                <div className="md:col-span-2">
+                  <FieldTextArea name="customerProfile" label="客户画像备注" value={company.customerProfile} placeholder="如: 系统集成商/贸易商/军警渠道/科研单位,采购决策链和预算情况" />
+                </div>
+              </div>
+            </div>
             <div className="md:col-span-3">
               <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 py-2.5 rounded-lg transition-all">
                 保存修改
@@ -353,6 +400,25 @@ export default async function CustomerDetailPage(props: any) {
           </form>
         </details>
       </div>
+
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-bold text-gray-900">客户画像与竞争情报</h2>
+          <span className="text-xs text-gray-400">最近更新:{company.lastProfiledAt ? fmtDate(company.lastProfiledAt) : '未维护'}</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <IntelCard label="优先级" value={`${company.priorityScore}/100`} />
+          <IntelCard label="主营/关注产品" value={company.mainProducts || '未填写'} />
+          <IntelCard label="竞品/竞争对手" value={company.competitors || '未填写'} />
+          <IntelCard label="痛点" value={company.painPoints || '未填写'} />
+          <IntelCard label="下一步动作" value={company.nextAction || '未填写'} />
+        </div>
+        {company.customerProfile && (
+          <div className="mt-4 rounded-xl border border-gray-100 bg-slate-50 p-4 text-sm text-gray-700 whitespace-pre-wrap">
+            {company.customerProfile}
+          </div>
+        )}
+      </section>
 
       {/* ✨ AI 客户智能分析大脑 (AI Customer Brain) */}
       {aiInsights && (
@@ -628,6 +694,30 @@ export default async function CustomerDetailPage(props: any) {
           </section>
         </div>
       </div>
+    </div>
+  );
+}
+
+function FieldTextArea({ name, label, value, placeholder }: { name: string; label: string; value?: string | null; placeholder?: string }) {
+  return (
+    <label className="block">
+      <span className="block text-xs font-semibold text-gray-500 mb-1">{label}</span>
+      <textarea
+        name={name}
+        defaultValue={value || ''}
+        placeholder={placeholder}
+        rows={3}
+        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+      />
+    </label>
+  );
+}
+
+function IntelCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-slate-50 p-4">
+      <div className="text-xs font-bold text-gray-500 mb-1">{label}</div>
+      <div className="text-sm font-semibold text-gray-800 whitespace-pre-wrap">{value}</div>
     </div>
   );
 }

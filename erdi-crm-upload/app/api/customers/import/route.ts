@@ -50,6 +50,12 @@ export async function POST(req: Request) {
       const country = pick(o, '国家', 'country');
       const industry = pick(o, '行业', 'industry');
       const website = pick(o, '官网', 'website');
+      const priorityScore = Math.max(0, Math.min(100, parseInt(pick(o, '优先级评分', 'priorityScore') || '0', 10) || 0));
+      const mainProducts = pick(o, '主营/关注产品', 'mainProducts');
+      const customerProfile = pick(o, '客户画像', 'customerProfile');
+      const painPoints = pick(o, '痛点', 'painPoints');
+      const competitors = pick(o, '竞品/竞争对手', 'competitors');
+      const nextAction = pick(o, '下一步动作', 'nextAction');
 
       const email = pick(o, '邮箱', 'email', 'Email');
       const firstName = pick(o, '联系人名', 'firstName');
@@ -73,6 +79,13 @@ export async function POST(req: Request) {
               country: country || existing.country,
               industry: industry || existing.industry,
               website: website || existing.website,
+              priorityScore,
+              mainProducts: mainProducts || existing.mainProducts,
+              customerProfile: customerProfile || existing.customerProfile,
+              painPoints: painPoints || existing.painPoints,
+              competitors: competitors || existing.competitors,
+              nextAction: nextAction || existing.nextAction,
+              lastProfiledAt: mainProducts || customerProfile || painPoints || competitors || nextAction ? new Date() : existing.lastProfiledAt,
             },
           });
           updated++;
@@ -83,7 +96,22 @@ export async function POST(req: Request) {
       } else {
         const customerCode = await ensureCustomerCode(codeIn);
         const c = await prisma.company.create({
-          data: { name, customerCode, type: type as any, country: country || null, industry: industry || null, website: website || null, source: 'IMPORT' },
+          data: {
+            name,
+            customerCode,
+            type: type as any,
+            country: country || null,
+            industry: industry || null,
+            website: website || null,
+            source: 'IMPORT',
+            priorityScore,
+            mainProducts: mainProducts || null,
+            customerProfile: customerProfile || null,
+            painPoints: painPoints || null,
+            competitors: competitors || null,
+            nextAction: nextAction || null,
+            lastProfiledAt: mainProducts || customerProfile || painPoints || competitors || nextAction ? new Date() : null,
+          },
         });
         companyId = c.id;
         created++;

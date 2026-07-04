@@ -260,6 +260,7 @@ export default async function CustomersPage(props: any) {
               <th className="p-4 font-bold text-gray-600 text-sm">客户编号</th>
               <th className="p-4 font-bold text-gray-600 text-sm">公司名称</th>
               <th className="p-4 font-bold text-gray-600 text-sm">类型</th>
+              <th className="p-4 font-bold text-gray-600 text-sm">优先级/下一步</th>
               <th className="p-4 font-bold text-gray-600 text-sm">国家</th>
               <th className="p-4 font-bold text-gray-600 text-sm">来源/负责人</th>
               <th className="p-4 font-bold text-gray-600 text-sm">主要联系人</th>
@@ -284,6 +285,10 @@ export default async function CustomersPage(props: any) {
                   <span className={`px-2 py-1 rounded border text-xs font-bold ${TYPE_STYLE[c.type] || 'bg-gray-50 text-gray-600 border-gray-100'}`}>
                     {TYPE_LABEL[c.type] || c.type}
                   </span>
+                </td>
+                <td className="p-4 text-sm">
+                  <div className="font-bold text-gray-800">{c.priorityScore || 0}/100</div>
+                  <div className="text-xs text-gray-400 max-w-[180px] truncate">{c.nextAction || '未填写'}</div>
                 </td>
                 <td className="p-4 text-gray-600 text-sm">{c.country || '-'}</td>
                 <td className="p-4 text-gray-600 text-sm">
