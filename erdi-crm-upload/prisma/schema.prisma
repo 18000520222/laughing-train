@@ -451,6 +451,10 @@ model SalesTask {
   source      String @default("MANUAL")
   sourceRef   String?
 
+  draftSubject String?
+  draftBody    String? @db.Text
+  draftGeneratedAt DateTime?
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

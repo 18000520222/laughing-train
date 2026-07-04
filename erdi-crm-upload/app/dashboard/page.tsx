@@ -96,6 +96,7 @@ export default async function Dashboard() {
           <NavBtn href="/settings" color="gray">⚙️ 设置</NavBtn>
           <NavBtn href="/analytics" color="blue">📈 数据</NavBtn>
           <NavBtn href="/sales-command" color="rose">🎯 指挥台</NavBtn>
+          <NavBtn href="/tasks" color="blue">✅ 任务</NavBtn>
           <NavBtn href="/attendance" color="pink">📅 考勤</NavBtn>
           <NavBtn href="/expenses" color="orange">💰 报账</NavBtn>
           <NavBtn href="/shipments" color="teal">🚚 发货</NavBtn>
