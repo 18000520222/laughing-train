@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { sendSalesTaskReminders } from '@/lib/sales-task-reminders';
-import { escalateOverdueSalesTasks } from '@/lib/sales-task-escalations';
+import { escalateOverdueSalesTasks, getSalesTaskEscalationPolicies } from '@/lib/sales-task-escalations';
 import { createTaskCalendarToken, taskCalendarUrl } from '@/lib/sales-task-calendar';
 
 export const dynamic = 'force-dynamic';
@@ -218,7 +218,35 @@ async function escalateDueTasks() {
   'use server';
   const { role } = await currentUser();
   if (role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
-  await escalateOverdueSalesTasks({ thresholdHours: 24, limit: 100 });
+  await escalateOverdueSalesTasks({ limit: 100 });
+  redirect('/tasks?view=escalated');
+}
+
+async function saveEscalationPolicies(formData: FormData) {
+  'use server';
+  const { role } = await currentUser();
+  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
+
+  for (const priority of ['URGENT', 'HIGH', 'NORMAL', 'LOW']) {
+    await prisma.salesTaskEscalationPolicy.upsert({
+      where: { priority: priority as any },
+      update: {
+        thresholdHours: intInput(formData.get(`${priority}_thresholdHours`), priority === 'URGENT' ? 2 : priority === 'HIGH' ? 8 : priority === 'NORMAL' ? 24 : 48),
+        isActive: formData.get(`${priority}_isActive`) === 'on',
+        notifyOwner: formData.get(`${priority}_notifyOwner`) === 'on',
+        notifyAdmins: formData.get(`${priority}_notifyAdmins`) === 'on',
+        notes: String(formData.get(`${priority}_notes`) || '').trim() || null,
+      },
+      create: {
+        priority: priority as any,
+        thresholdHours: intInput(formData.get(`${priority}_thresholdHours`), priority === 'URGENT' ? 2 : priority === 'HIGH' ? 8 : priority === 'NORMAL' ? 24 : 48),
+        isActive: formData.get(`${priority}_isActive`) === 'on',
+        notifyOwner: formData.get(`${priority}_notifyOwner`) === 'on',
+        notifyAdmins: formData.get(`${priority}_notifyAdmins`) === 'on',
+        notes: String(formData.get(`${priority}_notes`) || '').trim() || null,
+      },
+    });
+  }
   redirect('/tasks?view=escalated');
 }
 
@@ -339,7 +367,7 @@ export default async function TasksPage(props: any) {
     if (view === 'drafted') where.draftGeneratedAt = { not: null };
   }
 
-  const [tasks, openCount, overdueCount, todayCount, doneWeekCount, weekCount, noDueCount, escalatedCount, users, companies, opportunities, weekTasks, ownerTaskRows, ownerDoneRows, completedReportTasks, nextTaskCandidates] = await Promise.all([
+  const [tasks, openCount, overdueCount, todayCount, doneWeekCount, weekCount, noDueCount, escalatedCount, users, companies, opportunities, weekTasks, ownerTaskRows, ownerDoneRows, completedReportTasks, nextTaskCandidates, escalationPolicies] = await Promise.all([
     prisma.salesTask.findMany({
       where,
       orderBy: [{ dueAt: 'asc' }, { priority: 'desc' }, { createdAt: 'desc' }],
@@ -381,6 +409,7 @@ export default async function TasksPage(props: any) {
       include: { owner: true, company: true, opportunity: true },
       take: 60,
     }),
+    canSeeAll ? getSalesTaskEscalationPolicies() : Promise.resolve([]),
   ]);
 
   const doneByOwner = new Map(ownerDoneRows.map((row) => [row.ownerId, row._count._all]));
@@ -459,6 +488,57 @@ export default async function TasksPage(props: any) {
         <QueueCard href={`/tasks?${qs({ view: 'unscheduled' })}`} label="未排期队列" count={noDueCount} note="需要补截止时间" tone="slate" />
         <QueueCard href={`/tasks?${qs({ view: 'escalated' })}`} label="SLA升级" count={escalatedCount} note="管理层已收到异常" tone="rose" />
       </section>
+
+      {canSeeAll && (
+        <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-black text-gray-900">SLA 升级策略</h2>
+              <p className="mt-1 text-xs text-gray-400">按任务优先级设置逾期多久仍未完成就升级;手工按钮和每日 09:30 cron 共用这些策略。</p>
+            </div>
+            <form action={escalateDueTasks}>
+              <button className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-bold text-rose-700 hover:bg-rose-100">按策略立即升级</button>
+            </form>
+          </div>
+          <form action={saveEscalationPolicies} className="grid gap-3 xl:grid-cols-4">
+            {['URGENT', 'HIGH', 'NORMAL', 'LOW'].map((priority) => {
+              const policy = escalationPolicies.find((item: any) => item.priority === priority);
+              return (
+                <div key={priority} className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <TaskPriority priority={priority} />
+                    <label className="flex items-center gap-2 text-xs font-black text-gray-500">
+                      <input name={`${priority}_isActive`} type="checkbox" defaultChecked={policy?.isActive ?? true} className="h-4 w-4 accent-indigo-600" />
+                      启用
+                    </label>
+                  </div>
+                  <label className="block text-xs font-black text-gray-500">
+                    逾期后升级小时
+                    <input name={`${priority}_thresholdHours`} type="number" min="1" max="720" defaultValue={policy?.thresholdHours || (priority === 'URGENT' ? 2 : priority === 'HIGH' ? 8 : priority === 'NORMAL' ? 24 : 48)} className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-900 outline-none focus:border-indigo-400" />
+                  </label>
+                  <div className="mt-3 grid gap-2 text-xs font-black text-gray-500">
+                    <label className="flex items-center gap-2">
+                      <input name={`${priority}_notifyOwner`} type="checkbox" defaultChecked={policy?.notifyOwner ?? true} className="h-4 w-4 accent-indigo-600" />
+                      通知负责人
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input name={`${priority}_notifyAdmins`} type="checkbox" defaultChecked={policy?.notifyAdmins ?? true} className="h-4 w-4 accent-indigo-600" />
+                      通知管理层
+                    </label>
+                  </div>
+                  <label className="mt-3 block text-xs font-black text-gray-500">
+                    策略备注
+                    <textarea name={`${priority}_notes`} defaultValue={policy?.notes || ''} rows={3} className="mt-1 w-full resize-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 outline-none focus:border-indigo-400" />
+                  </label>
+                </div>
+              );
+            })}
+            <div className="xl:col-span-4">
+              <button className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-black text-white hover:bg-indigo-700">保存 SLA 策略</button>
+            </div>
+          </form>
+        </section>
+      )}
 
       <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -926,6 +1006,12 @@ function formatHours(value: number | null) {
   if (value < 1) return `${Math.max(1, Math.round(value * 60))}分钟`;
   if (value < 48) return `${Math.round(value)}小时`;
   return `${Math.round(value / 24)}天`;
+}
+
+function intInput(value: FormDataEntryValue | null, fallback: number) {
+  const next = Number(value || fallback);
+  if (!Number.isFinite(next)) return fallback;
+  return Math.min(720, Math.max(1, Math.round(next)));
 }
 
 function buildWeekBuckets(tasks: any[]) {

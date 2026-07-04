@@ -18,7 +18,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  const thresholdHours = parseInt(req.nextUrl.searchParams.get('hours') || '24', 10) || 24;
+  const hoursParam = req.nextUrl.searchParams.get('hours');
+  const thresholdHours = hoursParam ? parseInt(hoursParam, 10) || undefined : undefined;
   const limit = parseInt(req.nextUrl.searchParams.get('limit') || '100', 10) || 100;
   const result = await escalateOverdueSalesTasks({ thresholdHours, limit });
   return NextResponse.json({ ok: true, ts: new Date().toISOString(), ...result });

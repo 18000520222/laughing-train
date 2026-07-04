@@ -466,6 +466,19 @@ model SalesTask {
   @@index([status, dueAt])
 }
 
+model SalesTaskEscalationPolicy {
+  id             String @id @default(cuid())
+  priority       SalesTaskPriority @unique
+  thresholdHours Int @default(24)
+  isActive       Boolean @default(true)
+  notifyOwner    Boolean @default(true)
+  notifyAdmins   Boolean @default(true)
+  notes          String? @db.Text
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
 // --- 模块二十二:销售 KPI 目标与达成 ---
 
 model SalesKpiTarget {
