@@ -221,6 +221,8 @@ export default async function SalesCommandPage() {
 
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
 
@@ -307,6 +309,7 @@ export default async function SalesCommandPage() {
     .map((company) => ({ company, radar: buildSalesRadar(company) }))
     .sort((a, b) => b.radar.score - a.radar.score)
     .slice(0, 6);
+  const actionAttribution = await buildSalesActionAttributionReport({ since: thirtyDaysAgo, until: new Date() });
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
@@ -340,6 +343,60 @@ export default async function SalesCommandPage() {
         <Metric label="销售待办任务" value={openTaskCount} tone="blue" />
         <Metric label="已逾期任务" value={overdueTaskCount} tone="rose" />
         <Metric label="24小时内到期" value={todayTaskCount} tone="amber" />
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">销售动作多触点归因</h2>
+            <p className="mt-1 text-xs text-gray-400">近 30 天商机推进/赢单结果,回看结果前 30 天同客户触点;跟进、完成任务、我方消息、客户来信按等权拆分贡献。</p>
+          </div>
+          <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">保守多触点</span>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <AttributionMetric label="推进商机" value={actionAttribution.outcomes} detail={`可归因 ${actionAttribution.attributedOutcomes}`} tone={actionAttribution.attributedOutcomes > 0 ? 'blue' : 'gray'} />
+          <AttributionMetric label="赢单收入" value={`$${Math.round(actionAttribution.revenue).toLocaleString()}`} detail={`${actionAttribution.wonDeals} 个赢单`} tone={actionAttribution.revenue > 0 ? 'emerald' : 'gray'} />
+          <AttributionMetric label="归因收入" value={`$${Math.round(actionAttribution.attributedRevenue).toLocaleString()}`} detail={`覆盖率 ${formatLocalPercent(actionAttribution.attributionCoverage)}`} tone={actionAttribution.attributedRevenue > 0 ? 'emerald' : 'gray'} />
+          <AttributionMetric label="有效触点" value={actionAttribution.touchCredits} detail={`平均 ${actionAttribution.avgTouches} 个/结果`} tone={actionAttribution.touchCredits > 0 ? 'amber' : 'gray'} />
+          <AttributionMetric label="最佳触点" value={actionAttribution.bestType?.label || '-'} detail={actionAttribution.bestType ? `$${Math.round(actionAttribution.bestType.revenueCredit).toLocaleString()} 归因收入` : '等待数据'} tone={actionAttribution.bestType ? 'violet' : 'gray'} />
+        </div>
+        <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{actionAttribution.recommendation}</div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-3">
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">按触点类型</h3>
+            <div className="mt-3 space-y-3">
+              {actionAttribution.byType.map((item) => (
+                <AttributionBar key={item.key} label={item.label} value={item.touchCredits} max={actionAttribution.maxTypeCredit} detail={`收入 $${Math.round(item.revenueCredit).toLocaleString()} · 推进 ${formatLocalNumber(item.stageCredit)}`} />
+              ))}
+              {actionAttribution.byType.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无可归因触点。</div>}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">按负责人</h3>
+            <div className="mt-3 space-y-3">
+              {actionAttribution.byOwner.slice(0, 6).map((item) => (
+                <AttributionBar key={item.key} label={item.label} value={item.revenueCredit} max={actionAttribution.maxOwnerRevenue} detail={`触点 ${item.touchCredits} · 推进 ${formatLocalNumber(item.stageCredit)}`} />
+              ))}
+              {actionAttribution.byOwner.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无负责人归因。</div>}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">关键推进结果</h3>
+            <div className="mt-3 space-y-2">
+              {actionAttribution.topOutcomes.map((item) => (
+                <div key={item.id} className="rounded-lg bg-gray-50 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Link href={`/opportunity/${item.id}`} className="min-w-0 truncate text-xs font-black text-indigo-700 hover:underline">{item.title}</Link>
+                    <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] font-black text-gray-600">{item.stageLabel}</span>
+                  </div>
+                  <div className="mt-1 text-[11px] font-bold text-gray-500">{item.companyName} · {item.ownerName} · {item.touchCount} 个触点</div>
+                  <div className="mt-1 text-[11px] font-bold text-gray-400">金额 ${Math.round(item.amountUSD).toLocaleString()} · 主触点 {item.topTouchLabel}</div>
+                </div>
+              ))}
+              {actionAttribution.topOutcomes.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无近期推进结果。</div>}
+            </div>
+          </div>
+        </div>
       </section>
 
       <section className="mb-6 bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
@@ -664,6 +721,225 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: st
     <div className={`rounded-xl border border-gray-100 border-l-4 bg-white p-4 shadow-sm ${color[tone]}`}>
       <div className="text-xs font-bold text-gray-500">{label}</div>
       <div className="mt-1 text-2xl font-black">{value}</div>
+    </div>
+  );
+}
+
+async function buildSalesActionAttributionReport({ since, until }: { since: Date; until: Date }) {
+  const lookbackStart = new Date(since.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const outcomes = await prisma.opportunity.findMany({
+    where: {
+      stageChangedAt: { gte: since, lt: until },
+      stage: { in: ['REPLIED', 'QUOTING', 'NEGOTIATING', 'SPEC_CONFIRMING', 'CLOSED_WON'] as any },
+    },
+    include: { company: true, owner: true },
+    orderBy: [{ stageChangedAt: 'desc' }, { amountUSD: 'desc' }],
+    take: 200,
+  });
+  const companyIds = Array.from(new Set(outcomes.map((opp) => opp.companyId)));
+  if (outcomes.length === 0 || companyIds.length === 0) return emptySalesActionAttribution();
+
+  const [followUps, doneTasks, inboxMessages] = await Promise.all([
+    prisma.followUp.findMany({
+      where: { companyId: { in: companyIds }, createdAt: { gte: lookbackStart, lt: until } },
+      include: { user: true },
+      take: 800,
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.salesTask.findMany({
+      where: { companyId: { in: companyIds }, status: 'DONE', completedAt: { gte: lookbackStart, lt: until } },
+      include: { owner: true },
+      take: 800,
+      orderBy: { completedAt: 'desc' },
+    }),
+    prisma.inboxMessage.findMany({
+      where: { companyId: { in: companyIds }, createdAt: { gte: lookbackStart, lt: until } },
+      take: 1000,
+      orderBy: { createdAt: 'desc' },
+    }),
+  ]);
+
+  const touchpoints = [
+    ...followUps.map((item) => ({
+      id: item.id,
+      companyId: item.companyId,
+      ownerId: item.userId,
+      ownerName: item.user.name || item.user.email,
+      type: 'FOLLOW_UP',
+      label: '跟进记录',
+      at: item.createdAt,
+      text: item.content,
+    })),
+    ...doneTasks.map((item) => ({
+      id: item.id,
+      companyId: item.companyId,
+      ownerId: item.ownerId,
+      ownerName: item.owner.name || item.owner.email,
+      type: 'DONE_TASK',
+      label: '完成任务',
+      at: item.completedAt || item.updatedAt,
+      text: item.title,
+    })),
+    ...inboxMessages.map((item) => ({
+      id: item.id,
+      companyId: item.companyId || '',
+      ownerId: '',
+      ownerName: '',
+      type: item.direction === 'OUT' ? 'OUTBOUND_MESSAGE' : 'INBOUND_MESSAGE',
+      label: item.direction === 'OUT' ? '我方消息' : '客户来信',
+      at: item.sentAt || item.createdAt,
+      text: item.translatedText || item.originalText,
+    })),
+  ].filter((item) => item.companyId);
+
+  const byType = new Map<string, any>();
+  const byOwner = new Map<string, any>();
+  const outcomeRows: any[] = [];
+  let attributedRevenue = 0;
+  let attributedOutcomes = 0;
+  let touchCredits = 0;
+
+  for (const opp of outcomes) {
+    const outcomeAt = opp.stageChangedAt || opp.updatedAt;
+    const windowStart = new Date(outcomeAt.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const touches = touchpoints
+      .filter((touch) => touch.companyId === opp.companyId && touch.at >= windowStart && touch.at <= outcomeAt)
+      .sort((a, b) => b.at.getTime() - a.at.getTime())
+      .slice(0, 12)
+      .map((touch) => ({
+        ...touch,
+        ownerId: touch.ownerId || opp.ownerId || opp.company.ownerId || 'unassigned',
+        ownerName: touch.ownerName || opp.owner?.name || opp.owner?.email || opp.company.ownerId || '未分配',
+      }));
+    if (touches.length === 0) continue;
+
+    attributedOutcomes++;
+    touchCredits += touches.length;
+    const revenueCredit = opp.stage === 'CLOSED_WON' ? (opp.amountUSD || 0) / touches.length : 0;
+    const stageCredit = 1 / touches.length;
+    attributedRevenue += revenueCredit * touches.length;
+
+    for (const touch of touches) {
+      addAttributionBucket(byType, touch.type, touch.label, revenueCredit, stageCredit);
+      addAttributionBucket(byOwner, touch.ownerId, touch.ownerName, revenueCredit, stageCredit);
+    }
+
+    const topTouch = touches[0];
+    outcomeRows.push({
+      id: opp.id,
+      title: opp.title,
+      companyName: opp.company.name,
+      ownerName: opp.owner?.name || opp.owner?.email || '未分配',
+      stageLabel: STAGE_LABEL[opp.stage] || opp.stage,
+      amountUSD: opp.amountUSD || 0,
+      touchCount: touches.length,
+      topTouchLabel: topTouch?.label || '-',
+    });
+  }
+
+  const typeRows = Array.from(byType.values()).sort((a, b) => b.revenueCredit - a.revenueCredit || b.stageCredit - a.stageCredit || b.touchCredits - a.touchCredits);
+  const ownerRows = Array.from(byOwner.values()).sort((a, b) => b.revenueCredit - a.revenueCredit || b.stageCredit - a.stageCredit || b.touchCredits - a.touchCredits);
+  const revenue = outcomes.filter((opp) => opp.stage === 'CLOSED_WON').reduce((sum, opp) => sum + (opp.amountUSD || 0), 0);
+  const wonDeals = outcomes.filter((opp) => opp.stage === 'CLOSED_WON').length;
+  const bestType = typeRows[0] || null;
+  const attributionCoverage = outcomes.length > 0 ? attributedOutcomes / outcomes.length : null;
+
+  return {
+    outcomes: outcomes.length,
+    attributedOutcomes,
+    revenue,
+    wonDeals,
+    attributedRevenue,
+    attributionCoverage,
+    touchCredits,
+    avgTouches: attributedOutcomes > 0 ? formatLocalNumber(touchCredits / attributedOutcomes) : '0',
+    bestType,
+    byType: typeRows,
+    byOwner: ownerRows,
+    topOutcomes: outcomeRows.sort((a, b) => b.amountUSD - a.amountUSD || b.touchCount - a.touchCount).slice(0, 6),
+    maxTypeCredit: Math.max(1, ...typeRows.map((row) => row.touchCredits)),
+    maxOwnerRevenue: Math.max(1, ...ownerRows.map((row) => row.revenueCredit)),
+    recommendation: actionAttributionRecommendation({ attributedOutcomes, outcomes: outcomes.length, attributedRevenue, revenue, bestType }),
+  };
+}
+
+function emptySalesActionAttribution() {
+  return {
+    outcomes: 0,
+    attributedOutcomes: 0,
+    revenue: 0,
+    wonDeals: 0,
+    attributedRevenue: 0,
+    attributionCoverage: null,
+    touchCredits: 0,
+    avgTouches: '0',
+    bestType: null,
+    byType: [],
+    byOwner: [],
+    topOutcomes: [],
+    maxTypeCredit: 1,
+    maxOwnerRevenue: 1,
+    recommendation: '近 30 天暂无可分析的商机推进结果。先确保销售动作、任务完成和客户消息都沉淀到 CRM,后续才能做稳定归因。',
+  };
+}
+
+function addAttributionBucket(map: Map<string, any>, key: string, label: string, revenueCredit: number, stageCredit: number) {
+  const current = map.get(key) || { key, label, revenueCredit: 0, stageCredit: 0, touchCredits: 0 };
+  current.revenueCredit += revenueCredit;
+  current.stageCredit += stageCredit;
+  current.touchCredits += 1;
+  map.set(key, current);
+}
+
+function actionAttributionRecommendation(input: { attributedOutcomes: number; outcomes: number; attributedRevenue: number; revenue: number; bestType: any }) {
+  if (input.outcomes === 0) return '近 30 天没有商机推进结果,先把进行中商机的阶段和下一步动作维护起来。';
+  if (input.attributedOutcomes === 0) return '近期商机有推进,但推进前缺少可识别触点。需要让销售把跟进、任务完成和客户消息都记录进 CRM。';
+  if (input.attributedRevenue > 0) return `已有 $${Math.round(input.attributedRevenue).toLocaleString()} 赢单收入可分摊到销售触点;当前最有效触点是“${input.bestType?.label || '未知'}”,建议复盘其话术和客户场景。`;
+  return `近 30 天 ${input.attributedOutcomes}/${input.outcomes} 个推进结果能找到前置触点,但暂未形成赢单收入,下一步重点看报价到谈判、谈判到赢单的转化。`;
+}
+
+function formatLocalPercent(value: number | null) {
+  if (value === null) return '-';
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatLocalNumber(value: number) {
+  if (!Number.isFinite(value)) return '0';
+  if (Math.abs(value) >= 10) return String(Math.round(value));
+  return value.toFixed(1).replace(/\\.0$/, '');
+}
+
+function AttributionMetric({ label, value, detail, tone }: { label: string; value: string | number; detail: string; tone: 'blue' | 'emerald' | 'amber' | 'violet' | 'gray' }) {
+  const color = tone === 'emerald'
+    ? 'border-emerald-100 bg-emerald-50 text-emerald-800'
+    : tone === 'amber'
+      ? 'border-amber-100 bg-amber-50 text-amber-800'
+      : tone === 'violet'
+        ? 'border-violet-100 bg-violet-50 text-violet-800'
+        : tone === 'blue'
+          ? 'border-blue-100 bg-blue-50 text-blue-800'
+          : 'border-gray-100 bg-gray-50 text-gray-700';
+  return (
+    <div className={`rounded-xl border p-4 ${color}`}>
+      <div className="text-xs font-black opacity-75">{label}</div>
+      <div className="mt-1 truncate text-2xl font-black">{value}</div>
+      <div className="mt-1 text-xs font-bold opacity-70">{detail}</div>
+    </div>
+  );
+}
+
+function AttributionBar({ label, value, max, detail }: { label: string; value: number; max: number; detail: string }) {
+  const width = `${Math.max(4, Math.round((value / Math.max(1, max)) * 100))}%`;
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-xs font-black text-gray-900">{label}</span>
+        <span className="shrink-0 text-xs font-black text-gray-500">{formatLocalNumber(value)}</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-gray-100">
+        <div className="h-full rounded-full bg-indigo-500" style={{ width }} />
+      </div>
+      <div className="mt-1 text-[11px] font-bold text-gray-400">{detail}</div>
     </div>
   );
 }
