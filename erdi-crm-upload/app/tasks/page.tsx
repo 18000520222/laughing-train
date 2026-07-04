@@ -467,6 +467,7 @@ export default async function TasksPage(props: any) {
             <p className="mt-1 text-xs text-gray-400">将待办任务同步到 Apple、Google、Outlook 日历,默认提前 30 分钟提醒。</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Link href={`/tasks/focus?queue=${view === 'todo' || view === 'drafted' || view === 'done' ? 'all' : view}&scope=${scope}${priority ? `&priority=${priority}` : ''}`} className="rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-bold text-cyan-700 hover:bg-cyan-100">沉浸式执行</Link>
             <a href={calendarDownloadUrl} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-100">下载当前视图</a>
             <a href={myWebcalUrl} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-100">订阅我的日历</a>
             {canSeeAll && <a href={allWebcalUrl} className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-700 hover:bg-indigo-100">订阅全员日历</a>}
