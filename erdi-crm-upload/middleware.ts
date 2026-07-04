@@ -18,6 +18,7 @@ const PUBLIC_PREFIXES = [
   '/api/shopee/webhook',   // Shopee push
   '/api/tracking/webhook',
   '/api/cron/',        // 定时任务(自带 ?key= / Bearer 校验)
+  '/api/emails/classify', // 邮件历史分类回填(自带 ?key= / Bearer 校验)
 ];
 
 function isPublic(pathname: string): boolean {
