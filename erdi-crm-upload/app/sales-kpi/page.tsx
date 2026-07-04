@@ -16,6 +16,14 @@ import {
 
 export const dynamic = 'force-dynamic';
 
+const KPI_RECOVERY_LABEL: Record<string, string> = {
+  revenue: '收入',
+  wonDeals: '赢单',
+  newCustomers: '新增客户',
+  completedTasks: '完成任务',
+  onTimeRate: '准时率',
+};
+
 async function currentUser() {
   const role = (cookies().get('auth_role')?.value || '').toUpperCase();
   const email = cookies().get('auth_email')?.value || '';
@@ -98,6 +106,10 @@ export default async function SalesKpiPage(props: any) {
     ownerIds: canManage ? undefined : [user.id],
   });
   const users = rows.map((row) => row.owner);
+  const recoveryRecap = await getKpiRecoveryRecap({
+    periodStart: requestedPeriod,
+    owners: users,
+  });
   const totalGaps = rows.reduce((sum, row) => sum + row.gaps.length, 0);
   const criticalGaps = rows.reduce((sum, row) => sum + row.gaps.filter((gap) => gap.severity === 'critical').length, 0);
   const actionGenerated = props.searchParams?.kpiAction === 'generated';
@@ -183,6 +195,66 @@ export default async function SalesKpiPage(props: any) {
         </div>
       </section>
 
+      <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-black text-gray-900">KPI 补救效果复盘</h2>
+            <p className="mt-1 text-xs font-bold text-gray-400">只统计 {periodLabel} 由 KPI 自动拆解生成的补救任务,用于复盘拆解后是否真的补回执行。</p>
+          </div>
+          <Link href="/tasks?view=week" className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-black text-blue-700 hover:bg-blue-100">进入任务中心</Link>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <RecoveryMetric label="补救任务" value={recoveryRecap.total} detail={`待处理 ${recoveryRecap.open}`} tone={recoveryRecap.total > 0 ? 'blue' : 'gray'} />
+          <RecoveryMetric label="已完成" value={recoveryRecap.done} detail={`平均关闭 ${recoveryRecap.avgCloseHours === null ? '-' : `${recoveryRecap.avgCloseHours}小时`}`} tone={recoveryRecap.done > 0 ? 'emerald' : 'gray'} />
+          <RecoveryMetric label="完成率" value={formatPercent(recoveryRecap.completionRate)} detail={`24小时内到期 ${recoveryRecap.dueSoon}`} tone={(recoveryRecap.completionRate || 0) >= 0.8 ? 'emerald' : recoveryRecap.total > 0 ? 'amber' : 'gray'} />
+          <RecoveryMetric label="逾期补救" value={recoveryRecap.overdue} detail={`逾期率 ${formatPercent(recoveryRecap.overdueRate)}`} tone={recoveryRecap.overdue > 0 ? 'rose' : 'emerald'} />
+        </div>
+        <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm font-bold text-indigo-900">
+          {recoveryRecap.recommendation}
+        </div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-3">
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">按指标复盘</h3>
+            <div className="mt-3 space-y-3">
+              {recoveryRecap.byIndicator.map((item) => (
+                <RecoveryBreakdownRow key={item.key} label={item.label} total={item.total} done={item.done} overdue={item.overdue} />
+              ))}
+              {recoveryRecap.byIndicator.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无已拆解的 KPI 补救任务。</div>}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">人员补救执行</h3>
+            <div className="mt-3 space-y-3">
+              {recoveryRecap.byOwner.slice(0, 6).map((item) => (
+                <RecoveryBreakdownRow key={item.ownerId} label={item.ownerName} total={item.total} done={item.done} overdue={item.overdue} />
+              ))}
+              {recoveryRecap.byOwner.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">本月暂无人员补救执行记录。</div>}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">仍需处理</h3>
+            <div className="mt-3 space-y-2">
+              {recoveryRecap.openTasks.map((task) => (
+                <div key={task.id} className={`rounded-lg border px-3 py-2 ${task.isOverdue ? 'border-rose-100 bg-rose-50' : 'border-gray-100 bg-gray-50'}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0 truncate text-xs font-black text-gray-900">{task.title}</div>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-black ${task.isOverdue ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'}`}>
+                      {task.isOverdue ? '逾期' : task.priorityLabel}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-bold text-gray-500">
+                    <span>{task.ownerName}</span>
+                    <Link href={`/customers/${task.companyId}`} className="text-blue-700 hover:underline">{task.companyName}</Link>
+                    <span>{task.dueLabel}</span>
+                  </div>
+                </div>
+              ))}
+              {recoveryRecap.openTasks.length === 0 && <div className="rounded-lg bg-emerald-50 p-3 text-xs font-bold text-emerald-700">没有未完成的 KPI 补救任务。</div>}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {canManage && (
         <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
           <h2 className="text-sm font-black text-gray-900">设置月度目标</h2>
@@ -234,6 +306,101 @@ export default async function SalesKpiPage(props: any) {
   );
 }
 
+async function getKpiRecoveryRecap({ periodStart, owners }: {
+  periodStart: Date;
+  owners: Array<{ id: string; email: string; name: string | null; role: string }>;
+}) {
+  const ownerIds = owners.map((owner) => owner.id);
+  const now = new Date();
+  const periodKey = formatMonth(periodStart);
+  const tasks = ownerIds.length > 0
+    ? await prisma.salesTask.findMany({
+      where: {
+        ownerId: { in: ownerIds },
+        source: 'KPI_AUTO_SPLIT',
+        sourceRef: { startsWith: `kpi:${periodKey}:` },
+      },
+      include: {
+        owner: { select: { id: true, email: true, name: true } },
+        company: { select: { id: true, name: true } },
+      },
+      orderBy: [{ status: 'asc' }, { dueAt: 'asc' }, { createdAt: 'desc' }],
+      take: 400,
+    })
+    : [];
+
+  const doneTasks = tasks.filter((task) => task.status === 'DONE');
+  const openTasks = tasks.filter((task) => task.status === 'TODO');
+  const overdueTasks = openTasks.filter((task) => task.dueAt && task.dueAt.getTime() < now.getTime());
+  const dueSoonTasks = openTasks.filter((task) => {
+    if (!task.dueAt || task.dueAt.getTime() < now.getTime()) return false;
+    return task.dueAt.getTime() <= now.getTime() + 24 * 60 * 60 * 1000;
+  });
+  const closeHours = doneTasks
+    .filter((task) => task.completedAt)
+    .map((task) => Math.max(0, (task.completedAt!.getTime() - task.createdAt.getTime()) / 36e5));
+  const avgCloseHours = closeHours.length > 0 ? Math.round(closeHours.reduce((sum, item) => sum + item, 0) / closeHours.length) : null;
+
+  const byIndicator = Object.entries(KPI_RECOVERY_LABEL).map(([key, label]) => {
+    const bucket = tasks.filter((task) => parseKpiRecoveryKey(task.sourceRef) === key);
+    const done = bucket.filter((task) => task.status === 'DONE').length;
+    const overdue = bucket.filter((task) => task.status === 'TODO' && task.dueAt && task.dueAt.getTime() < now.getTime()).length;
+    return { key, label, total: bucket.length, done, overdue, completionRate: bucket.length > 0 ? done / bucket.length : null };
+  }).filter((item) => item.total > 0);
+
+  const ownerById = new Map(owners.map((owner) => [owner.id, owner]));
+  const byOwner = ownerIds.map((ownerId) => {
+    const owner = ownerById.get(ownerId);
+    const bucket = tasks.filter((task) => task.ownerId === ownerId);
+    const done = bucket.filter((task) => task.status === 'DONE').length;
+    const overdue = bucket.filter((task) => task.status === 'TODO' && task.dueAt && task.dueAt.getTime() < now.getTime()).length;
+    return {
+      ownerId,
+      ownerName: owner?.name || owner?.email || '未命名',
+      total: bucket.length,
+      done,
+      overdue,
+      completionRate: bucket.length > 0 ? done / bucket.length : null,
+    };
+  }).filter((item) => item.total > 0).sort((a, b) => b.overdue - a.overdue || b.total - a.total || a.ownerName.localeCompare(b.ownerName));
+
+  const openTaskRows = openTasks
+    .map((task) => ({
+      id: task.id,
+      title: task.title,
+      priorityLabel: priorityLabel(task.priority),
+      ownerName: task.owner.name || task.owner.email,
+      companyId: task.company.id,
+      companyName: task.company.name,
+      dueLabel: formatDue(task.dueAt, now),
+      isOverdue: Boolean(task.dueAt && task.dueAt.getTime() < now.getTime()),
+      dueAt: task.dueAt,
+    }))
+    .sort((a, b) => Number(b.isOverdue) - Number(a.isOverdue) || (a.dueAt?.getTime() || 0) - (b.dueAt?.getTime() || 0))
+    .slice(0, 6);
+
+  const total = tasks.length;
+  const done = doneTasks.length;
+  const overdue = overdueTasks.length;
+  const completionRate = total > 0 ? done / total : null;
+  const overdueRate = total > 0 ? overdue / total : null;
+
+  return {
+    total,
+    done,
+    open: openTasks.length,
+    overdue,
+    dueSoon: dueSoonTasks.length,
+    completionRate,
+    overdueRate,
+    avgCloseHours,
+    byIndicator,
+    byOwner,
+    openTasks: openTaskRows,
+    recommendation: kpiRecoveryRecommendation({ total, done, overdue, dueSoon: dueSoonTasks.length, completionRate }),
+  };
+}
+
 function KpiRow({ row }: { row: any }) {
   return (
     <div className="p-5">
@@ -258,6 +425,39 @@ function KpiRow({ row }: { row: any }) {
         <span>逾期任务:{row.overdueTasks}</span>
         {row.target?.notes && <span>备注:{row.target.notes}</span>}
       </div>
+    </div>
+  );
+}
+
+function RecoveryMetric({ label, value, detail, tone }: { label: string; value: string | number; detail: string; tone: 'blue' | 'emerald' | 'amber' | 'rose' | 'gray' }) {
+  const color = tone === 'emerald'
+    ? 'border-emerald-100 bg-emerald-50 text-emerald-800'
+    : tone === 'amber'
+      ? 'border-amber-100 bg-amber-50 text-amber-800'
+      : tone === 'rose'
+        ? 'border-rose-100 bg-rose-50 text-rose-800'
+        : tone === 'blue'
+          ? 'border-blue-100 bg-blue-50 text-blue-800'
+          : 'border-gray-100 bg-gray-50 text-gray-700';
+  return (
+    <div className={`rounded-xl border p-4 ${color}`}>
+      <div className="text-xs font-black opacity-75">{label}</div>
+      <div className="mt-1 text-2xl font-black">{value}</div>
+      <div className="mt-1 text-xs font-bold opacity-70">{detail}</div>
+    </div>
+  );
+}
+
+function RecoveryBreakdownRow({ label, total, done, overdue }: { label: string; total: number; done: number; overdue: number }) {
+  const rate = total > 0 ? done / total : null;
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-xs font-black text-gray-900">{label}</span>
+        <span className="shrink-0 text-xs font-black text-gray-500">{done}/{total}</span>
+      </div>
+      <ProgressBar rate={rate} />
+      <div className="mt-1 text-[11px] font-bold text-gray-400">完成率 {formatPercent(rate)} · 逾期 {overdue}</div>
     </div>
   );
 }
@@ -315,6 +515,32 @@ function TargetInput({ name, label }: { name: string; label: string }) {
       <input name={name} type="number" min="0" step="1" defaultValue="0" className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-bold text-gray-900 outline-none focus:border-indigo-400" />
     </label>
   );
+}
+
+function parseKpiRecoveryKey(sourceRef: string | null) {
+  const key = String(sourceRef || '').split(':').pop() || '';
+  return KPI_RECOVERY_LABEL[key] ? key : 'unknown';
+}
+
+function priorityLabel(priority: string) {
+  return priority === 'URGENT' ? '紧急' : priority === 'HIGH' ? '高' : priority === 'LOW' ? '低' : '普通';
+}
+
+function formatDue(value: Date | null, now: Date) {
+  if (!value) return '无截止';
+  const diffDays = Math.ceil((value.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+  if (diffDays < 0) return `逾期 ${Math.abs(diffDays)} 天`;
+  if (diffDays === 0) return '今天到期';
+  if (diffDays === 1) return '明天到期';
+  return `${diffDays} 天后到期`;
+}
+
+function kpiRecoveryRecommendation(input: { total: number; done: number; overdue: number; dueSoon: number; completionRate: number | null }) {
+  if (input.total === 0) return '本月暂无 KPI 自动补救任务。若目标落后,先点击一键拆解,再用这里复盘执行闭环。';
+  if (input.overdue > 0) return `有 ${input.overdue} 个 KPI 补救任务已经逾期,优先进入任务中心处理这些客户动作,避免拆了任务但没有补回结果。`;
+  if (input.dueSoon > 0) return `有 ${input.dueSoon} 个 KPI 补救任务 24 小时内到期,今天需要集中清掉,防止明天变成逾期。`;
+  if ((input.completionRate || 0) >= 0.8) return 'KPI 补救任务执行率良好,下一步应复盘哪些指标真的被补回,把有效打法固化到团队节奏。';
+  return 'KPI 补救任务完成率偏低,建议按人员和指标逐项追问阻塞原因,必要时重新分派给更合适的负责人。';
 }
 
 function numberInput(value: FormDataEntryValue | null) {
