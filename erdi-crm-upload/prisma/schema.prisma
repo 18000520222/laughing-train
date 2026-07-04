@@ -28,6 +28,7 @@ model User {
   notifications Notification[]
   socialAccounts SocialAccount[]
   automationRuns AutomationRun[]
+  assignmentRules SalesAssignmentRule[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -331,6 +332,55 @@ model FollowUp {
   user      User     @relation(fields: [userId], references: [id])
 
   createdAt DateTime @default(now())
+}
+
+
+// --- 模块二十:销售指挥台与线索分配 ---
+
+enum SalesAssignmentDistribution {
+  ROUND_ROBIN
+  LOWEST_LOAD
+  FIXED_OWNER
+}
+
+model SalesAssignmentRule {
+  id          String @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean @default(true)
+  priority    Int     @default(100)
+
+  customerTypes CustomerType[]
+  countries     String[]
+  sources       String[]
+  minPriorityScore Int @default(0)
+
+  ownerIds     String[]
+  distribution SalesAssignmentDistribution @default(ROUND_ROBIN)
+  lastAssignedOwnerId String?
+
+  createdById String?
+  createdBy   User? @relation(fields: [createdById], references: [id])
+  runs        SalesAssignmentRun[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, priority])
+}
+
+model SalesAssignmentRun {
+  id String @id @default(cuid())
+  ruleId String
+  rule SalesAssignmentRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  scannedCount Int @default(0)
+  assignedCount Int @default(0)
+  summary Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([ruleId, createdAt])
 }
 
 

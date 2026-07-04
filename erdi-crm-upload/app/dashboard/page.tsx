@@ -95,6 +95,7 @@ export default async function Dashboard() {
           <NavBtn href="/products" color="amber">🛒 产品</NavBtn>
           <NavBtn href="/settings" color="gray">⚙️ 设置</NavBtn>
           <NavBtn href="/analytics" color="blue">📈 数据</NavBtn>
+          <NavBtn href="/sales-command" color="rose">🎯 指挥台</NavBtn>
           <NavBtn href="/attendance" color="pink">📅 考勤</NavBtn>
           <NavBtn href="/expenses" color="orange">💰 报账</NavBtn>
           <NavBtn href="/shipments" color="teal">🚚 发货</NavBtn>
@@ -136,6 +137,7 @@ function NavBtn({ href, color, children }: { href: string; color: string; childr
     pink: 'bg-pink-50 text-pink-700 hover:bg-pink-100 border-pink-100',
     orange: 'bg-orange-50 text-orange-700 hover:bg-orange-100 border-orange-100',
     teal: 'bg-teal-50 text-teal-700 hover:bg-teal-100 border-teal-100',
+    rose: 'bg-rose-50 text-rose-700 hover:bg-rose-100 border-rose-100',
   };
   return (
     <Link href={href} className={`text-sm border px-3 py-2 rounded-lg font-medium transition-colors ${map[color]}`}>
