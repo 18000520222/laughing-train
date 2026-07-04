@@ -27,6 +27,7 @@ model User {
   attendancesApproved  AttendanceRequest[] @relation("AttendanceApprovedBy")
   notifications Notification[]
   socialAccounts SocialAccount[]
+  automationRuns AutomationRun[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -567,4 +568,86 @@ model InboxMessage {
   @@unique([channel, externalId])
   @@index([channel, status])
   @@index([threadId])
+}
+
+// --- 模块十九:自动化流程中台 ---
+
+enum AutomationChannel {
+  ALL
+  CHAT_WIDGET
+  WHATSAPP
+  EMAIL
+  ALIBABA
+  AMAZON
+  SHOPEE
+  FACEBOOK
+  LINKEDIN
+}
+
+enum AutomationStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+}
+
+enum AutomationRunStatus {
+  MATCHED
+  SKIPPED
+  ACTION_SENT
+  FAILED
+}
+
+model AutomationFlow {
+  id          String @id @default(cuid())
+  flowCode    String @unique
+  name        String
+  description String?
+  category    String @default("default")
+  templateKey String?
+  channel     AutomationChannel @default(ALL)
+  status      AutomationStatus @default(DRAFT)
+
+  triggerType   String
+  triggerConfig Json?
+  conditionType String?
+  conditionConfig Json?
+  actionType    String
+  actionConfig  Json?
+  canvas        Json?
+
+  triggerCount       Int   @default(0)
+  uniqueContactCount Int   @default(0)
+  participationRate  Float @default(0)
+
+  lastRunAt DateTime?
+  runs      AutomationRun[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, channel])
+  @@index([category])
+}
+
+model AutomationRun {
+  id     String @id @default(cuid())
+  flowId String
+  flow   AutomationFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  inboxMessageId String?
+  channel        AutomationChannel
+  contactKey     String?
+  status         AutomationRunStatus
+  matched        Boolean @default(false)
+  summary        String?
+  input          Json?
+  output         Json?
+
+  userId String?
+  user   User? @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([flowId, createdAt])
+  @@index([channel, status])
 }

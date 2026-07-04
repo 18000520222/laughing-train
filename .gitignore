@@ -3,6 +3,7 @@
 *.csv
 *.py
 !erdi-crm-upload/**
+erdi-crm-upload/scripts/
 
 # 但保留 CRM 项目内的配置类 json
 !erdi-crm-upload/package.json

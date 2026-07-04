@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && prisma db push && next build",
+    "build": "NODE_ENV=production prisma generate && NODE_ENV=production prisma db push && NODE_ENV=production next build",
     "start": "next start",
     "postinstall": "prisma generate"
   },
