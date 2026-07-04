@@ -273,6 +273,12 @@ export default async function AutomationPage(props: any) {
     }),
   ]);
 
+  const governanceFlows = await prisma.automationFlow.findMany({
+    orderBy: { updatedAt: 'desc' },
+    take: 200,
+    include: { runs: { orderBy: { createdAt: 'desc' }, take: 20 } },
+  });
+
   const selected = selectedId
     ? await prisma.automationFlow.findUnique({
         where: { id: selectedId },
@@ -283,6 +289,7 @@ export default async function AutomationPage(props: any) {
   const activeCount = flows.filter((flow) => flow.status === 'ACTIVE').length;
   const totalTriggers = flows.reduce((sum, flow) => sum + flow.triggerCount, 0);
   const totalContacts = flows.reduce((sum, flow) => sum + flow.uniqueContactCount, 0);
+  const governance = buildAutomationGovernance(governanceFlows);
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 md:p-8">
@@ -303,6 +310,76 @@ export default async function AutomationPage(props: any) {
           <Metric icon={<BarChart3 className="h-4 w-4" />} label="触达客户" value={totalContacts} />
         </div>
       </header>
+
+      <section className="mb-6 rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">自动化治理驾驶舱</h2>
+            <p className="mt-1 text-xs text-gray-500">按 HubSpot/Pipedrive/Zoho 的工作流治理思路,持续检查启用覆盖、命中率、失败、跳过和草稿积压。</p>
+          </div>
+          <div className={`rounded-lg px-3 py-2 text-xs font-black ${governance.healthScore >= 80 ? 'bg-emerald-50 text-emerald-700' : governance.healthScore >= 55 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>
+            健康度 {governance.healthScore}
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <GovernanceMetric label="流程总数" value={governance.totalFlows} detail={`${governance.activeFlows} 个已开启`} tone="blue" />
+          <GovernanceMetric label="启用覆盖" value={formatAutomationPercent(governance.activeRate)} detail={`${governance.draftFlows} 草稿 · ${governance.pausedFlows} 暂停`} tone={(governance.activeRate || 0) >= 0.6 ? 'emerald' : 'amber'} />
+          <GovernanceMetric label="样本运行" value={governance.sampleRuns} detail="最近 20 条/流程" tone="slate" />
+          <GovernanceMetric label="命中率" value={formatAutomationPercent(governance.matchRate)} detail={`${governance.matchedRuns} 次命中`} tone={(governance.matchRate || 0) >= 0.5 ? 'emerald' : 'amber'} />
+          <GovernanceMetric label="失败运行" value={governance.failedRuns} detail="需要修配置/授权" tone={governance.failedRuns > 0 ? 'rose' : 'emerald'} />
+          <GovernanceMetric label="跳过运行" value={governance.skippedRuns} detail="条件未命中或流程错配" tone={governance.skippedRuns > 0 ? 'amber' : 'emerald'} />
+        </div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">治理待办</h3>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {governance.actionItems.map((item) => (
+                <div key={item.title} className={`rounded-lg border px-3 py-2 ${item.tone === 'rose' ? 'border-rose-100 bg-rose-50 text-rose-800' : item.tone === 'amber' ? 'border-amber-100 bg-amber-50 text-amber-800' : 'border-emerald-100 bg-emerald-50 text-emerald-800'}`}>
+                  <div className="text-xs font-black">{item.title}</div>
+                  <div className="mt-1 text-[11px] font-bold opacity-75">{item.detail}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">分类覆盖</h3>
+            <div className="mt-3 space-y-3">
+              {governance.categoryRows.map((row) => (
+                <AutomationBar key={row.category} label={row.category} value={row.activeFlows} max={governance.maxCategoryActive} detail={`${row.totalFlows} 流程 · ${row.triggerCount} 触发 · ${row.uniqueContactCount} 客户`} />
+              ))}
+              {governance.categoryRows.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无流程分类。</div>}
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-gray-50 text-xs font-black text-gray-500">
+              <tr>
+                <th className="p-3">需关注流程</th>
+                <th className="p-3">状态</th>
+                <th className="p-3">最近运行</th>
+                <th className="p-3">命中率</th>
+                <th className="p-3">风险</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {governance.riskRows.map((row) => (
+                <tr key={row.id} className="hover:bg-gray-50">
+                  <td className="p-3">
+                    <Link href={`/automation?flow=${row.id}`} className="font-black text-gray-900 hover:text-indigo-700">{row.name}</Link>
+                    <div className="mt-0.5 text-[11px] font-mono text-gray-400">{row.flowCode}</div>
+                  </td>
+                  <td className="p-3"><StatusPill status={row.status} /></td>
+                  <td className="p-3 font-bold text-gray-700">{row.recentRuns}</td>
+                  <td className="p-3 font-bold text-gray-700">{formatAutomationPercent(row.matchRate)}</td>
+                  <td className="p-3 text-xs font-bold text-gray-600">{row.reason}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {governance.riskRows.length === 0 && <div className="p-8 text-center text-sm font-bold text-gray-400">当前没有明显自动化治理风险。</div>}
+        </div>
+      </section>
 
       <div className="grid grid-cols-1 2xl:grid-cols-[minmax(560px,0.95fr)_minmax(640px,1.05fr)] gap-6">
         <section className="space-y-6">
@@ -553,6 +630,168 @@ export default async function AutomationPage(props: any) {
           </div>
         </section>
       </div>
+    </div>
+  );
+}
+
+function buildAutomationGovernance(flows: any[]) {
+  const totalFlows = flows.length;
+  const activeFlows = flows.filter((flow) => flow.status === 'ACTIVE').length;
+  const pausedFlows = flows.filter((flow) => flow.status === 'PAUSED').length;
+  const draftFlows = flows.filter((flow) => flow.status === 'DRAFT').length;
+  const allRuns = flows.flatMap((flow) => flow.runs || []);
+  const sampleRuns = allRuns.length;
+  const matchedRuns = allRuns.filter((run) => run.matched).length;
+  const failedRuns = allRuns.filter((run) => run.status === 'FAILED').length;
+  const skippedRuns = allRuns.filter((run) => run.status === 'SKIPPED').length;
+  const activeNeverRun = flows.filter((flow) => flow.status === 'ACTIVE' && !flow.lastRunAt && flow.triggerCount === 0).length;
+  const lowMatchFlows = flows.filter((flow) => {
+    const runs = flow.runs || [];
+    if (runs.length < 5) return false;
+    return runs.filter((run: any) => run.matched).length / runs.length < 0.35;
+  }).length;
+  const activeRate = totalFlows ? activeFlows / totalFlows : null;
+  const matchRate = sampleRuns ? matchedRuns / sampleRuns : null;
+  const healthPenalty =
+    (totalFlows === 0 ? 35 : 0) +
+    (activeRate === null ? 0 : Math.max(0, 0.55 - activeRate) * 35) +
+    failedRuns * 8 +
+    activeNeverRun * 7 +
+    lowMatchFlows * 6 +
+    Math.min(18, skippedRuns * 1.5);
+  const healthScore = Math.max(0, Math.min(100, Math.round(100 - healthPenalty)));
+
+  const actionItems = [];
+  if (totalFlows === 0) {
+    actionItems.push({ title: '先创建核心流程', detail: '建议从新线索分配、关键词回复、高价值提醒三个模板开始。', tone: 'amber' });
+  }
+  if (totalFlows > 0 && activeFlows === 0) {
+    actionItems.push({ title: '没有启用流程', detail: '至少开启一个低风险草稿流程,否则自动化中台只是看板。', tone: 'rose' });
+  }
+  if (activeNeverRun > 0) {
+    actionItems.push({ title: '已开启但未触发', detail: `${activeNeverRun} 个流程开启后还没有运行,检查触发器/渠道/入口。`, tone: 'amber' });
+  }
+  if (failedRuns > 0) {
+    actionItems.push({ title: '存在失败运行', detail: `最近样本中有 ${failedRuns} 次失败,优先检查授权、动作配置和收件箱数据。`, tone: 'rose' });
+  }
+  if (lowMatchFlows > 0) {
+    actionItems.push({ title: '条件过严', detail: `${lowMatchFlows} 个流程近期命中率低于 35%,需要放宽关键词/意图/时间条件。`, tone: 'amber' });
+  }
+  if (draftFlows > activeFlows && draftFlows > 0) {
+    actionItems.push({ title: '草稿积压', detail: `${draftFlows} 个草稿未上线,可复制后小流量测试。`, tone: 'amber' });
+  }
+  if (actionItems.length === 0) {
+    actionItems.push({ title: '治理状态稳定', detail: '当前启用、命中和失败状态正常,下一步关注转化结果归因。', tone: 'emerald' });
+  }
+
+  const categoryMap = new Map<string, { category: string; totalFlows: number; activeFlows: number; triggerCount: number; uniqueContactCount: number }>();
+  for (const flow of flows) {
+    const key = flow.category || '未分类';
+    const row = categoryMap.get(key) || { category: key, totalFlows: 0, activeFlows: 0, triggerCount: 0, uniqueContactCount: 0 };
+    row.totalFlows += 1;
+    row.activeFlows += flow.status === 'ACTIVE' ? 1 : 0;
+    row.triggerCount += flow.triggerCount || 0;
+    row.uniqueContactCount += flow.uniqueContactCount || 0;
+    categoryMap.set(key, row);
+  }
+  const categoryRows = Array.from(categoryMap.values()).sort((a, b) => b.activeFlows - a.activeFlows || b.triggerCount - a.triggerCount || b.totalFlows - a.totalFlows);
+
+  const riskRows = flows
+    .map((flow) => {
+      const runs = flow.runs || [];
+      const flowFailedRuns = runs.filter((run: any) => run.status === 'FAILED').length;
+      const flowSkippedRuns = runs.filter((run: any) => run.status === 'SKIPPED').length;
+      const flowMatchedRuns = runs.filter((run: any) => run.matched).length;
+      const flowMatchRate = runs.length ? flowMatchedRuns / runs.length : null;
+      let reason = '';
+      let weight = 0;
+      if (flow.status === 'ACTIVE' && !flow.lastRunAt && flow.triggerCount === 0) {
+        reason = '已开启但从未触发';
+        weight = 80;
+      } else if (flowFailedRuns > 0) {
+        reason = `最近 ${flowFailedRuns} 次失败`;
+        weight = 90 + flowFailedRuns;
+      } else if (runs.length >= 5 && flowMatchRate !== null && flowMatchRate < 0.35) {
+        reason = '近期命中率偏低';
+        weight = 70;
+      } else if (runs.length >= 5 && flowSkippedRuns / runs.length >= 0.7) {
+        reason = '跳过过多,条件可能错配';
+        weight = 65;
+      } else if (flow.status === 'DRAFT') {
+        reason = '草稿未上线';
+        weight = 45;
+      } else if (flow.status === 'PAUSED') {
+        reason = '流程已暂停';
+        weight = 35;
+      }
+      return {
+        id: flow.id,
+        flowCode: flow.flowCode,
+        name: flow.name,
+        status: flow.status,
+        recentRuns: runs.length,
+        matchRate: flowMatchRate,
+        reason,
+        weight,
+      };
+    })
+    .filter((row) => row.reason)
+    .sort((a, b) => b.weight - a.weight || b.recentRuns - a.recentRuns)
+    .slice(0, 8);
+
+  return {
+    totalFlows,
+    activeFlows,
+    pausedFlows,
+    draftFlows,
+    activeRate,
+    sampleRuns,
+    matchedRuns,
+    failedRuns,
+    skippedRuns,
+    matchRate,
+    healthScore,
+    actionItems,
+    categoryRows,
+    maxCategoryActive: Math.max(1, ...categoryRows.map((row) => row.activeFlows)),
+    riskRows,
+  };
+}
+
+function formatAutomationPercent(value: number | null) {
+  if (value === null) return '-';
+  return `${Math.round(value * 100)}%`;
+}
+
+function GovernanceMetric({ label, value, detail, tone }: { label: string; value: number | string; detail: string; tone: string }) {
+  const color: Record<string, string> = {
+    blue: 'border-blue-100 bg-blue-50 text-blue-800',
+    emerald: 'border-emerald-100 bg-emerald-50 text-emerald-800',
+    amber: 'border-amber-100 bg-amber-50 text-amber-800',
+    rose: 'border-rose-100 bg-rose-50 text-rose-800',
+    slate: 'border-slate-100 bg-slate-50 text-slate-800',
+  };
+  return (
+    <div className={`rounded-xl border p-3 ${color[tone] || color.slate}`}>
+      <div className="text-xs font-bold opacity-70">{label}</div>
+      <div className="mt-1 text-xl font-black">{value}</div>
+      <div className="mt-1 text-[11px] font-bold opacity-70">{detail}</div>
+    </div>
+  );
+}
+
+function AutomationBar({ label, value, max, detail }: { label: string; value: number; max: number; detail: string }) {
+  const width = Math.max(3, Math.round((value / Math.max(1, max)) * 100));
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <div className="truncate text-xs font-black text-gray-700">{label}</div>
+        <div className="text-xs font-bold text-gray-400">{value}</div>
+      </div>
+      <div className="h-2 rounded-full bg-gray-100">
+        <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${width}%` }} />
+      </div>
+      <div className="mt-1 text-[11px] font-bold text-gray-400">{detail}</div>
     </div>
   );
 }
