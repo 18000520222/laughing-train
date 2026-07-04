@@ -1,6 +1,7 @@
 // app/api/auth/linkedin/start/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { canonicalOrigin } from '@/lib/site-url';
 
 
 
@@ -11,8 +12,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: '请先在设置中配置 LinkedIn Client ID' }, { status: 400 });
   }
 
-  const origin = new URL(req.url).origin;
-  const redirectUri = `${origin}/api/auth/linkedin/callback`;
+  const redirectUri = `${canonicalOrigin()}/api/auth/linkedin/callback`;
   const scope = 'openid profile email r_organization_social rw_organization_admin r_ads_leadgen_automation';
   const state = Math.random().toString(36).slice(2);
 

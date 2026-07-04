@@ -1,6 +1,7 @@
 // app/api/auth/shopee/start/route.ts — 跳转 Shopee 店铺授权页
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { canonicalOrigin } from '@/lib/site-url';
 import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
@@ -13,8 +14,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: '请先配置 Shopee Partner ID / Partner Key' }, { status: 400 });
   }
   const base = s?.shopeeRegion || 'https://partner.shopeemobile.com';
-  const origin = new URL(req.url).origin;
-  const redirectUri = `${origin}/api/auth/shopee/callback`;
+  const redirectUri = `${canonicalOrigin()}/api/auth/shopee/callback`;
 
   const apiPath = '/api/v2/shop/auth_partner';
   const ts = Math.floor(Date.now() / 1000);

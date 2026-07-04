@@ -1,6 +1,7 @@
 // app/api/auth/alibaba/start/route.ts — 跳转阿里国际站授权页
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { canonicalOrigin } from '@/lib/site-url';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,8 +11,7 @@ export async function GET(req: Request) {
   if (!appKey) {
     return NextResponse.json({ error: '请先在设置中配置 Alibaba AppKey/AppSecret' }, { status: 400 });
   }
-  const origin = new URL(req.url).origin;
-  const redirectUri = `${origin}/api/auth/alibaba/callback`;
+  const redirectUri = `${canonicalOrigin()}/api/auth/alibaba/callback`;
   // 国际站新版授权地址(consumer 授权)
   const url =
     `https://openapi-auth.alibaba.com/oauth/authorize` +

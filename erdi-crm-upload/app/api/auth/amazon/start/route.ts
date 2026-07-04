@@ -1,6 +1,7 @@
 // app/api/auth/amazon/start/route.ts — 跳转 Amazon Seller Central 授权(LWA)
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { canonicalOrigin } from '@/lib/site-url';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,8 +13,7 @@ export async function GET(req: Request) {
   if (!appId) {
     return NextResponse.json({ error: '请先配置 Amazon 应用(LWA Client ID / App ID)' }, { status: 400 });
   }
-  const origin = new URL(req.url).origin;
-  const redirectUri = `${origin}/api/auth/amazon/callback`;
+  const redirectUri = `${canonicalOrigin()}/api/auth/amazon/callback`;
   const state = Math.random().toString(36).slice(2);
   // 卖家授权页(北美站示例)；其它站点域名不同，凭据到位后按 region 调整。
   const url =

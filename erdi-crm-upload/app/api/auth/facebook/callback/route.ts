@@ -1,6 +1,7 @@
 // app/api/auth/facebook/callback/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { canonicalOrigin } from '@/lib/site-url';
 
 
 
@@ -18,8 +19,7 @@ export async function GET(req: Request) {
     return NextResponse.redirect(new URL('/social?error=missing_app_config', req.url));
   }
 
-  const origin = new URL(req.url).origin;
-  const redirectUri = `${origin}/api/auth/facebook/callback`;
+  const redirectUri = `${canonicalOrigin()}/api/auth/facebook/callback`;
 
   // 1. 用 code 换 user token
   const tokenRes = await fetch(`https://graph.facebook.com/v18.0/oauth/access_token?client_id=${appId}&client_secret=${appSecret}&redirect_uri=${encodeURIComponent(redirectUri)}&code=${code}`);

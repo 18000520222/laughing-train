@@ -1,6 +1,7 @@
 // app/api/auth/linkedin/callback/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { canonicalOrigin } from '@/lib/site-url';
 
 
 
@@ -16,8 +17,7 @@ export async function GET(req: Request) {
     return NextResponse.redirect(new URL('/social?error=missing_app_config', req.url));
   }
 
-  const origin = new URL(req.url).origin;
-  const redirectUri = `${origin}/api/auth/linkedin/callback`;
+  const redirectUri = `${canonicalOrigin()}/api/auth/linkedin/callback`;
 
   const tokenRes = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
     method: 'POST',

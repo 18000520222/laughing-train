@@ -1,6 +1,7 @@
 // app/api/auth/amazon/callback/route.ts — 用 spapi_oauth_code 换 refresh_token(LWA)
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { canonicalOrigin } from '@/lib/site-url';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,8 +21,7 @@ export async function GET(req: Request) {
     return NextResponse.redirect(new URL('/settings/channels?error=missing_amazon_lwa', req.url));
   }
 
-  const origin = new URL(req.url).origin;
-  const redirectUri = `${origin}/api/auth/amazon/callback`;
+  const redirectUri = `${canonicalOrigin()}/api/auth/amazon/callback`;
 
   try {
     const res = await fetch(LWA_TOKEN_URL, {
