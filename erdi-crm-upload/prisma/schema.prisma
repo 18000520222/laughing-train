@@ -435,6 +435,7 @@ model SalesTask {
   status      SalesTaskStatus @default(TODO)
 
   dueAt       DateTime?
+  reminderSentAt DateTime?
   completedAt DateTime?
 
   ownerId     String
