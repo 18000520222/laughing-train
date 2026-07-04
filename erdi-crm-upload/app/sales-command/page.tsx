@@ -317,6 +317,7 @@ export default async function SalesCommandPage() {
         </div>
         <div className="flex gap-2">
           <Link href="/customers" className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-gray-700 text-sm font-bold hover:bg-gray-50">客户列表</Link>
+          <Link href="/sales-kpi" className="px-4 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm font-bold hover:bg-emerald-100">销售KPI</Link>
           <Link href="/tasks" className="px-4 py-2 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-sm font-bold hover:bg-blue-100">销售任务</Link>
           <Link href="/automation" className="px-4 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm font-bold hover:bg-indigo-100">自动化流程</Link>
           {canManage && (

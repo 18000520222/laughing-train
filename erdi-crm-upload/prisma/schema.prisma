@@ -31,6 +31,7 @@ model User {
   assignmentRules SalesAssignmentRule[]
   salesTasks SalesTask[] @relation("SalesTaskOwner")
   createdSalesTasks SalesTask[] @relation("SalesTaskCreatedBy")
+  salesKpiTargets SalesKpiTarget[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -463,6 +464,28 @@ model SalesTask {
   @@index([ownerId, status, dueAt])
   @@index([companyId, status, dueAt])
   @@index([status, dueAt])
+}
+
+// --- 模块二十二:销售 KPI 目标与达成 ---
+
+model SalesKpiTarget {
+  id          String @id @default(cuid())
+  ownerId     String
+  owner       User @relation(fields: [ownerId], references: [id])
+  periodStart DateTime
+
+  revenueTargetUSD   Float @default(0)
+  wonDealsTarget     Int   @default(0)
+  newCustomersTarget Int   @default(0)
+  completedTasksTarget Int @default(0)
+  onTimeRateTarget   Float @default(0.8)
+  notes       String? @db.Text
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([ownerId, periodStart])
+  @@index([periodStart])
 }
 
 

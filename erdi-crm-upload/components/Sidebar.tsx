@@ -27,6 +27,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { href: '/customers', label: '客户管理', icon: '👥' },
       { href: '/sales-command', label: '销售指挥台', icon: '🎯' },
+      { href: '/sales-kpi', label: '销售KPI', icon: '🏁' },
       { href: '/tasks', label: '销售任务', icon: '✅' },
       { href: '/omnibox', label: '统一收件箱', icon: '📥' },
       { href: '/automation', label: '自动化流程', icon: '🤖' },
