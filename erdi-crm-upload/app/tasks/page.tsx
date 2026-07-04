@@ -25,6 +25,13 @@ const TYPE_LABEL: Record<string, string> = {
   GENERAL: '通用',
 };
 
+const PRIORITY_WEIGHT: Record<string, number> = {
+  URGENT: 4,
+  HIGH: 3,
+  NORMAL: 2,
+  LOW: 1,
+};
+
 async function currentUser() {
   const role = (cookies().get('auth_role')?.value || '').toUpperCase();
   const email = cookies().get('auth_email')?.value || '';
@@ -300,6 +307,8 @@ export default async function TasksPage(props: any) {
   tomorrow.setDate(tomorrow.getDate() + 1);
   const weekAgo = new Date();
   weekAgo.setDate(weekAgo.getDate() - 7);
+  const reportStart = startOfDay(new Date());
+  reportStart.setDate(reportStart.getDate() - 13);
   const weekEnd = new Date();
   weekEnd.setDate(weekEnd.getDate() + 7);
 
@@ -319,7 +328,7 @@ export default async function TasksPage(props: any) {
     if (view === 'drafted') where.draftGeneratedAt = { not: null };
   }
 
-  const [tasks, openCount, overdueCount, todayCount, doneWeekCount, weekCount, noDueCount, users, companies, opportunities, weekTasks, ownerTaskRows, ownerDoneRows] = await Promise.all([
+  const [tasks, openCount, overdueCount, todayCount, doneWeekCount, weekCount, noDueCount, users, companies, opportunities, weekTasks, ownerTaskRows, ownerDoneRows, completedReportTasks, nextTaskCandidates] = await Promise.all([
     prisma.salesTask.findMany({
       where,
       orderBy: [{ dueAt: 'asc' }, { priority: 'desc' }, { createdAt: 'desc' }],
@@ -348,6 +357,18 @@ export default async function TasksPage(props: any) {
     }),
     prisma.salesTask.groupBy({ by: ['ownerId'], where: { status: 'TODO' }, _count: { _all: true } }),
     prisma.salesTask.groupBy({ by: ['ownerId'], where: { status: 'DONE', completedAt: { gte: weekAgo } }, _count: { _all: true } }),
+    prisma.salesTask.findMany({
+      where: { ...baseWhere, status: 'DONE', completedAt: { gte: reportStart } },
+      orderBy: { completedAt: 'asc' },
+      include: { owner: true, company: true },
+      take: 400,
+    }),
+    prisma.salesTask.findMany({
+      where: { ...baseWhere, status: 'TODO' },
+      orderBy: [{ dueAt: 'asc' }, { priority: 'desc' }, { createdAt: 'asc' }],
+      include: { owner: true, company: true, opportunity: true },
+      take: 60,
+    }),
   ]);
 
   const doneByOwner = new Map(ownerDoneRows.map((row) => [row.ownerId, row._count._all]));
@@ -367,6 +388,8 @@ export default async function TasksPage(props: any) {
   const companyNameById = new Map(companies.map((company) => [company.id, company.name]));
   const maxOwnerOpen = Math.max(1, ...ownerStats.map((item) => item.open));
   const bulkFormId = 'sales-task-bulk-form';
+  const taskReport = buildTaskReport(completedReportTasks, users, { openCount, overdueCount, reportStart });
+  const nextTask = pickNextTask(nextTaskCandidates);
 
   const qs = (extra: Record<string, string>) => {
     const params = new URLSearchParams();
@@ -408,6 +431,87 @@ export default async function TasksPage(props: any) {
         <QueueCard href={`/tasks?${qs({ view: 'today' })}`} label="今日队列" count={todayCount} note="今天必须完成或顺延" tone="amber" />
         <QueueCard href={`/tasks?${qs({ view: 'week' })}`} label="7天排程" count={weekCount} note="本周要推进的跟进动作" tone="blue" />
         <QueueCard href={`/tasks?${qs({ view: 'unscheduled' })}`} label="未排期队列" count={noDueCount} note="需要补截止时间" tone="slate" />
+      </section>
+
+      <section className="mb-6 grid gap-4 xl:grid-cols-[minmax(320px,0.85fr)_minmax(0,1.15fr)]">
+        <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-black text-gray-900">下一条该做</h2>
+              <p className="mt-1 text-xs text-gray-400">按逾期、截止时间和优先级自动挑选。</p>
+            </div>
+            {nextTask && <TaskPriority priority={nextTask.priority} />}
+          </div>
+          {nextTask ? (
+            <div>
+              <div className="text-lg font-black text-gray-900">{nextTask.title}</div>
+              <div className="mt-2 text-sm leading-relaxed text-gray-600">{nextTask.description || '暂无说明'}</div>
+              <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-xs font-bold text-gray-400">
+                <span>客户:<Link href={`/customers/${nextTask.companyId}`} className="ml-1 text-indigo-600 hover:underline">{nextTask.company.name}</Link></span>
+                <span>负责人:{nextTask.owner.name || nextTask.owner.email}</span>
+                <span>截止:{nextTask.dueAt ? new Date(nextTask.dueAt).toLocaleString('zh-CN') : '未排期'}</span>
+                {nextTask.opportunity && <span>商机:{nextTask.opportunity.title}</span>}
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <form action={completeTask}>
+                  <input type="hidden" name="id" value={nextTask.id} />
+                  <button className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-100">完成任务</button>
+                </form>
+                <form action={generateDraft}>
+                  <input type="hidden" name="id" value={nextTask.id} />
+                  <button className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 hover:bg-blue-100">生成邮件草稿</button>
+                </form>
+                <Link href={`/customers/${nextTask.companyId}`} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-700 hover:bg-gray-50">打开客户</Link>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl bg-gray-50 p-8 text-center text-sm text-gray-400">当前没有待办任务。</div>
+          )}
+        </section>
+
+        <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-black text-gray-900">任务 SLA / 完成率</h2>
+              <p className="mt-1 text-xs text-gray-400">近 14 天完成趋势、准时率和当前逾期压力。</p>
+            </div>
+            <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-500">近14天</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <ReportMetric label="完成任务" value={taskReport.completedCount} />
+            <ReportMetric label="准时完成率" value={formatPercent(taskReport.onTimeRate)} />
+            <ReportMetric label="当前逾期率" value={formatPercent(taskReport.overdueRate)} />
+            <ReportMetric label="平均完成耗时" value={formatHours(taskReport.avgCompletionHours)} />
+          </div>
+          <div className="mt-5">
+            <div className="mb-2 flex items-center justify-between text-xs font-black text-gray-500">
+              <span>14天完成趋势</span>
+              <span>{taskReport.completedCount} 条</span>
+            </div>
+            <div className="flex h-24 items-end gap-1 rounded-xl bg-gray-50 p-3">
+              {taskReport.dailyTrend.map((day) => (
+                <div key={day.key} className="flex min-w-0 flex-1 flex-col items-center gap-1">
+                  <div className="w-full rounded-t bg-indigo-500" style={{ height: `${Math.max(4, Math.round((day.count / taskReport.maxDailyCompleted) * 64))}px` }} />
+                  <div className="truncate text-[10px] font-bold text-gray-400">{day.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="mt-5">
+            <div className="mb-2 text-xs font-black text-gray-500">负责人 SLA</div>
+            <div className="space-y-2">
+              {taskReport.ownerRows.map((row) => (
+                <div key={row.ownerId} className="grid grid-cols-[minmax(0,1fr)_64px_72px_72px] items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs">
+                  <div className="truncate font-black text-gray-700">{row.name}</div>
+                  <div className="text-right font-bold text-gray-500">{row.completed}条</div>
+                  <div className="text-right font-bold text-emerald-600">{formatPercent(row.onTimeRate)}</div>
+                  <div className="text-right font-bold text-gray-500">{formatHours(row.avgHours)}</div>
+                </div>
+              ))}
+              {taskReport.ownerRows.length === 0 && <div className="rounded-lg bg-gray-50 p-4 text-center text-xs text-gray-400">近 14 天暂无完成任务。</div>}
+            </div>
+          </div>
+        </section>
       </section>
 
       <section className="mb-6 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
@@ -676,6 +780,97 @@ ERDI TECH LTD`,
   };
 }
 
+function pickNextTask(tasks: any[]) {
+  return [...tasks].sort((a, b) => taskUrgencyScore(b) - taskUrgencyScore(a))[0] || null;
+}
+
+function taskUrgencyScore(task: any) {
+  const now = Date.now();
+  const due = task.dueAt ? new Date(task.dueAt).getTime() : null;
+  const overdueScore = due && due < now ? 10000 : 0;
+  const dueSoonScore = due ? Math.max(0, 5000 - Math.floor(Math.max(due - now, 0) / 3600000)) : 0;
+  return overdueScore + dueSoonScore + (PRIORITY_WEIGHT[task.priority] || 0) * 100 + Math.max(0, 30 - Math.floor((now - new Date(task.createdAt).getTime()) / 86400000));
+}
+
+function buildTaskReport(tasks: any[], users: any[], totals: { openCount: number; overdueCount: number; reportStart: Date }) {
+  const completedCount = tasks.length;
+  const timedTasks = tasks.filter((task) => task.createdAt && task.completedAt);
+  const onTimeCount = tasks.filter((task) => task.dueAt && task.completedAt && new Date(task.completedAt).getTime() <= new Date(task.dueAt).getTime()).length;
+  const withDueCount = tasks.filter((task) => task.dueAt).length;
+  const avgCompletionHours = average(timedTasks.map((task) => (new Date(task.completedAt).getTime() - new Date(task.createdAt).getTime()) / 3600000));
+  const ownerMap = new Map<string, { ownerId: string; name: string; completed: number; onTime: number; due: number; hours: number[] }>();
+
+  for (const task of tasks) {
+    const owner = task.owner || users.find((item) => item.id === task.ownerId);
+    const current = ownerMap.get(task.ownerId) || {
+      ownerId: task.ownerId,
+      name: owner?.name || owner?.email || '未知负责人',
+      completed: 0,
+      onTime: 0,
+      due: 0,
+      hours: [] as number[],
+    };
+    current.completed++;
+    if (task.dueAt) {
+      current.due++;
+      if (task.completedAt && new Date(task.completedAt).getTime() <= new Date(task.dueAt).getTime()) current.onTime++;
+    }
+    if (task.createdAt && task.completedAt) current.hours.push((new Date(task.completedAt).getTime() - new Date(task.createdAt).getTime()) / 3600000);
+    ownerMap.set(task.ownerId, current);
+  }
+
+  const dailyTrend = buildCompletionTrend(tasks, totals.reportStart);
+  return {
+    completedCount,
+    onTimeRate: withDueCount > 0 ? onTimeCount / withDueCount : null,
+    overdueRate: totals.openCount > 0 ? totals.overdueCount / totals.openCount : 0,
+    avgCompletionHours,
+    dailyTrend,
+    maxDailyCompleted: Math.max(1, ...dailyTrend.map((day) => day.count)),
+    ownerRows: Array.from(ownerMap.values())
+      .map((row) => ({
+        ownerId: row.ownerId,
+        name: row.name,
+        completed: row.completed,
+        onTimeRate: row.due > 0 ? row.onTime / row.due : null,
+        avgHours: average(row.hours),
+      }))
+      .sort((a, b) => b.completed - a.completed)
+      .slice(0, 8),
+  };
+}
+
+function buildCompletionTrend(tasks: any[], reportStart: Date) {
+  return Array.from({ length: 14 }, (_, index) => {
+    const date = new Date(reportStart);
+    date.setDate(reportStart.getDate() + index);
+    const key = dateKey(date);
+    return {
+      key,
+      label: date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }),
+      count: tasks.filter((task) => task.completedAt && dateKey(new Date(task.completedAt)) === key).length,
+    };
+  });
+}
+
+function average(values: number[]) {
+  const finite = values.filter((value) => Number.isFinite(value) && value >= 0);
+  if (finite.length === 0) return null;
+  return finite.reduce((sum, value) => sum + value, 0) / finite.length;
+}
+
+function formatPercent(value: number | null) {
+  if (value === null) return '-';
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatHours(value: number | null) {
+  if (value === null) return '-';
+  if (value < 1) return `${Math.max(1, Math.round(value * 60))}分钟`;
+  if (value < 48) return `${Math.round(value)}小时`;
+  return `${Math.round(value / 24)}天`;
+}
+
 function buildWeekBuckets(tasks: any[]) {
   const start = startOfDay(new Date());
   return Array.from({ length: 7 }, (_, index) => {
@@ -712,6 +907,15 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: st
     <div className={`rounded-xl border border-gray-100 border-l-4 bg-white p-4 shadow-sm ${color[tone]}`}>
       <div className="text-xs font-bold text-gray-500">{label}</div>
       <div className="mt-1 text-2xl font-black">{value}</div>
+    </div>
+  );
+}
+
+function ReportMetric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+      <div className="text-xs font-bold text-gray-500">{label}</div>
+      <div className="mt-1 text-xl font-black text-gray-900">{value}</div>
     </div>
   );
 }
