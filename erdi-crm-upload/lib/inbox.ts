@@ -6,7 +6,8 @@
 //   3. AI 生成回复草稿(按全局 autoReplyMode 决定是否生成/自动发)
 //   4. 关联已知客户公司
 //   5. 入库 InboxMessage
-//   6. 通知业务员
+//   6. 执行已开启的自动化流程(只做内部记录/通知/分配,不直接外发)
+//   7. 通知业务员
 //
 // 渠道适配器只负责"解析原始 payload → NormalizedMessage"和"send",
 // 业务逻辑全部集中在此,新增渠道零重复。
@@ -14,6 +15,7 @@
 import { prisma } from '@/lib/prisma';
 import { translateText } from '@/lib/translate';
 import { generateAutoReply } from '@/lib/autoreply';
+import { runAutomationsForInbox } from '@/lib/automation-runner';
 import type { NormalizedMessage, ChannelType } from '@/lib/channels/types';
 
 export interface IngestResult {
@@ -97,7 +99,12 @@ export async function ingestInbound(msg: NormalizedMessage): Promise<IngestResul
   // 6. AUTO 模式 + AI 判定可自动发 → 由调用方负责实际发送(pipeline 不直接持有 adapter)
   const autoSent = autoReplyMode === 'AUTO' && aiAutoSendable && !!aiReplyCustomer;
 
-  // 7. 通知业务员
+  // 7. 自动化流程执行。失败不阻断入库,避免渠道消息丢失。
+  await runAutomationsForInbox(saved.id).catch((err) => {
+    console.error('[inbox] automation runner failed:', err);
+  });
+
+  // 8. 通知业务员
   await notify(msg, translatedText, saved.id);
 
   return { created: true, inboxId: saved.id, autoSent };
