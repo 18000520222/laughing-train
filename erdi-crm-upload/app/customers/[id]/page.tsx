@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { chat, isLLMAvailable } from '@/lib/llm';
+import { buildSalesRadar } from '@/lib/sales-radar';
 
 export const dynamic = 'force-dynamic';
 
@@ -217,6 +218,7 @@ export default async function CustomerDetailPage(props: any) {
   const openCount = company.opportunities.filter(
     (o) => o.stage !== 'CLOSED_WON' && o.stage !== 'CLOSED_LOST'
   ).length;
+  const salesRadar = buildSalesRadar(company);
 
   // 💡 智能行动指南 / 互动提示语逻辑
   const lastMailDate = company.inboxMessages[0]?.sentAt || company.inboxMessages[0]?.createdAt || null;
@@ -418,6 +420,37 @@ export default async function CustomerDetailPage(props: any) {
             {company.customerProfile}
           </div>
         )}
+      </section>
+
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="font-bold text-gray-900">智能销售雷达</h2>
+            <p className="text-xs text-gray-400 mt-1">综合客户阶段、往来消息、商机停留、负责人和下一步动作生成销售优先级</p>
+          </div>
+          <RadarBadge level={salesRadar.level} label={salesRadar.levelLabel} score={salesRadar.score} />
+        </div>
+        <div className="mt-5 grid grid-cols-1 lg:grid-cols-[0.85fr_1.15fr] gap-4">
+          <div className="rounded-xl border border-gray-100 bg-slate-50 p-4">
+            <div className="text-xs font-bold text-gray-500">系统判定</div>
+            <div className="mt-1 text-lg font-black text-gray-900">{salesRadar.title}</div>
+            <div className="mt-3 text-sm leading-relaxed text-gray-700">{salesRadar.recommendedAction}</div>
+          </div>
+          <div className="rounded-xl border border-gray-100 bg-slate-50 p-4">
+            <div className="text-xs font-bold text-gray-500">判定依据</div>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+              {salesRadar.reasons.map((reason) => (
+                <div key={reason} className="rounded-lg bg-white px-3 py-2 text-sm text-gray-700">{reason}</div>
+              ))}
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2 text-xs font-bold text-gray-500">
+              <span className="rounded bg-white px-2 py-1">互动间隔 {salesRadar.metrics.daysSinceLastInteraction ?? '-'} 天</span>
+              <span className="rounded bg-white px-2 py-1">进行中商机 {salesRadar.metrics.openOpportunityCount}</span>
+              <span className="rounded bg-white px-2 py-1">超期商机 {salesRadar.metrics.stalledOpportunityCount}</span>
+              <span className="rounded bg-white px-2 py-1">{salesRadar.metrics.awaitingReply ? '客户等回复' : '回复节奏正常'}</span>
+            </div>
+          </div>
+        </div>
       </section>
 
       {/* ✨ AI 客户智能分析大脑 (AI Customer Brain) */}
@@ -718,6 +751,21 @@ function IntelCard({ label, value }: { label: string; value: string }) {
     <div className="rounded-xl border border-gray-100 bg-slate-50 p-4">
       <div className="text-xs font-bold text-gray-500 mb-1">{label}</div>
       <div className="text-sm font-semibold text-gray-800 whitespace-pre-wrap">{value}</div>
+    </div>
+  );
+}
+
+function RadarBadge({ level, label, score }: { level: string; label: string; score: number }) {
+  const style: Record<string, string> = {
+    hot: 'border-rose-200 bg-rose-50 text-rose-700',
+    risk: 'border-amber-200 bg-amber-50 text-amber-700',
+    warm: 'border-blue-200 bg-blue-50 text-blue-700',
+    normal: 'border-slate-200 bg-slate-50 text-slate-700',
+  };
+  return (
+    <div className={`rounded-xl border px-5 py-3 text-center ${style[level] || style.normal}`}>
+      <div className="text-2xl font-black">{score}</div>
+      <div className="mt-1 text-xs font-bold">{label}</div>
     </div>
   );
 }

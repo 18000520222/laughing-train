@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createDefaultSalesAssignmentRules, executeSalesAssignmentRules } from '@/lib/sales-assignment';
 import { emailCategoryLabel } from '@/lib/email-classifier';
+import { buildSalesRadar } from '@/lib/sales-radar';
 
 export const dynamic = 'force-dynamic';
 
@@ -159,7 +160,14 @@ export default async function SalesCommandPage() {
       where: { type: { in: ['INQUIRY', 'QUOTED', 'CONTRACT_SENT', 'PROSPECT', 'NEW'] as any } },
       orderBy: [{ priorityScore: 'desc' }, { updatedAt: 'asc' }],
       take: 15,
-      include: { owner: true, contacts: { take: 1 }, _count: { select: { inboxMessages: true, opportunities: true } } },
+      include: {
+        owner: true,
+        contacts: { take: 1 },
+        inboxMessages: { orderBy: { createdAt: 'desc' }, take: 6 },
+        followUps: { orderBy: { createdAt: 'desc' }, take: 3 },
+        opportunities: { orderBy: { updatedAt: 'desc' }, take: 5 },
+        _count: { select: { inboxMessages: true, opportunities: true } },
+      },
     }),
     prisma.opportunity.findMany({
       where: { stage: { notIn: ['CLOSED_WON', 'CLOSED_LOST'] as any }, stageChangedAt: { lt: sevenDaysAgo } },
@@ -189,6 +197,10 @@ export default async function SalesCommandPage() {
 
   const usersById = new Map(users.map((u) => [u.id, u]));
   const assignedTotal = ownerRows.reduce((sum, r) => sum + r._count._all, 0);
+  const salesRadarItems = topQueue
+    .map((company) => ({ company, radar: buildSalesRadar(company) }))
+    .sort((a, b) => b.radar.score - a.radar.score)
+    .slice(0, 6);
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
@@ -236,6 +248,33 @@ export default async function SalesCommandPage() {
             </div>
           ))}
           {emailCategoryRows.length === 0 && <div className="text-sm text-gray-400">暂无邮件分类数据。</div>}
+        </div>
+      </section>
+
+      <section className="mb-6 bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">智能销售雷达</h2>
+            <p className="text-xs text-gray-400 mt-1">综合客户阶段、邮件往来、商机停留、负责人和下一步动作,自动挑出最该处理的客户</p>
+          </div>
+          <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">Top {salesRadarItems.length}</span>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+          {salesRadarItems.map(({ company, radar }) => (
+            <RadarCard
+              key={company.id}
+              href={`/customers/${company.id}`}
+              name={company.name}
+              owner={company.owner?.name || company.owner?.email || '未分配'}
+              score={radar.score}
+              level={radar.level}
+              levelLabel={radar.levelLabel}
+              title={radar.title}
+              action={radar.recommendedAction}
+              reasons={radar.reasons}
+            />
+          ))}
+          {salesRadarItems.length === 0 && <div className="text-sm text-gray-400">暂无可分析客户。</div>}
         </div>
       </section>
 
@@ -478,6 +517,64 @@ function LoadBar({ label, value, max }: { label: string; value: number; max: num
         <div className="h-2 rounded-full bg-indigo-500" style={{ width }} />
       </div>
     </div>
+  );
+}
+
+function RadarCard({
+  href,
+  name,
+  owner,
+  score,
+  level,
+  levelLabel,
+  title,
+  action,
+  reasons,
+}: {
+  href: string;
+  name: string;
+  owner: string;
+  score: number;
+  level: string;
+  levelLabel: string;
+  title: string;
+  action: string;
+  reasons: string[];
+}) {
+  const style: Record<string, string> = {
+    hot: 'border-rose-200 bg-rose-50 text-rose-800',
+    risk: 'border-amber-200 bg-amber-50 text-amber-800',
+    warm: 'border-blue-200 bg-blue-50 text-blue-800',
+    normal: 'border-slate-200 bg-slate-50 text-slate-700',
+  };
+  const meter: Record<string, string> = {
+    hot: 'bg-rose-500',
+    risk: 'bg-amber-500',
+    warm: 'bg-blue-500',
+    normal: 'bg-slate-400',
+  };
+  return (
+    <Link href={href} className={`block rounded-xl border p-4 transition hover:-translate-y-0.5 hover:shadow-sm ${style[level] || style.normal}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-black text-gray-900">{name}</div>
+          <div className="mt-1 text-xs font-bold opacity-70">{title} · {owner}</div>
+        </div>
+        <span className="shrink-0 rounded-full bg-white/80 px-2 py-1 text-xs font-black">{levelLabel}</span>
+      </div>
+      <div className="mt-4 flex items-center gap-3">
+        <div className="h-2 flex-1 rounded-full bg-white/80">
+          <div className={`h-2 rounded-full ${meter[level] || meter.normal}`} style={{ width: `${score}%` }} />
+        </div>
+        <div className="text-sm font-black">{score}</div>
+      </div>
+      <div className="mt-3 rounded-lg bg-white/75 p-3 text-xs leading-relaxed text-gray-700">{action}</div>
+      <div className="mt-3 space-y-1">
+        {reasons.slice(0, 3).map((reason) => (
+          <div key={reason} className="text-xs font-medium opacity-80">- {reason}</div>
+        ))}
+      </div>
+    </Link>
   );
 }
 
