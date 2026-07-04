@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { createDefaultSalesAssignmentRules, executeSalesAssignmentRules } from '@/lib/sales-assignment';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,28 @@ const DISTRIBUTION_LABEL: Record<string, string> = {
 };
 
 const TYPE_LABEL = Object.fromEntries(CUSTOMER_TYPES);
+
+const STAGE_LABEL: Record<string, string> = {
+  UNPROCESSED: '未处理',
+  REPLIED: '已回复',
+  QUOTING: '报价中',
+  NEGOTIATING: '谈判中',
+  SPEC_CONFIRMING: '规格确认',
+  CLOSED_WON: '已成交',
+  CLOSED_LOST: '已流失',
+};
+
+const LOST_REASON_LABEL: Record<string, string> = {
+  PRICE: '价格不合适',
+  SPEC: '规格/性能不匹配',
+  DELIVERY: '交期不满足',
+  CERTIFICATION: '认证/资质不满足',
+  COMPETITOR: '被竞争对手拿走',
+  NO_RESPONSE: '客户无回复',
+  BUDGET: '预算取消/推迟',
+  OTHER: '其他',
+  '未填写原因': '未填写原因',
+};
 
 function listFromForm(formData: FormData, key: string) {
   return formData.getAll(key).map((v) => String(v).trim()).filter(Boolean);
@@ -87,159 +110,14 @@ async function deleteRule(formData: FormData) {
 async function createDefaultRules() {
   'use server';
   const user = await requireAdminUser();
-  const owners = await prisma.user.findMany({
-    where: { role: { in: ['SUPER_ADMIN', 'ADMIN', 'SALES'] as any }, isActive: true },
-    orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
-    select: { id: true },
-  });
-  const ownerIds = owners.map((u) => u.id);
-  if (ownerIds.length === 0) return;
-
-  const templates = [
-    {
-      name: '高优先级询盘优先分配',
-      description: '优先级评分 >= 70 的新询盘先分给当前客户负载最少的业务员。',
-      priority: 10,
-      customerTypes: ['INQUIRY', 'QUOTED', 'PROSPECT', 'NEW'],
-      minPriorityScore: 70,
-      sources: [] as string[],
-      distribution: 'LOWEST_LOAD',
-    },
-    {
-      name: '邮件/Gmail 询盘轮流分配',
-      description: '来自邮箱聚合的新询盘按轮流方式分配,避免客户无人跟。',
-      priority: 20,
-      customerTypes: ['INQUIRY', 'PROSPECT', 'NEW'],
-      minPriorityScore: 0,
-      sources: ['EMAIL', 'GMAIL_INBOX'],
-      distribution: 'ROUND_ROBIN',
-    },
-    {
-      name: '重点渠道线索轮流分配',
-      description: '阿里、WhatsApp、LinkedIn、Facebook 等渠道线索进入销售队列。',
-      priority: 30,
-      customerTypes: ['INQUIRY', 'PROSPECT', 'NEW'],
-      minPriorityScore: 0,
-      sources: ['ALIBABA', 'WHATSAPP', 'LINKEDIN', 'FACEBOOK'],
-      distribution: 'ROUND_ROBIN',
-    },
-  ];
-
-  for (const tpl of templates) {
-    const exists = await prisma.salesAssignmentRule.findFirst({ where: { name: tpl.name } });
-    if (exists) continue;
-    await prisma.salesAssignmentRule.create({
-      data: {
-        ...tpl,
-        customerTypes: tpl.customerTypes as any,
-        countries: [],
-        ownerIds,
-        distribution: tpl.distribution as any,
-        createdById: user?.id || null,
-      },
-    });
-  }
-
+  await createDefaultSalesAssignmentRules(user?.id || null);
   redirect('/sales-command');
 }
 
 async function executeAssignmentRules() {
   'use server';
   await requireAdminUser();
-
-  const [rules, candidates, salesUsers] = await Promise.all([
-    prisma.salesAssignmentRule.findMany({ where: { isActive: true }, orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }] }),
-    prisma.company.findMany({
-      where: { ownerId: null },
-      orderBy: [{ priorityScore: 'desc' }, { createdAt: 'desc' }],
-      take: 200,
-      include: { _count: { select: { inboxMessages: true, opportunities: true } } },
-    }),
-    prisma.user.findMany({ where: { role: { in: ['SUPER_ADMIN', 'ADMIN', 'SALES'] as any }, isActive: true }, select: { id: true, name: true, email: true } }),
-  ]);
-
-  const ownerLoad = new Map(
-    await Promise.all(
-      salesUsers.map(async (u) => [u.id, await prisma.company.count({ where: { ownerId: u.id } })] as const)
-    )
-  );
-  const usersById = new Map(salesUsers.map((u) => [u.id, u]));
-  const runStats = new Map<string, { scannedCount: number; assignedCount: number; customers: string[] }>();
-
-  const matches = (rule: any, company: any) => {
-    if (company.priorityScore < rule.minPriorityScore) return false;
-    if (rule.customerTypes.length > 0 && !rule.customerTypes.includes(company.type)) return false;
-    if (rule.countries.length > 0) {
-      const country = String(company.country || '').toLowerCase();
-      if (!rule.countries.some((c: string) => country.includes(c.toLowerCase()))) return false;
-    }
-    if (rule.sources.length > 0) {
-      const source = String(company.source || '').toLowerCase();
-      if (!rule.sources.some((s: string) => source.includes(s.toLowerCase()))) return false;
-    }
-    return true;
-  };
-
-  const pickOwner = (rule: any) => {
-    const ownerIds = rule.ownerIds.filter((id: string) => usersById.has(id));
-    if (ownerIds.length === 0) return null;
-    if (rule.distribution === 'FIXED_OWNER') return ownerIds[0];
-    if (rule.distribution === 'LOWEST_LOAD') {
-      return ownerIds.sort((a: string, b: string) => (ownerLoad.get(a) || 0) - (ownerLoad.get(b) || 0))[0];
-    }
-    const lastIndex = ownerIds.indexOf(rule.lastAssignedOwnerId || '');
-    return ownerIds[(lastIndex + 1) % ownerIds.length];
-  };
-
-  for (const company of candidates) {
-    for (const rule of rules) {
-      const stat = runStats.get(rule.id) || { scannedCount: 0, assignedCount: 0, customers: [] };
-      stat.scannedCount++;
-      runStats.set(rule.id, stat);
-      if (!matches(rule, company)) continue;
-
-      const ownerId = pickOwner(rule);
-      if (!ownerId) continue;
-      const nextAction = company.nextAction || (company.priorityScore >= 70 ? '高优先级询盘:今天内完成首轮跟进' : '新线索:24小时内完成首轮跟进');
-
-      await prisma.company.update({
-        where: { id: company.id },
-        data: {
-          ownerId,
-          nextAction,
-          priorityScore: Math.max(company.priorityScore || 0, company._count.inboxMessages > 0 ? 60 : 0),
-        },
-      });
-      await prisma.notification.create({
-        data: {
-          userId: ownerId,
-          type: 'SYSTEM',
-          title: '新客户已分配',
-          body: `${company.name} 已按规则「${rule.name}」分配给你。下一步:${nextAction}`,
-          link: `/customers/${company.id}`,
-        },
-      });
-      await prisma.salesAssignmentRule.update({ where: { id: rule.id }, data: { lastAssignedOwnerId: ownerId } });
-
-      ownerLoad.set(ownerId, (ownerLoad.get(ownerId) || 0) + 1);
-      stat.assignedCount++;
-      stat.customers.push(company.name);
-      break;
-    }
-  }
-
-  for (const rule of rules) {
-    const stat = runStats.get(rule.id) || { scannedCount: 0, assignedCount: 0, customers: [] };
-    await prisma.salesAssignmentRun.create({
-      data: {
-        ruleId: rule.id,
-        scannedCount: stat.scannedCount,
-        assignedCount: stat.assignedCount,
-        summary: { customers: stat.customers.slice(0, 20) },
-      },
-    });
-  }
-
+  await executeSalesAssignmentRules();
   redirect('/sales-command');
 }
 
@@ -260,6 +138,8 @@ export default async function SalesCommandPage() {
     needsNextAction,
     staleCustomers,
     topQueue,
+    staleOpportunities,
+    lostReasonRows,
     ownerRows,
     sourceRows,
   ] = await Promise.all([
@@ -275,6 +155,19 @@ export default async function SalesCommandPage() {
       orderBy: [{ priorityScore: 'desc' }, { updatedAt: 'asc' }],
       take: 15,
       include: { owner: true, contacts: { take: 1 }, _count: { select: { inboxMessages: true, opportunities: true } } },
+    }),
+    prisma.opportunity.findMany({
+      where: { stage: { notIn: ['CLOSED_WON', 'CLOSED_LOST'] as any }, stageChangedAt: { lt: sevenDaysAgo } },
+      orderBy: [{ stageChangedAt: 'asc' }, { amountUSD: 'desc' }],
+      take: 12,
+      include: { company: true, owner: true },
+    }),
+    prisma.opportunity.groupBy({
+      by: ['lostReason'],
+      where: { stage: 'CLOSED_LOST' },
+      _count: { _all: true },
+      orderBy: { _count: { lostReason: 'desc' } },
+      take: 8,
     }),
     prisma.company.groupBy({ by: ['ownerId'], _count: { _all: true } }),
     prisma.company.groupBy({ by: ['source'], _count: { _all: true }, orderBy: { _count: { source: 'desc' } }, take: 8 }),
@@ -305,7 +198,7 @@ export default async function SalesCommandPage() {
         <Metric label="待分配客户" value={unassignedCount} tone="blue" />
         <Metric label="高优先级未分配" value={highPriorityUnassigned} tone="rose" />
         <Metric label="缺下一步动作" value={needsNextAction} tone="amber" />
-        <Metric label="7天未动询盘" value={staleCustomers} tone="violet" />
+        <Metric label="7天未动客户" value={staleCustomers} tone="violet" />
         <Metric label="已分配客户" value={assignedTotal} tone="emerald" />
       </section>
 
@@ -379,6 +272,61 @@ export default async function SalesCommandPage() {
           </div>
         </section>
       </div>
+
+      <section className="mt-6 grid grid-cols-1 xl:grid-cols-[1fr_0.8fr] gap-6">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100">
+            <h2 className="font-bold text-gray-900">阶段停留超期商机</h2>
+            <p className="text-xs text-gray-400 mt-1">超过 7 天未推进的进行中商机,优先复盘或升级处理</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50 text-sm text-gray-500 border-b border-gray-100">
+                  <th className="p-4 font-bold">商机</th>
+                  <th className="p-4 font-bold">阶段</th>
+                  <th className="p-4 font-bold">停留</th>
+                  <th className="p-4 font-bold">金额</th>
+                  <th className="p-4 font-bold">负责人</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {staleOpportunities.map((opp) => {
+                  const days = Math.max(0, Math.floor((Date.now() - new Date(opp.stageChangedAt || opp.updatedAt).getTime()) / 86400000));
+                  return (
+                    <tr key={opp.id} className="hover:bg-gray-50">
+                      <td className="p-4">
+                        <Link href={`/opportunity/${opp.id}`} className="font-bold text-gray-900 hover:text-indigo-600">{opp.title}</Link>
+                        <div className="text-xs text-gray-400">{opp.company?.name || '未关联客户'}</div>
+                      </td>
+                      <td className="p-4 text-sm text-gray-600">{STAGE_LABEL[opp.stage] || opp.stage}</td>
+                      <td className="p-4"><span className="rounded-lg bg-rose-50 px-2 py-1 text-sm font-bold text-rose-700">{days} 天</span></td>
+                      <td className="p-4 text-sm font-bold text-gray-700">${(opp.amountUSD || 0).toLocaleString()}</td>
+                      <td className="p-4 text-sm text-gray-600">{opp.owner?.name || opp.owner?.email || '未分配'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {staleOpportunities.length === 0 && <div className="p-10 text-center text-sm text-gray-400">暂无阶段超期商机。</div>}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h2 className="font-bold text-gray-900 mb-4">丢单原因复盘</h2>
+          <div className="space-y-3">
+            {lostReasonRows.map((row) => (
+              <LoadBar
+                key={row.lostReason || 'empty'}
+                label={LOST_REASON_LABEL[row.lostReason || '未填写原因'] || row.lostReason || '未填写原因'}
+                value={row._count._all}
+                max={Math.max(1, ...lostReasonRows.map((r) => r._count._all))}
+              />
+            ))}
+            {lostReasonRows.length === 0 && <div className="rounded-xl border border-dashed border-gray-200 p-8 text-center text-sm text-gray-400">暂无丢单复盘数据。</div>}
+          </div>
+        </div>
+      </section>
 
       <section className="mt-6 grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">

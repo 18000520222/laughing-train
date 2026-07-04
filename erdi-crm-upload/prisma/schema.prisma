@@ -220,6 +220,10 @@ model Opportunity {
   productId       String?
   product         Product? @relation(fields: [productId], references: [id])
   stage           OppStage @default(UNPROCESSED)
+  stageChangedAt  DateTime @default(now())
+  nextStep        String?  @db.Text
+  lostReason      String?
+  lostDetail      String?  @db.Text
 
   companyId       String
   company         Company  @relation(fields: [companyId], references: [id])

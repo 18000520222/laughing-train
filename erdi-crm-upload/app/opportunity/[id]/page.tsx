@@ -15,11 +15,26 @@ async function updateOpportunity(formData: FormData) {
   const companyId = String(formData.get('companyId')) || '';
   const stage = String(formData.get('stage'));
   const productId = String(formData.get('productId'));
+  const nextStep = String(formData.get('nextStep') || '').trim();
+  const lostReason = String(formData.get('lostReason') || '').trim();
+  const lostDetail = String(formData.get('lostDetail') || '').trim();
 
   if (!oppId) return;
+  const existing = await prisma.opportunity.findUnique({ where: { id: oppId }, select: { stage: true } });
+  if (!existing) return;
+
   await prisma.opportunity.update({
     where: { id: oppId },
-    data: { amountUSD: amount, stage: stage as any, productId: productId || null }
+    data: {
+      amountUSD: amount,
+      companyId,
+      stage: stage as any,
+      stageChangedAt: existing.stage === stage ? undefined : new Date(),
+      productId: productId || null,
+      nextStep: nextStep || null,
+      lostReason: stage === 'CLOSED_LOST' ? (lostReason || '未填写原因') : null,
+      lostDetail: stage === 'CLOSED_LOST' ? (lostDetail || null) : null,
+    }
   });
   redirect('/dashboard');
 }
@@ -92,15 +107,20 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
 
   if (!oppId) return <div className="p-10">缺少商机 ID</div>;
 
-  const products = await prisma.product.findMany({ where: { isActive: true } });
+  const [products, companies] = await Promise.all([
+    prisma.product.findMany({ where: { isActive: true }, orderBy: { sku: 'asc' } }),
+    prisma.company.findMany({ orderBy: { updatedAt: 'desc' }, take: 500, select: { id: true, name: true, customerCode: true, country: true } }),
+  ]);
   const opp = await prisma.opportunity.findUnique({
-    where: { id: String(oppId) }, include: { product: true }
+    where: { id: String(oppId) }, include: { product: true, company: true, owner: true }
   });
 
   if (!opp) return <div className="p-10">找不到该商机</div>;
 
   // 从 title 里剥离出客户的名字 and 邮箱
   const rawSender = opp.title.replace('New Inquiry from ', '');
+  const stageAgeDays = Math.max(0, Math.floor((Date.now() - new Date(opp.stageChangedAt || opp.updatedAt).getTime()) / 86400000));
+  const isStageStale = opp.stage !== 'CLOSED_WON' && opp.stage !== 'CLOSED_LOST' && stageAgeDays >= 7;
 
   // 智能翻译描述内容 (如果包含英文且存在内容)
   let translatedDesc = '';
@@ -138,6 +158,16 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
                 <h2 className="text-lg font-bold text-gray-800">📧 邮件流与沟通记录</h2>
                 <span className="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded-full font-medium">{rawSender}</span>
               </div>
+              <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <StatusCard label="客户" value={opp.company?.name || '未关联客户'} />
+                <StatusCard label="阶段停留" value={`${stageAgeDays} 天`} tone={isStageStale ? 'rose' : 'slate'} />
+                <StatusCard label="下一步" value={opp.nextStep || '未填写'} />
+              </div>
+              {isStageStale && (
+                <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                  这个商机在当前阶段已停留 {stageAgeDays} 天,需要尽快跟进或更新阶段。
+                </div>
+              )}
               
               {/* 正文与智能翻译阅读区 */}
               {translatedDesc ? (
@@ -224,12 +254,16 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
               <input type="hidden" name="oppId" value={opp.id} />
               
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">🏢 真实客户公司名</label>
-                <input 
-                  type="text" name="companyId" defaultValue={opp.companyId || ''} 
-                  placeholder="例如: Apple Inc."
+                <label className="block text-sm font-semibold text-gray-700 mb-2">🏢 关联客户公司</label>
+                <select
+                  name="companyId"
+                  defaultValue={opp.companyId || ''}
                   className="w-full border border-gray-200 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-gray-50 focus:bg-white transition-colors text-sm"
-                />
+                >
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>{c.customerCode ? `${c.customerCode} · ` : ''}{c.name}{c.country ? ` · ${c.country}` : ''}</option>
+                  ))}
+                </select>
               </div>
 
               
@@ -263,10 +297,52 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
                   name="stage" defaultValue={opp.stage} 
                   className="w-full border border-gray-200 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-gray-50 focus:bg-white transition-colors text-sm font-medium"
                 >
-                  <option value="SPEC_CONFIRMING">1️⃣ 新询盘确认</option>
-                  <option value="NEGOTIATING">2️⃣ 样品测试阶段</option>
-                  <option value="CLOSED_WON">3️⃣ 成功赢单签约</option>
+                  <option value="UNPROCESSED">0. 未处理</option>
+                  <option value="REPLIED">1. 已回复</option>
+                  <option value="QUOTING">2. 报价中</option>
+                  <option value="NEGOTIATING">3. 谈判中</option>
+                  <option value="SPEC_CONFIRMING">4. 规格确认</option>
+                  <option value="CLOSED_WON">5. 成功赢单</option>
+                  <option value="CLOSED_LOST">6. 已丢单/流失</option>
                 </select>
+                <p className="mt-1 text-xs text-gray-400">阶段变化后会自动刷新阶段停留天数。</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">✅ 下一步动作</label>
+                <textarea
+                  name="nextStep"
+                  rows={3}
+                  defaultValue={opp.nextStep || ''}
+                  placeholder="如: 今天发送 PI; 周五跟进样品测试反馈; 等客户确认 1535nm 参数"
+                  className="w-full border border-gray-200 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-gray-50 focus:bg-white transition-colors text-sm"
+                />
+              </div>
+
+              <div className="rounded-xl border border-rose-100 bg-rose-50/40 p-4">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">📉 丢单原因</label>
+                <select
+                  name="lostReason"
+                  defaultValue={opp.lostReason || ''}
+                  className="w-full border border-rose-100 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-rose-400 focus:border-rose-400 bg-white transition-colors text-sm"
+                >
+                  <option value="">未丢单/无需填写</option>
+                  <option value="PRICE">价格不合适</option>
+                  <option value="SPEC">规格/性能不匹配</option>
+                  <option value="DELIVERY">交期不满足</option>
+                  <option value="CERTIFICATION">认证/资质不满足</option>
+                  <option value="COMPETITOR">被竞争对手拿走</option>
+                  <option value="NO_RESPONSE">客户无回复</option>
+                  <option value="BUDGET">预算取消/推迟</option>
+                  <option value="OTHER">其他</option>
+                </select>
+                <textarea
+                  name="lostDetail"
+                  rows={3}
+                  defaultValue={opp.lostDetail || ''}
+                  placeholder="丢单时写清楚真实原因、竞争对手、价格差距、下次改进点"
+                  className="mt-3 w-full border border-rose-100 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-rose-400 focus:border-rose-400 bg-white transition-colors text-sm"
+                />
               </div>
 
               <div className="pt-2">
@@ -282,6 +358,16 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
 
         </div>
       </div>
+    </div>
+  );
+}
+
+function StatusCard({ label, value, tone = 'slate' }: { label: string; value: string; tone?: 'slate' | 'rose' }) {
+  const color = tone === 'rose' ? 'bg-rose-50 text-rose-700 border-rose-100' : 'bg-slate-50 text-slate-700 border-slate-100';
+  return (
+    <div className={`rounded-xl border px-4 py-3 ${color}`}>
+      <div className="text-xs font-bold opacity-70">{label}</div>
+      <div className="mt-1 text-sm font-bold line-clamp-2">{value}</div>
     </div>
   );
 }
