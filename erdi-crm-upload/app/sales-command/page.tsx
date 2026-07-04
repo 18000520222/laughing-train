@@ -66,6 +66,13 @@ async function requireAdminUser() {
   return prisma.user.findUnique({ where: { email } });
 }
 
+async function requireSalesUser() {
+  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
+  const email = cookies().get('auth_email')?.value || '';
+  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN' && role !== 'SALES') redirect('/dashboard');
+  return prisma.user.findUnique({ where: { email } });
+}
+
 async function createRule(formData: FormData) {
   'use server';
   const user = await requireAdminUser();
@@ -123,6 +130,90 @@ async function executeAssignmentRules() {
   redirect('/sales-command');
 }
 
+async function createRadarTask(formData: FormData) {
+  'use server';
+  const user = await requireSalesUser();
+  if (!user) return;
+
+  const companyId = String(formData.get('companyId') || '');
+  if (!companyId) return;
+  const company = await prisma.company.findUnique({ where: { id: companyId }, include: { owner: true } });
+  if (!company) return;
+
+  const ownerIdFromForm = String(formData.get('ownerId') || '');
+  const ownerId = ownerIdFromForm || company.ownerId || user.id;
+  const owner = await prisma.user.findUnique({ where: { id: ownerId } });
+  if (!owner) return;
+
+  const sourceRef = `RADAR:${companyId}`;
+  const exists = await prisma.salesTask.findFirst({
+    where: { companyId, status: 'TODO', source: 'SALES_RADAR', sourceRef },
+    select: { id: true },
+  });
+  if (exists) redirect('/sales-command');
+
+  const dueHours = Math.max(2, Math.min(168, parseInt(String(formData.get('dueHours') || '24'), 10) || 24));
+  const dueAt = new Date();
+  dueAt.setHours(dueAt.getHours() + dueHours);
+  const description = String(formData.get('description') || '').trim() || '根据智能销售雷达生成的跟进任务。';
+  const priority = String(formData.get('priority') || 'NORMAL') as any;
+
+  await prisma.salesTask.create({
+    data: {
+      title: String(formData.get('title') || '').trim() || `跟进 ${company.name}`,
+      description,
+      type: priority === 'URGENT' ? 'RISK_RESCUE' : 'FOLLOW_UP',
+      priority,
+      dueAt,
+      ownerId: owner.id,
+      createdById: user.id,
+      companyId,
+      source: 'SALES_RADAR',
+      sourceRef,
+    },
+  });
+  await prisma.company.update({
+    where: { id: companyId },
+    data: { nextAction: company.nextAction || description },
+  });
+  await prisma.notification.create({
+    data: {
+      userId: owner.id,
+      type: 'SYSTEM',
+      title: '销售雷达已生成跟进任务',
+      body: `${company.name}: ${description}`,
+      link: `/customers/${companyId}`,
+    },
+  });
+  redirect('/sales-command');
+}
+
+async function completeSalesTask(formData: FormData) {
+  'use server';
+  const user = await requireSalesUser();
+  if (!user) return;
+  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
+  const id = String(formData.get('id') || '');
+  if (!id) return;
+  const task = await prisma.salesTask.findUnique({ where: { id }, include: { company: true } });
+  if (!task) return;
+  if (role === 'SALES' && task.ownerId !== user.id) return;
+
+  await prisma.salesTask.update({
+    where: { id },
+    data: { status: 'DONE', completedAt: new Date() },
+  });
+  await prisma.followUp.create({
+    data: {
+      companyId: task.companyId,
+      userId: user.id,
+      type: 'TASK',
+      content: `完成销售任务: ${task.title}`,
+    },
+  });
+  redirect('/sales-command');
+}
+
 export default async function SalesCommandPage() {
   const role = (cookies().get('auth_role')?.value || '').toUpperCase();
   if (role !== 'SUPER_ADMIN' && role !== 'ADMIN' && role !== 'SALES') redirect('/dashboard');
@@ -130,6 +221,8 @@ export default async function SalesCommandPage() {
 
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
 
   const [
     users,
@@ -146,6 +239,10 @@ export default async function SalesCommandPage() {
     actionEmailCount,
     leadEmailCount,
     unclassifiedEmailCount,
+    openTaskCount,
+    overdueTaskCount,
+    todayTaskCount,
+    salesTasks,
     ownerRows,
     sourceRows,
   ] = await Promise.all([
@@ -191,6 +288,15 @@ export default async function SalesCommandPage() {
     prisma.emailMessage.count({ where: { actionRequired: true } }),
     prisma.emailMessage.count({ where: { isLead: true } }),
     prisma.emailMessage.count({ where: { category: 'UNCLASSIFIED' } }),
+    prisma.salesTask.count({ where: { status: 'TODO' } }),
+    prisma.salesTask.count({ where: { status: 'TODO', dueAt: { lt: new Date() } } }),
+    prisma.salesTask.count({ where: { status: 'TODO', dueAt: { gte: new Date(), lt: tomorrow } } }),
+    prisma.salesTask.findMany({
+      where: { status: 'TODO' },
+      orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
+      take: 12,
+      include: { owner: true, company: true, opportunity: true },
+    }),
     prisma.company.groupBy({ by: ['ownerId'], _count: { _all: true } }),
     prisma.company.groupBy({ by: ['source'], _count: { _all: true }, orderBy: { _count: { source: 'desc' } }, take: 8 }),
   ]);
@@ -226,6 +332,12 @@ export default async function SalesCommandPage() {
         <Metric label="缺下一步动作" value={needsNextAction} tone="amber" />
         <Metric label="7天未动客户" value={staleCustomers} tone="violet" />
         <Metric label="已分配客户" value={assignedTotal} tone="emerald" />
+      </section>
+
+      <section className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Metric label="销售待办任务" value={openTaskCount} tone="blue" />
+        <Metric label="已逾期任务" value={overdueTaskCount} tone="rose" />
+        <Metric label="24小时内到期" value={todayTaskCount} tone="amber" />
       </section>
 
       <section className="mb-6 bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
@@ -272,9 +384,58 @@ export default async function SalesCommandPage() {
               title={radar.title}
               action={radar.recommendedAction}
               reasons={radar.reasons}
+              companyId={company.id}
+              ownerId={company.ownerId || ''}
+              dueHours={radar.level === 'hot' || radar.level === 'risk' || radar.metrics.awaitingReply ? 24 : 72}
+              priority={radar.level === 'hot' || radar.level === 'risk' ? 'URGENT' : radar.level === 'warm' ? 'HIGH' : 'NORMAL'}
             />
           ))}
           {salesRadarItems.length === 0 && <div className="text-sm text-gray-400">暂无可分析客户。</div>}
+        </div>
+      </section>
+
+      <section className="mb-6 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100">
+          <h2 className="font-bold text-gray-900">销售任务闭环</h2>
+          <p className="text-xs text-gray-400 mt-1">雷达建议生成任务后,销售在这里按截止时间处理并完成闭环</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-gray-50 text-sm text-gray-500 border-b border-gray-100">
+                <th className="p-4 font-bold">任务</th>
+                <th className="p-4 font-bold">客户</th>
+                <th className="p-4 font-bold">负责人</th>
+                <th className="p-4 font-bold">优先级</th>
+                <th className="p-4 font-bold">截止</th>
+                <th className="p-4 font-bold">动作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {salesTasks.map((task) => (
+                <tr key={task.id} className="hover:bg-gray-50">
+                  <td className="p-4">
+                    <div className="font-bold text-gray-900">{task.title}</div>
+                    <div className="mt-1 max-w-[420px] truncate text-xs text-gray-400">{task.description || '-'}</div>
+                  </td>
+                  <td className="p-4">
+                    <Link href={`/customers/${task.companyId}`} className="text-sm font-bold text-indigo-600 hover:underline">{task.company.name}</Link>
+                    {task.opportunity && <div className="text-xs text-gray-400">{task.opportunity.title}</div>}
+                  </td>
+                  <td className="p-4 text-sm text-gray-600">{task.owner.name || task.owner.email}</td>
+                  <td className="p-4"><TaskPriority priority={task.priority} /></td>
+                  <td className="p-4 text-sm text-gray-600">{task.dueAt ? new Date(task.dueAt).toLocaleString('zh-CN') : '-'}</td>
+                  <td className="p-4">
+                    <form action={completeSalesTask}>
+                      <input type="hidden" name="id" value={task.id} />
+                      <button className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100">完成</button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {salesTasks.length === 0 && <div className="p-10 text-center text-sm text-gray-400">暂无销售任务。可从智能销售雷达一键生成。</div>}
         </div>
       </section>
 
@@ -530,6 +691,10 @@ function RadarCard({
   title,
   action,
   reasons,
+  companyId,
+  ownerId,
+  dueHours,
+  priority,
 }: {
   href: string;
   name: string;
@@ -540,6 +705,10 @@ function RadarCard({
   title: string;
   action: string;
   reasons: string[];
+  companyId: string;
+  ownerId: string;
+  dueHours: number;
+  priority: string;
 }) {
   const style: Record<string, string> = {
     hot: 'border-rose-200 bg-rose-50 text-rose-800',
@@ -554,28 +723,57 @@ function RadarCard({
     normal: 'bg-slate-400',
   };
   return (
-    <Link href={href} className={`block rounded-xl border p-4 transition hover:-translate-y-0.5 hover:shadow-sm ${style[level] || style.normal}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-black text-gray-900">{name}</div>
-          <div className="mt-1 text-xs font-bold opacity-70">{title} · {owner}</div>
+    <div className={`rounded-xl border p-4 transition hover:-translate-y-0.5 hover:shadow-sm ${style[level] || style.normal}`}>
+      <Link href={href} className="block">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-black text-gray-900">{name}</div>
+            <div className="mt-1 text-xs font-bold opacity-70">{title} · {owner}</div>
+          </div>
+          <span className="shrink-0 rounded-full bg-white/80 px-2 py-1 text-xs font-black">{levelLabel}</span>
         </div>
-        <span className="shrink-0 rounded-full bg-white/80 px-2 py-1 text-xs font-black">{levelLabel}</span>
-      </div>
-      <div className="mt-4 flex items-center gap-3">
-        <div className="h-2 flex-1 rounded-full bg-white/80">
-          <div className={`h-2 rounded-full ${meter[level] || meter.normal}`} style={{ width: `${score}%` }} />
+        <div className="mt-4 flex items-center gap-3">
+          <div className="h-2 flex-1 rounded-full bg-white/80">
+            <div className={`h-2 rounded-full ${meter[level] || meter.normal}`} style={{ width: `${score}%` }} />
+          </div>
+          <div className="text-sm font-black">{score}</div>
         </div>
-        <div className="text-sm font-black">{score}</div>
-      </div>
-      <div className="mt-3 rounded-lg bg-white/75 p-3 text-xs leading-relaxed text-gray-700">{action}</div>
+        <div className="mt-3 rounded-lg bg-white/75 p-3 text-xs leading-relaxed text-gray-700">{action}</div>
+      </Link>
       <div className="mt-3 space-y-1">
         {reasons.slice(0, 3).map((reason) => (
           <div key={reason} className="text-xs font-medium opacity-80">- {reason}</div>
         ))}
       </div>
-    </Link>
+      <form action={createRadarTask} className="mt-4">
+        <input type="hidden" name="companyId" value={companyId} />
+        <input type="hidden" name="ownerId" value={ownerId} />
+        <input type="hidden" name="title" value={`跟进 ${name}`} />
+        <input type="hidden" name="description" value={action} />
+        <input type="hidden" name="priority" value={priority} />
+        <input type="hidden" name="dueHours" value={dueHours} />
+        <button className="w-full rounded-lg bg-white/90 px-3 py-2 text-xs font-black text-gray-800 shadow-sm hover:bg-white">
+          生成跟进任务
+        </button>
+      </form>
+    </div>
   );
+}
+
+function TaskPriority({ priority }: { priority: string }) {
+  const style: Record<string, string> = {
+    URGENT: 'bg-rose-50 text-rose-700 border-rose-100',
+    HIGH: 'bg-amber-50 text-amber-700 border-amber-100',
+    NORMAL: 'bg-blue-50 text-blue-700 border-blue-100',
+    LOW: 'bg-slate-50 text-slate-600 border-slate-100',
+  };
+  const label: Record<string, string> = {
+    URGENT: '紧急',
+    HIGH: '高',
+    NORMAL: '普通',
+    LOW: '低',
+  };
+  return <span className={`rounded-full border px-2 py-1 text-xs font-bold ${style[priority] || style.NORMAL}`}>{label[priority] || priority}</span>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

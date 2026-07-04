@@ -121,6 +121,90 @@ async function addFollowUp(formData: FormData) {
   redirect(`/customers/${companyId}`);
 }
 
+async function createCustomerRadarTask(formData: FormData) {
+  'use server';
+  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
+  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
+
+  const authEmail = cookies().get('auth_email')?.value;
+  if (!authEmail) return;
+  const user = await prisma.user.findUnique({ where: { email: authEmail } });
+  if (!user) return;
+
+  const companyId = String(formData.get('companyId') || '');
+  if (!companyId) return;
+  const company = await prisma.company.findUnique({ where: { id: companyId } });
+  if (!company) return;
+
+  const ownerId = company.ownerId || user.id;
+  const sourceRef = `RADAR:${companyId}`;
+  const exists = await prisma.salesTask.findFirst({
+    where: { companyId, status: 'TODO', source: 'SALES_RADAR', sourceRef },
+    select: { id: true },
+  });
+  if (exists) redirect(`/customers/${companyId}`);
+
+  const dueHours = Math.max(2, Math.min(168, parseInt(String(formData.get('dueHours') || '24'), 10) || 24));
+  const dueAt = new Date();
+  dueAt.setHours(dueAt.getHours() + dueHours);
+  const description = String(formData.get('description') || '').trim() || '根据智能销售雷达生成的跟进任务。';
+  const priority = String(formData.get('priority') || 'NORMAL') as any;
+
+  await prisma.salesTask.create({
+    data: {
+      title: String(formData.get('title') || '').trim() || `跟进 ${company.name}`,
+      description,
+      type: priority === 'URGENT' ? 'RISK_RESCUE' : 'FOLLOW_UP',
+      priority,
+      dueAt,
+      ownerId,
+      createdById: user.id,
+      companyId,
+      source: 'SALES_RADAR',
+      sourceRef,
+    },
+  });
+  await prisma.company.update({ where: { id: companyId }, data: { nextAction: company.nextAction || description } });
+  await prisma.notification.create({
+    data: {
+      userId: ownerId,
+      type: 'SYSTEM',
+      title: '销售雷达已生成跟进任务',
+      body: `${company.name}: ${description}`,
+      link: `/customers/${companyId}`,
+    },
+  });
+  redirect(`/customers/${companyId}`);
+}
+
+async function completeCustomerSalesTask(formData: FormData) {
+  'use server';
+  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
+  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
+
+  const authEmail = cookies().get('auth_email')?.value;
+  if (!authEmail) return;
+  const user = await prisma.user.findUnique({ where: { email: authEmail } });
+  if (!user) return;
+
+  const id = String(formData.get('id') || '');
+  if (!id) return;
+  const task = await prisma.salesTask.findUnique({ where: { id } });
+  if (!task) return;
+  if (role === 'SALES' && task.ownerId !== user.id) return;
+
+  await prisma.salesTask.update({ where: { id }, data: { status: 'DONE', completedAt: new Date() } });
+  await prisma.followUp.create({
+    data: {
+      companyId: task.companyId,
+      userId: user.id,
+      type: 'TASK',
+      content: `完成销售任务: ${task.title}`,
+    },
+  });
+  redirect(`/customers/${task.companyId}`);
+}
+
 async function getAICustomerInsights(company: any) {
   try {
     const isAvailable = isLLMAvailable();
@@ -199,6 +283,11 @@ export default async function CustomerDetailPage(props: any) {
       opportunities: { orderBy: { updatedAt: 'desc' }, include: { product: true } },
       followUps: { orderBy: { createdAt: 'desc' }, take: 20, include: { user: true } },
       inboxMessages: { orderBy: { createdAt: 'desc' }, take: 15 },
+      salesTasks: {
+        where: { status: 'TODO' },
+        orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
+        include: { owner: true, opportunity: true },
+      },
     },
   });
 
@@ -435,6 +524,16 @@ export default async function CustomerDetailPage(props: any) {
             <div className="text-xs font-bold text-gray-500">系统判定</div>
             <div className="mt-1 text-lg font-black text-gray-900">{salesRadar.title}</div>
             <div className="mt-3 text-sm leading-relaxed text-gray-700">{salesRadar.recommendedAction}</div>
+            <form action={createCustomerRadarTask} className="mt-4">
+              <input type="hidden" name="companyId" value={company.id} />
+              <input type="hidden" name="title" value={`跟进 ${company.name}`} />
+              <input type="hidden" name="description" value={salesRadar.recommendedAction} />
+              <input type="hidden" name="priority" value={salesRadar.level === 'hot' || salesRadar.level === 'risk' ? 'URGENT' : salesRadar.level === 'warm' ? 'HIGH' : 'NORMAL'} />
+              <input type="hidden" name="dueHours" value={salesRadar.level === 'hot' || salesRadar.level === 'risk' || salesRadar.metrics.awaitingReply ? 24 : 72} />
+              <button className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-500">
+                生成跟进任务
+              </button>
+            </form>
           </div>
           <div className="rounded-xl border border-gray-100 bg-slate-50 p-4">
             <div className="text-xs font-bold text-gray-500">判定依据</div>
@@ -451,6 +550,40 @@ export default async function CustomerDetailPage(props: any) {
             </div>
           </div>
         </div>
+      </section>
+
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-bold text-gray-900">销售任务</h2>
+          <span className="text-xs font-bold text-gray-400">{company.salesTasks.length} 个待办</span>
+        </div>
+        {company.salesTasks.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-gray-200 p-8 text-center text-sm text-gray-400">暂无待办任务,可从智能销售雷达生成。</div>
+        ) : (
+          <div className="space-y-3">
+            {company.salesTasks.map((task) => (
+              <div key={task.id} className="rounded-xl border border-gray-100 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="font-bold text-gray-900">{task.title}</div>
+                    <div className="mt-1 text-xs text-gray-500">{task.description || '-'}</div>
+                    <div className="mt-2 text-xs text-gray-400">
+                      负责人:{task.owner.name || task.owner.email} · 截止:{task.dueAt ? fmtDate(task.dueAt) : '-'}
+                      {task.opportunity ? ` · 商机:${task.opportunity.title}` : ''}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <TaskPriority priority={task.priority} />
+                    <form action={completeCustomerSalesTask}>
+                      <input type="hidden" name="id" value={task.id} />
+                      <button className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100">完成</button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* ✨ AI 客户智能分析大脑 (AI Customer Brain) */}
@@ -768,4 +901,20 @@ function RadarBadge({ level, label, score }: { level: string; label: string; sco
       <div className="mt-1 text-xs font-bold">{label}</div>
     </div>
   );
+}
+
+function TaskPriority({ priority }: { priority: string }) {
+  const style: Record<string, string> = {
+    URGENT: 'bg-rose-50 text-rose-700 border-rose-100',
+    HIGH: 'bg-amber-50 text-amber-700 border-amber-100',
+    NORMAL: 'bg-blue-50 text-blue-700 border-blue-100',
+    LOW: 'bg-slate-50 text-slate-600 border-slate-100',
+  };
+  const label: Record<string, string> = {
+    URGENT: '紧急',
+    HIGH: '高',
+    NORMAL: '普通',
+    LOW: '低',
+  };
+  return <span className={`rounded-full border px-2 py-1 text-xs font-bold ${style[priority] || style.NORMAL}`}>{label[priority] || priority}</span>;
 }

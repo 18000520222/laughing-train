@@ -29,6 +29,8 @@ model User {
   socialAccounts SocialAccount[]
   automationRuns AutomationRun[]
   assignmentRules SalesAssignmentRule[]
+  salesTasks SalesTask[] @relation("SalesTaskOwner")
+  createdSalesTasks SalesTask[] @relation("SalesTaskCreatedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -146,6 +148,7 @@ model Company {
   whatsappMessages WhatsAppMessage[]
   socialMessages   SocialMessage[]
   inboxMessages    InboxMessage[]
+  salesTasks       SalesTask[]
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -239,6 +242,7 @@ model Opportunity {
 
   expenses      ExpenseClaim[]
   shipments     Shipment[]
+  salesTasks     SalesTask[]
   carrier         String?
   trackingNumber  String?
 
@@ -394,6 +398,65 @@ model SalesAssignmentRun {
   createdAt DateTime @default(now())
 
   @@index([ruleId, createdAt])
+}
+
+// --- 模块二十一:销售任务与活动闭环 ---
+
+enum SalesTaskStatus {
+  TODO
+  DONE
+  CANCELLED
+}
+
+enum SalesTaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum SalesTaskType {
+  FOLLOW_UP
+  EMAIL
+  PHONE
+  MEETING
+  QUOTE
+  TECH_CHECK
+  RISK_RESCUE
+  GENERAL
+}
+
+model SalesTask {
+  id          String @id @default(cuid())
+  title       String
+  description String? @db.Text
+  type        SalesTaskType @default(FOLLOW_UP)
+  priority    SalesTaskPriority @default(NORMAL)
+  status      SalesTaskStatus @default(TODO)
+
+  dueAt       DateTime?
+  completedAt DateTime?
+
+  ownerId     String
+  owner       User @relation("SalesTaskOwner", fields: [ownerId], references: [id])
+  createdById String?
+  createdBy   User? @relation("SalesTaskCreatedBy", fields: [createdById], references: [id])
+
+  companyId   String
+  company     Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  opportunityId String?
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+
+  source      String @default("MANUAL")
+  sourceRef   String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([ownerId, status, dueAt])
+  @@index([companyId, status, dueAt])
+  @@index([status, dueAt])
 }
 
 
