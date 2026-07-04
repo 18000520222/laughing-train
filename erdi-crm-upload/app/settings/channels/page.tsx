@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import type { InboxChannel, SocialPlatform } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,6 +39,49 @@ export default async function ChannelSettingsPage({
   let s = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
   if (!s) s = { id: 'default', usdToCnyRate: 7.2, companyName: 'ERDI TECH LTD', updatedAt: new Date() } as any;
   const st: any = s;
+
+  const [emailAccounts, socialAccounts, inboxTotals, inboxPending, trackingEventCount, latestTrackingEvent] = await Promise.all([
+    prisma.emailAccount.findMany({
+      orderBy: { email: 'asc' },
+      select: {
+        email: true,
+        password: true,
+        imapHost: true,
+        isActive: true,
+        updatedAt: true,
+        _count: { select: { messages: true } },
+        messages: { orderBy: { date: 'desc' }, take: 1, select: { date: true } },
+      },
+    }),
+    prisma.socialAccount.findMany({
+      orderBy: [{ platform: 'asc' }, { updatedAt: 'desc' }],
+      select: {
+        platform: true,
+        name: true,
+        externalId: true,
+        expiresAt: true,
+        updatedAt: true,
+        _count: { select: { messages: true } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } },
+      },
+    }),
+    prisma.inboxMessage.groupBy({
+      by: ['channel'],
+      where: { direction: 'IN' },
+      _count: { _all: true },
+      _max: { createdAt: true, sentAt: true },
+    }),
+    prisma.inboxMessage.groupBy({
+      by: ['channel'],
+      where: { direction: 'IN', status: { in: ['NEW', 'AI_DRAFTED'] } },
+      _count: { _all: true },
+    }),
+    prisma.trackingEvent.count(),
+    prisma.trackingEvent.findFirst({
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+      select: { occurredAt: true, createdAt: true },
+    }),
+  ]);
 
   async function save(formData: FormData) {
     'use server';
@@ -109,9 +153,20 @@ export default async function ChannelSettingsPage({
   const spOk = !!(st.shopeePartnerId && st.shopeePartnerKey && st.shopeeShopId);
 
   const baseUrl = 'https://erdicrm.com';
+  const channelHealthRows = buildChannelHealthRows({
+    st,
+    emailAccounts,
+    socialAccounts,
+    inboxTotals,
+    inboxPending,
+    trackingEventCount,
+    latestTrackingAt: latestTrackingEvent?.occurredAt || latestTrackingEvent?.createdAt || null,
+    configured: { waOk, fbOk, liOk, aftershipOk, abOk, amzOk, spOk },
+  });
+  const channelHealthSummary = summarizeChannelHealth(channelHealthRows);
 
   return (
-    <div className="max-w-4xl mx-auto p-6 md:p-10">
+    <div className="max-w-6xl mx-auto p-6 md:p-10">
       <div className="flex items-center gap-3 mb-2">
         <Link href="/settings" className="text-sm text-gray-500 hover:text-gray-800">← 系统设置</Link>
       </div>
@@ -131,6 +186,68 @@ export default async function ChannelSettingsPage({
           ❌ 授权失败：{decodeURIComponent(authError)}
         </div>
       )}
+
+      <section className="mb-8 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">渠道授权健康总控</h2>
+            <p className="mt-1 text-xs text-gray-500">
+              按 HubSpot/Zendesk/Intercom/Pipedrive 的接入与队列治理思路,统一检查授权、数据流入、SLA 积压和下一步动作。
+            </p>
+          </div>
+          <span className={`rounded-lg px-3 py-2 text-xs font-black ${channelHealthSummary.healthScore >= 80 ? 'bg-emerald-50 text-emerald-700' : channelHealthSummary.healthScore >= 55 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>
+            接入健康度 {channelHealthSummary.healthScore}
+          </span>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <ChannelHealthMetric label="渠道总数" value={channelHealthSummary.total} detail="邮件/社媒/平台/物流" tone="blue" />
+          <ChannelHealthMetric label="已配置" value={channelHealthSummary.configured} detail="凭据或账号存在" tone={channelHealthSummary.configured === channelHealthSummary.total ? 'emerald' : 'amber'} />
+          <ChannelHealthMetric label="有数据流入" value={channelHealthSummary.flowing} detail="已有消息或事件" tone={channelHealthSummary.flowing > 0 ? 'emerald' : 'rose'} />
+          <ChannelHealthMetric label="待回复积压" value={channelHealthSummary.pending} detail="NEW + AI草稿" tone={channelHealthSummary.pending > 0 ? 'rose' : 'emerald'} />
+          <ChannelHealthMetric label="需处理" value={channelHealthSummary.risks} detail="缺授权/断流/过期" tone={channelHealthSummary.risks > 0 ? 'rose' : 'emerald'} />
+          <ChannelHealthMetric label="7天内活跃" value={channelHealthSummary.fresh} detail="最近有入站数据" tone={channelHealthSummary.fresh > 0 ? 'emerald' : 'slate'} />
+        </div>
+        <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{channelHealthSummary.recommendation}</div>
+        <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-gray-50 text-xs font-black text-gray-500">
+              <tr>
+                <th className="p-3">渠道</th>
+                <th className="p-3">授权/连接</th>
+                <th className="p-3">数据流入</th>
+                <th className="p-3">待处理</th>
+                <th className="p-3">建议动作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {channelHealthRows.map((row) => (
+                <tr key={row.key} className="hover:bg-gray-50">
+                  <td className="p-3">
+                    <div className="font-black text-gray-900">{row.name}</div>
+                    <div className="mt-0.5 text-[11px] font-bold text-gray-400">{row.mode}</div>
+                  </td>
+                  <td className="p-3">
+                    <span className={`rounded-full px-2 py-1 text-xs font-black ${row.toneClass}`}>{row.status}</span>
+                    <div className="mt-1 text-[11px] font-bold text-gray-400">{row.tokenLabel}</div>
+                  </td>
+                  <td className="p-3">
+                    <div className="font-black text-gray-800">{row.dataCount}</div>
+                    <div className="mt-0.5 text-[11px] font-bold text-gray-400">最近:{row.lastSeenLabel}</div>
+                  </td>
+                  <td className="p-3">
+                    <div className={`font-black ${row.pendingCount > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{row.pendingCount}</div>
+                    <div className="mt-0.5 text-[11px] font-bold text-gray-400">统一收件箱</div>
+                  </td>
+                  <td className="p-3">
+                    <div className="text-xs font-bold text-gray-600">{row.action}</div>
+                    <Link href={row.href} className="mt-1 inline-block text-[11px] font-black text-blue-600 hover:underline">{row.linkLabel}</Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <form action={save} className="space-y-8">
         {/* WhatsApp */}
@@ -254,6 +371,379 @@ export default async function ChannelSettingsPage({
           保存渠道配置
         </button>
       </form>
+    </div>
+  );
+}
+
+type ChannelHealthRow = {
+  key: string;
+  name: string;
+  mode: string;
+  status: string;
+  tokenLabel: string;
+  dataCount: number;
+  pendingCount: number;
+  lastSeenAt: Date | null;
+  lastSeenLabel: string;
+  action: string;
+  href: string;
+  linkLabel: string;
+  configured: boolean;
+  flowing: boolean;
+  fresh: boolean;
+  riskLevel: 'ok' | 'warn' | 'risk';
+  toneClass: string;
+};
+
+type EmailAccountHealth = {
+  email: string;
+  password: string;
+  imapHost: string;
+  isActive: boolean;
+  updatedAt: Date;
+  _count: { messages: number };
+  messages: Array<{ date: Date }>;
+};
+
+type SocialAccountHealth = {
+  platform: SocialPlatform;
+  name: string | null;
+  externalId: string;
+  expiresAt: Date | null;
+  updatedAt: Date;
+  _count: { messages: number };
+  messages: Array<{ createdAt: Date }>;
+};
+
+type InboxTotalHealth = {
+  channel: InboxChannel;
+  _count: { _all: number };
+  _max: { createdAt: Date | null; sentAt: Date | null };
+};
+
+type InboxPendingHealth = {
+  channel: InboxChannel;
+  _count: { _all: number };
+};
+
+function buildChannelHealthRows(input: {
+  st: any;
+  emailAccounts: EmailAccountHealth[];
+  socialAccounts: SocialAccountHealth[];
+  inboxTotals: InboxTotalHealth[];
+  inboxPending: InboxPendingHealth[];
+  trackingEventCount: number;
+  latestTrackingAt: Date | null;
+  configured: { waOk: boolean; fbOk: boolean; liOk: boolean; aftershipOk: boolean; abOk: boolean; amzOk: boolean; spOk: boolean };
+}) {
+  const totalMap = new Map<InboxChannel, InboxTotalHealth>();
+  const pendingMap = new Map<InboxChannel, number>();
+  for (const row of input.inboxTotals) totalMap.set(row.channel, row);
+  for (const row of input.inboxPending) pendingMap.set(row.channel, row._count._all);
+
+  const byChannel = (channel: InboxChannel) => {
+    const row = totalMap.get(channel);
+    return {
+      total: row?._count._all || 0,
+      pending: pendingMap.get(channel) || 0,
+      lastSeenAt: maxDate(row?._max.sentAt || null, row?._max.createdAt || null),
+    };
+  };
+
+  const facebook = socialSummary(input.socialAccounts, 'FACEBOOK');
+  const linkedin = socialSummary(input.socialAccounts, 'LINKEDIN');
+  const emailLatest = maxDate(...input.emailAccounts.map((account) => account.messages[0]?.date || null));
+  const activeEmailAccounts = input.emailAccounts.filter((account) => account.isActive);
+  const emailConfigured = activeEmailAccounts.some((account) => Boolean(account.password));
+  const emailDataCount = input.emailAccounts.reduce((sum, account) => sum + account._count.messages, 0);
+  const emailChannel = byChannel('EMAIL');
+  const whatsapp = byChannel('WHATSAPP');
+  const alibaba = byChannel('ALIBABA');
+  const amazon = byChannel('AMAZON');
+  const shopee = byChannel('SHOPEE');
+  const facebookInbox = byChannel('FACEBOOK');
+  const linkedinInbox = byChannel('LINKEDIN');
+
+  return [
+    makeChannelRow({
+      key: 'email',
+      name: 'Gmail / IMAP 邮件',
+      mode: `${activeEmailAccounts.length}/${input.emailAccounts.length} 个账号启用 · ${activeEmailAccounts.map((account) => account.imapHost).filter(Boolean).slice(0, 2).join('、') || '未配置 IMAP'}`,
+      configured: emailConfigured,
+      tokenExpired: false,
+      tokenLabel: emailConfigured ? `已配置 ${activeEmailAccounts.length} 个邮箱` : input.emailAccounts.length > 0 ? '缺邮箱授权码' : '未添加邮箱账号',
+      dataCount: emailDataCount,
+      pendingCount: emailChannel.pending,
+      lastSeenAt: maxDate(emailLatest, emailChannel.lastSeenAt),
+      setupAction: input.emailAccounts.length > 0 ? '补齐邮箱授权码或应用专用密码,再运行邮件同步。' : '先在系统设置添加 Gmail/IMAP 邮箱账号和授权码。',
+      emptyAction: '运行邮件同步并检查 IMAP 主机、授权码和 Gmail 安全设置。',
+      staleAction: '邮件超过 7 天无新数据,检查 Gmail/IMAP 授权是否失效。',
+      pendingAction: '邮件有待回复积压,进入统一收件箱优先清询盘和报价邮件。',
+      href: '/settings',
+      linkLabel: '管理邮箱账号',
+    }),
+    makeChannelRow({
+      key: 'whatsapp',
+      name: 'WhatsApp / 360dialog',
+      mode: 'Webhook + AI 草稿 + 人工确认',
+      configured: input.configured.waOk,
+      tokenExpired: false,
+      tokenLabel: input.st.whatsapp360ApiKey ? '360dialog 已配置' : input.configured.waOk ? 'Meta Cloud 已配置' : '未配置 API Key/Token',
+      dataCount: whatsapp.total,
+      pendingCount: whatsapp.pending,
+      lastSeenAt: whatsapp.lastSeenAt,
+      setupAction: '配置 360dialog API Key 或 Meta Token + Phone Number ID,并设置 webhook。',
+      emptyAction: '发送一条 WhatsApp 测试消息,确认 webhook 进入统一收件箱。',
+      staleAction: 'WhatsApp 超过 7 天无新消息,检查 360dialog/Meta webhook 状态。',
+      pendingAction: 'WhatsApp 待回复通常更急,先从统一收件箱清掉。',
+      href: '/omnibox',
+      linkLabel: '打开统一收件箱',
+    }),
+    makeChannelRow({
+      key: 'alibaba',
+      name: '阿里巴巴国际站',
+      mode: 'OAuth + Webhook / 轮询订单消息',
+      configured: input.configured.abOk,
+      tokenExpired: isPast(input.st.alibabaTokenExpiresAt),
+      tokenLabel: tokenLabel(input.configured.abOk, input.st.alibabaTokenExpiresAt),
+      dataCount: alibaba.total,
+      pendingCount: alibaba.pending,
+      lastSeenAt: alibaba.lastSeenAt,
+      setupAction: '先保存 AppKey/AppSecret,再点一键授权完成阿里 OAuth。',
+      emptyAction: '完成阿里后台消息推送配置,用测试询盘确认入站。',
+      staleAction: '阿里超过 7 天无新消息,检查 token、webhook 和平台权限。',
+      pendingAction: '阿里询盘是高价值渠道,优先回复报价/索样/订单状态。',
+      href: '/api/auth/alibaba/start',
+      linkLabel: '发起阿里授权',
+    }),
+    makeChannelRow({
+      key: 'amazon',
+      name: 'Amazon SP-API',
+      mode: 'LWA OAuth + SP-API 轮询',
+      configured: input.configured.amzOk,
+      tokenExpired: false,
+      tokenLabel: input.configured.amzOk ? `${input.st.amazonRegion || 'na'} · ${input.st.amazonMarketplaceId || '默认站点'}` : '缺 LWA / AWS 凭据',
+      dataCount: amazon.total,
+      pendingCount: amazon.pending,
+      lastSeenAt: amazon.lastSeenAt,
+      setupAction: '补齐 LWA、AWS SigV4、Seller ID 和 Marketplace 后发起授权。',
+      emptyAction: '授权后运行渠道轮询,确认 Amazon 订单/消息进入统一收件箱。',
+      staleAction: 'Amazon 超过 7 天无新数据,检查 LWA refresh token 和 SP-API 权限。',
+      pendingAction: 'Amazon 客户消息待回复,优先确认订单/售后/发货问题。',
+      href: '/api/auth/amazon/start',
+      linkLabel: '发起 Amazon 授权',
+    }),
+    makeChannelRow({
+      key: 'shopee',
+      name: 'Shopee 虾皮',
+      mode: '店铺 OAuth + Push Webhook',
+      configured: input.configured.spOk,
+      tokenExpired: isPast(input.st.shopeeTokenExpiresAt),
+      tokenLabel: tokenLabel(input.configured.spOk, input.st.shopeeTokenExpiresAt),
+      dataCount: shopee.total,
+      pendingCount: shopee.pending,
+      lastSeenAt: shopee.lastSeenAt,
+      setupAction: '保存 Partner ID/Key 后发起 Shopee 店铺授权。',
+      emptyAction: '配置 Shopee Push URL,发送测试聊天确认入站。',
+      staleAction: 'Shopee 超过 7 天无新消息,检查 token 刷新和 Push 配置。',
+      pendingAction: 'Shopee 待回复消息进入统一收件箱逐条清理。',
+      href: '/api/auth/shopee/start',
+      linkLabel: '发起 Shopee 授权',
+    }),
+    makeChannelRow({
+      key: 'facebook',
+      name: 'Facebook Page / Messenger',
+      mode: `${facebook.accountCount} 个 Page/账号 · Graph OAuth`,
+      configured: input.configured.fbOk || facebook.accountCount > 0,
+      tokenExpired: facebook.expired,
+      tokenLabel: facebook.accountCount > 0 ? `${facebook.accountCount} 个账号已授权` : input.configured.fbOk ? 'App 凭据已配置' : '未配置 App 凭据',
+      dataCount: facebook.dataCount + facebookInbox.total,
+      pendingCount: facebookInbox.pending,
+      lastSeenAt: maxDate(facebook.lastSeenAt, facebookInbox.lastSeenAt),
+      setupAction: '配置 Facebook App 并完成 Page 一键授权。',
+      emptyAction: '订阅 Page messages webhook,用 Messenger 测试消息确认入站。',
+      staleAction: 'Facebook 超过 7 天无新消息,检查 Page 授权和 webhook 订阅。',
+      pendingAction: 'Facebook Messenger 待回复,进入统一收件箱处理。',
+      href: '/api/auth/facebook/start',
+      linkLabel: '发起 Facebook 授权',
+    }),
+    makeChannelRow({
+      key: 'linkedin',
+      name: 'LinkedIn Lead Gen',
+      mode: `${linkedin.accountCount} 个账号 · Lead Gen Forms`,
+      configured: input.configured.liOk || linkedin.accountCount > 0,
+      tokenExpired: linkedin.expired,
+      tokenLabel: linkedin.accountCount > 0 ? `${linkedin.accountCount} 个账号已授权` : input.configured.liOk ? 'Client 已配置' : '未配置 Client',
+      dataCount: linkedin.dataCount + linkedinInbox.total,
+      pendingCount: linkedinInbox.pending,
+      lastSeenAt: maxDate(linkedin.lastSeenAt, linkedinInbox.lastSeenAt),
+      setupAction: '配置 LinkedIn Client 并完成组织/Lead Sync 权限授权。',
+      emptyAction: 'Lead Sync 权限通过后,拉取表单线索确认入库。',
+      staleAction: 'LinkedIn 超过 7 天无新线索,检查产品权限、token 和表单归属。',
+      pendingAction: 'LinkedIn 线索待处理,进入统一收件箱或客户列表分配负责人。',
+      href: '/api/auth/linkedin/start',
+      linkLabel: '发起 LinkedIn 授权',
+    }),
+    makeChannelRow({
+      key: 'aftership',
+      name: 'AfterShip 物流追踪',
+      mode: 'API Key + 物流事件同步',
+      configured: input.configured.aftershipOk,
+      tokenExpired: false,
+      tokenLabel: input.configured.aftershipOk ? 'API Key 已配置' : '未配置 API Key',
+      dataCount: input.trackingEventCount,
+      pendingCount: 0,
+      lastSeenAt: input.latestTrackingAt,
+      setupAction: '配置 AfterShip API Key,再同步未签收运单。',
+      emptyAction: '运行物流同步,确认运单事件写入物流中心。',
+      staleAction: '物流事件超过 7 天无更新,检查 AfterShip API Key 和运单状态。',
+      pendingAction: '物流渠道无收件箱积压,关注异常运单即可。',
+      href: '/logistics',
+      linkLabel: '打开物流中心',
+    }),
+  ];
+}
+
+function summarizeChannelHealth(rows: ChannelHealthRow[]) {
+  const total = rows.length;
+  const configured = rows.filter((row) => row.configured).length;
+  const flowing = rows.filter((row) => row.flowing).length;
+  const fresh = rows.filter((row) => row.fresh).length;
+  const pending = rows.reduce((sum, row) => sum + row.pendingCount, 0);
+  const risks = rows.filter((row) => row.riskLevel === 'risk').length;
+  const warnings = rows.filter((row) => row.riskLevel === 'warn').length;
+  const healthScore = Math.max(0, Math.min(100, Math.round(100 - risks * 13 - warnings * 6 - Math.min(24, pending))));
+  return {
+    total,
+    configured,
+    flowing,
+    fresh,
+    pending,
+    risks,
+    healthScore,
+    recommendation: channelHealthRecommendation({ total, configured, flowing, fresh, pending, risks, warnings }),
+  };
+}
+
+function makeChannelRow(input: {
+  key: string;
+  name: string;
+  mode: string;
+  configured: boolean;
+  tokenExpired: boolean;
+  tokenLabel: string;
+  dataCount: number;
+  pendingCount: number;
+  lastSeenAt: Date | null;
+  setupAction: string;
+  emptyAction: string;
+  staleAction: string;
+  pendingAction: string;
+  href: string;
+  linkLabel: string;
+}): ChannelHealthRow {
+  const fresh = isFresh(input.lastSeenAt, 7);
+  const flowing = input.dataCount > 0;
+  let riskLevel: ChannelHealthRow['riskLevel'] = 'ok';
+  let status = '运行中';
+  let action = '保持授权有效,继续监控统一收件箱和同步日志。';
+
+  if (!input.configured) {
+    riskLevel = 'risk';
+    status = '缺授权';
+    action = input.setupAction;
+  } else if (input.tokenExpired) {
+    riskLevel = 'risk';
+    status = '授权过期';
+    action = '重新发起 OAuth 授权或刷新平台 token。';
+  } else if (!flowing) {
+    riskLevel = 'warn';
+    status = '待验证';
+    action = input.emptyAction;
+  } else if (!fresh) {
+    riskLevel = 'warn';
+    status = '疑似断流';
+    action = input.staleAction;
+  } else if (input.pendingCount > 0) {
+    riskLevel = 'warn';
+    status = '有积压';
+    action = input.pendingAction;
+  }
+
+  return {
+    ...input,
+    status,
+    action,
+    flowing,
+    fresh,
+    riskLevel,
+    lastSeenLabel: input.lastSeenAt ? formatShortDate(input.lastSeenAt) : '暂无',
+    toneClass: riskLevel === 'ok' ? 'bg-emerald-50 text-emerald-700' : riskLevel === 'warn' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700',
+  };
+}
+
+function socialSummary(accounts: SocialAccountHealth[], platform: SocialPlatform) {
+  const rows = accounts.filter((account) => account.platform === platform);
+  return {
+    accountCount: rows.length,
+    dataCount: rows.reduce((sum, account) => sum + account._count.messages, 0),
+    lastSeenAt: maxDate(...rows.map((account) => account.messages[0]?.createdAt || null)),
+    expired: rows.some((account) => isPast(account.expiresAt)),
+  };
+}
+
+function channelHealthRecommendation(input: { total: number; configured: number; flowing: number; fresh: number; pending: number; risks: number; warnings: number }) {
+  if (input.risks > 0) return `还有 ${input.risks} 个渠道缺授权或授权过期。先补齐这些渠道,否则客户消息不会稳定进入 CRM。`;
+  if (input.flowing < input.configured) return `已配置 ${input.configured} 个渠道,但只有 ${input.flowing} 个有数据流入。逐个做测试消息/同步验证。`;
+  if (input.pending > 0) return `统一收件箱还有 ${input.pending} 条待回复消息。先清 SLA 积压,再继续接新渠道。`;
+  if (input.fresh < input.flowing) return '部分渠道超过 7 天没有新数据。检查 webhook、轮询任务和平台授权是否仍有效。';
+  if (input.configured === input.total) return '所有核心渠道均已配置并处于可监控状态。继续保持每日巡检和授权到期复核。';
+  return '核心渠道健康度可控。下一步补齐未配置渠道,并用测试消息验证入站闭环。';
+}
+
+function tokenLabel(configured: boolean, expiresAt: Date | string | null | undefined) {
+  if (!configured) return '未授权';
+  if (!expiresAt) return '已配置,无到期时间';
+  if (isPast(expiresAt)) return `已过期 ${formatShortDate(expiresAt)}`;
+  return `到期 ${formatShortDate(expiresAt)}`;
+}
+
+function isPast(value: Date | string | null | undefined) {
+  if (!value) return false;
+  return new Date(value).getTime() < Date.now();
+}
+
+function isFresh(value: Date | string | null | undefined, days: number) {
+  if (!value) return false;
+  return Date.now() - new Date(value).getTime() <= days * 86400000;
+}
+
+function maxDate(...values: Array<Date | string | null | undefined>) {
+  const times = values
+    .filter(Boolean)
+    .map((value) => new Date(value as Date | string))
+    .filter((value) => Number.isFinite(value.getTime()));
+  if (times.length === 0) return null;
+  return new Date(Math.max(...times.map((value) => value.getTime())));
+}
+
+function formatShortDate(value: Date | string) {
+  return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function ChannelHealthMetric({ label, value, detail, tone }: { label: string; value: number | string; detail: string; tone: 'blue' | 'emerald' | 'amber' | 'rose' | 'slate' }) {
+  const color = {
+    blue: 'border-blue-100 bg-blue-50 text-blue-800',
+    emerald: 'border-emerald-100 bg-emerald-50 text-emerald-800',
+    amber: 'border-amber-100 bg-amber-50 text-amber-800',
+    rose: 'border-rose-100 bg-rose-50 text-rose-800',
+    slate: 'border-slate-100 bg-slate-50 text-slate-800',
+  };
+  return (
+    <div className={`rounded-xl border p-3 ${color[tone]}`}>
+      <div className="text-xs font-bold opacity-70">{label}</div>
+      <div className="mt-1 text-xl font-black">{value}</div>
+      <div className="mt-1 text-[11px] font-bold opacity-70">{detail}</div>
     </div>
   );
 }
