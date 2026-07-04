@@ -253,6 +253,60 @@ export default async function SalesKpiPage(props: any) {
             </div>
           </div>
         </div>
+        <div className="mt-4 rounded-xl border border-gray-100 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-xs font-black text-gray-500">补救后业务归因</h3>
+              <p className="mt-1 text-[11px] font-bold text-gray-400">只把同客户、同负责人、补救任务完成后、本月内发生的赢单和后续完成动作计入归因;同一赢单只归给最近一次已完成补救。</p>
+            </div>
+            <span className="rounded-full bg-gray-50 px-3 py-1 text-[11px] font-black text-gray-500">保守归因</span>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <RecoveryMetric label="归因收入" value={`$${Math.round(recoveryRecap.attribution.revenue).toLocaleString()}`} detail={`${recoveryRecap.attribution.wonDeals} 个赢单`} tone={recoveryRecap.attribution.revenue > 0 ? 'emerald' : 'gray'} />
+            <RecoveryMetric label="有效补救率" value={formatPercent(recoveryRecap.attribution.effectiveRate)} detail={`${recoveryRecap.attribution.effectiveTasks}/${recoveryRecap.done} 个完成补救产生结果`} tone={(recoveryRecap.attribution.effectiveRate || 0) >= 0.5 ? 'emerald' : recoveryRecap.done > 0 ? 'amber' : 'gray'} />
+            <RecoveryMetric label="后续完成动作" value={recoveryRecap.attribution.downstreamTasks} detail="不含原 KPI 补救任务" tone={recoveryRecap.attribution.downstreamTasks > 0 ? 'blue' : 'gray'} />
+            <RecoveryMetric label="有效客户" value={recoveryRecap.attribution.companies} detail={recoveryRecap.attribution.recommendationTone} tone={recoveryRecap.attribution.companies > 0 ? 'emerald' : 'gray'} />
+          </div>
+          <div className="mt-4 rounded-lg bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">
+            {recoveryRecap.attribution.recommendation}
+          </div>
+          <div className="mt-4 grid gap-4 xl:grid-cols-3">
+            <div>
+              <h4 className="text-xs font-black text-gray-500">按指标归因</h4>
+              <div className="mt-3 space-y-3">
+                {recoveryRecap.attribution.byIndicator.map((item) => (
+                  <AttributionBreakdownRow key={item.key} label={item.label} total={item.recoveryDone} revenue={item.revenue} wonDeals={item.wonDeals} downstreamTasks={item.downstreamTasks} />
+                ))}
+                {recoveryRecap.attribution.byIndicator.length === 0 && <div className="rounded-lg bg-white p-3 text-xs font-bold text-gray-400">暂无已完成补救任务可归因。</div>}
+              </div>
+            </div>
+            <div>
+              <h4 className="text-xs font-black text-gray-500">人员结果归因</h4>
+              <div className="mt-3 space-y-3">
+                {recoveryRecap.attribution.byOwner.slice(0, 6).map((item) => (
+                  <AttributionBreakdownRow key={item.key} label={item.label} total={item.recoveryDone} revenue={item.revenue} wonDeals={item.wonDeals} downstreamTasks={item.downstreamTasks} />
+                ))}
+                {recoveryRecap.attribution.byOwner.length === 0 && <div className="rounded-lg bg-white p-3 text-xs font-bold text-gray-400">暂无人员归因结果。</div>}
+              </div>
+            </div>
+            <div>
+              <h4 className="text-xs font-black text-gray-500">关键客户结果</h4>
+              <div className="mt-3 space-y-2">
+                {recoveryRecap.attribution.topCompanies.map((item) => (
+                  <div key={`${item.taskId}-${item.companyId}`} className="rounded-lg border border-gray-100 bg-white px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <Link href={`/customers/${item.companyId}`} className="min-w-0 truncate text-xs font-black text-blue-700 hover:underline">{item.companyName}</Link>
+                      <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-700">{item.metricLabel}</span>
+                    </div>
+                    <div className="mt-1 text-[11px] font-bold text-gray-500">{item.ownerName} · 收入 ${Math.round(item.revenue).toLocaleString()} · 赢单 {item.wonDeals} · 后续动作 {item.downstreamTasks}</div>
+                    <div className="mt-1 truncate text-[11px] font-bold text-gray-400">{item.taskTitle}</div>
+                  </div>
+                ))}
+                {recoveryRecap.attribution.topCompanies.length === 0 && <div className="rounded-lg bg-white p-3 text-xs font-bold text-gray-400">暂无可归因的客户结果。</div>}
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       {canManage && (
@@ -378,6 +432,11 @@ async function getKpiRecoveryRecap({ periodStart, owners }: {
     }))
     .sort((a, b) => Number(b.isOverdue) - Number(a.isOverdue) || (a.dueAt?.getTime() || 0) - (b.dueAt?.getTime() || 0))
     .slice(0, 6);
+  const attribution = await getKpiRecoveryAttribution({
+    tasks,
+    periodStart,
+    periodEnd: addMonths(periodStart, 1),
+  });
 
   const total = tasks.length;
   const done = doneTasks.length;
@@ -397,7 +456,114 @@ async function getKpiRecoveryRecap({ periodStart, owners }: {
     byIndicator,
     byOwner,
     openTasks: openTaskRows,
+    attribution,
     recommendation: kpiRecoveryRecommendation({ total, done, overdue, dueSoon: dueSoonTasks.length, completionRate }),
+  };
+}
+
+async function getKpiRecoveryAttribution({ tasks, periodStart, periodEnd }: { tasks: any[]; periodStart: Date; periodEnd: Date }) {
+  const doneRecoveryTasks = tasks.filter((task) => task.status === 'DONE' && task.completedAt);
+  const ownerIds = Array.from(new Set(doneRecoveryTasks.map((task) => task.ownerId)));
+  const companyIds = Array.from(new Set(doneRecoveryTasks.map((task) => task.companyId)));
+  const empty = buildEmptyAttribution(doneRecoveryTasks);
+  if (doneRecoveryTasks.length === 0 || ownerIds.length === 0 || companyIds.length === 0) return empty;
+
+  const [wonOpps, downstreamTasks] = await Promise.all([
+    prisma.opportunity.findMany({
+      where: {
+        ownerId: { in: ownerIds },
+        companyId: { in: companyIds },
+        stage: 'CLOSED_WON',
+        stageChangedAt: { gte: periodStart, lt: periodEnd },
+      },
+      select: { id: true, title: true, amountUSD: true, companyId: true, ownerId: true, stageChangedAt: true },
+    }),
+    prisma.salesTask.findMany({
+      where: {
+        ownerId: { in: ownerIds },
+        companyId: { in: companyIds },
+        status: 'DONE',
+        completedAt: { gte: periodStart, lt: periodEnd },
+        source: { not: 'KPI_AUTO_SPLIT' },
+      },
+      select: { id: true, title: true, companyId: true, ownerId: true, completedAt: true },
+    }),
+  ]);
+
+  const records = new Map<string, any>();
+  for (const task of doneRecoveryTasks) {
+    records.set(task.id, {
+      taskId: task.id,
+      taskTitle: task.title,
+      metricKey: parseKpiRecoveryKey(task.sourceRef),
+      metricLabel: KPI_RECOVERY_LABEL[parseKpiRecoveryKey(task.sourceRef)] || '其他',
+      ownerId: task.ownerId,
+      ownerName: task.owner.name || task.owner.email,
+      companyId: task.companyId,
+      companyName: task.company.name,
+      recoveryDone: 1,
+      revenue: 0,
+      wonDeals: 0,
+      downstreamTasks: 0,
+      hasOutcome: false,
+    });
+  }
+
+  for (const opp of wonOpps) {
+    const task = findInfluencingRecoveryTask(doneRecoveryTasks, {
+      ownerId: opp.ownerId,
+      companyId: opp.companyId,
+      outcomeAt: opp.stageChangedAt,
+    });
+    if (!task) continue;
+    const record = records.get(task.id);
+    record.revenue += opp.amountUSD || 0;
+    record.wonDeals++;
+    record.hasOutcome = true;
+  }
+
+  for (const taskOutcome of downstreamTasks) {
+    if (!taskOutcome.completedAt) continue;
+    const task = findInfluencingRecoveryTask(doneRecoveryTasks, {
+      ownerId: taskOutcome.ownerId,
+      companyId: taskOutcome.companyId,
+      outcomeAt: taskOutcome.completedAt,
+    });
+    if (!task) continue;
+    const record = records.get(task.id);
+    record.downstreamTasks++;
+    record.hasOutcome = true;
+  }
+
+  const rows = Array.from(records.values());
+  const revenue = rows.reduce((sum, row) => sum + row.revenue, 0);
+  const wonDeals = rows.reduce((sum, row) => sum + row.wonDeals, 0);
+  const downstreamTaskCount = rows.reduce((sum, row) => sum + row.downstreamTasks, 0);
+  const effectiveTasks = rows.filter((row) => row.hasOutcome).length;
+  const companies = new Set(rows.filter((row) => row.hasOutcome).map((row) => row.companyId)).size;
+  const byIndicator = Object.entries(KPI_RECOVERY_LABEL).map(([key, label]) => summarizeAttributionRows(key, label, rows.filter((row) => row.metricKey === key))).filter((item) => item.recoveryDone > 0);
+  const byOwner = Array.from(new Set(rows.map((row) => row.ownerId))).map((ownerId) => {
+    const ownerRows = rows.filter((row) => row.ownerId === ownerId);
+    return summarizeAttributionRows(ownerId, ownerRows[0]?.ownerName || '未命名', ownerRows, { ownerId });
+  }).filter((item) => item.recoveryDone > 0).sort((a, b) => b.revenue - a.revenue || b.wonDeals - a.wonDeals || b.downstreamTasks - a.downstreamTasks);
+  const topCompanies = rows
+    .filter((row) => row.hasOutcome)
+    .sort((a, b) => b.revenue - a.revenue || b.wonDeals - a.wonDeals || b.downstreamTasks - a.downstreamTasks)
+    .slice(0, 6);
+  const effectiveRate = doneRecoveryTasks.length > 0 ? effectiveTasks / doneRecoveryTasks.length : null;
+
+  return {
+    revenue,
+    wonDeals,
+    downstreamTasks: downstreamTaskCount,
+    effectiveTasks,
+    companies,
+    effectiveRate,
+    byIndicator,
+    byOwner,
+    topCompanies,
+    recommendationTone: companies > 0 ? '已有结果证据' : '等待业务结果',
+    recommendation: kpiAttributionRecommendation({ revenue, wonDeals, downstreamTasks: downstreamTaskCount, effectiveTasks, doneRecovery: doneRecoveryTasks.length }),
   };
 }
 
@@ -458,6 +624,20 @@ function RecoveryBreakdownRow({ label, total, done, overdue }: { label: string; 
       </div>
       <ProgressBar rate={rate} />
       <div className="mt-1 text-[11px] font-bold text-gray-400">完成率 {formatPercent(rate)} · 逾期 {overdue}</div>
+    </div>
+  );
+}
+
+function AttributionBreakdownRow({ label, total, revenue, wonDeals, downstreamTasks }: { label: string; total: number; revenue: number; wonDeals: number; downstreamTasks: number }) {
+  const score = total > 0 ? Math.min(1, (wonDeals + downstreamTasks) / total) : null;
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-xs font-black text-gray-900">{label}</span>
+        <span className="shrink-0 text-xs font-black text-gray-500">{total} 个补救</span>
+      </div>
+      <ProgressBar rate={score} />
+      <div className="mt-1 text-[11px] font-bold text-gray-400">收入 ${Math.round(revenue).toLocaleString()} · 赢单 {wonDeals} · 后续动作 {downstreamTasks}</div>
     </div>
   );
 }
@@ -541,6 +721,60 @@ function kpiRecoveryRecommendation(input: { total: number; done: number; overdue
   if (input.dueSoon > 0) return `有 ${input.dueSoon} 个 KPI 补救任务 24 小时内到期,今天需要集中清掉,防止明天变成逾期。`;
   if ((input.completionRate || 0) >= 0.8) return 'KPI 补救任务执行率良好,下一步应复盘哪些指标真的被补回,把有效打法固化到团队节奏。';
   return 'KPI 补救任务完成率偏低,建议按人员和指标逐项追问阻塞原因,必要时重新分派给更合适的负责人。';
+}
+
+function findInfluencingRecoveryTask(tasks: any[], outcome: { ownerId: string | null; companyId: string; outcomeAt: Date }) {
+  const candidates = tasks
+    .filter((task) => task.ownerId === outcome.ownerId && task.companyId === outcome.companyId && task.completedAt && task.completedAt.getTime() <= outcome.outcomeAt.getTime())
+    .sort((a, b) => b.completedAt.getTime() - a.completedAt.getTime());
+  return candidates[0] || null;
+}
+
+function summarizeAttributionRows(key: string, label: string, rows: any[], extra: Record<string, any> = {}) {
+  return {
+    key,
+    label,
+    recoveryDone: rows.reduce((sum, row) => sum + row.recoveryDone, 0),
+    revenue: rows.reduce((sum, row) => sum + row.revenue, 0),
+    wonDeals: rows.reduce((sum, row) => sum + row.wonDeals, 0),
+    downstreamTasks: rows.reduce((sum, row) => sum + row.downstreamTasks, 0),
+    effectiveTasks: rows.filter((row) => row.hasOutcome).length,
+    ...extra,
+  };
+}
+
+function buildEmptyAttribution(doneRecoveryTasks: any[]) {
+  const byIndicator = Object.entries(KPI_RECOVERY_LABEL).map(([key, label]) => {
+    const rows = doneRecoveryTasks.filter((task) => parseKpiRecoveryKey(task.sourceRef) === key);
+    return summarizeAttributionRows(key, label, rows.map((task) => ({
+      recoveryDone: 1,
+      revenue: 0,
+      wonDeals: 0,
+      downstreamTasks: 0,
+      hasOutcome: false,
+    })));
+  }).filter((item) => item.recoveryDone > 0);
+
+  return {
+    revenue: 0,
+    wonDeals: 0,
+    downstreamTasks: 0,
+    effectiveTasks: 0,
+    companies: 0,
+    effectiveRate: doneRecoveryTasks.length > 0 ? 0 : null,
+    byIndicator,
+    byOwner: [],
+    topCompanies: [],
+    recommendationTone: '等待业务结果',
+    recommendation: kpiAttributionRecommendation({ revenue: 0, wonDeals: 0, downstreamTasks: 0, effectiveTasks: 0, doneRecovery: doneRecoveryTasks.length }),
+  };
+}
+
+function kpiAttributionRecommendation(input: { revenue: number; wonDeals: number; downstreamTasks: number; effectiveTasks: number; doneRecovery: number }) {
+  if (input.doneRecovery === 0) return '还没有已完成的 KPI 补救任务,目前无法做结果归因。先把补救任务执行完,再看是否带来客户和收入变化。';
+  if (input.revenue > 0 || input.wonDeals > 0) return `已有 ${input.wonDeals} 个赢单和 $${Math.round(input.revenue).toLocaleString()} 收入可保守归因到已完成补救,建议把这些客户动作沉淀成可复制打法。`;
+  if (input.downstreamTasks > 0) return `已完成补救后带动 ${input.downstreamTasks} 个后续销售动作,但暂未看到赢单收入,下一步要盯商机阶段推进和报价结果。`;
+  return '已完成补救暂未产生可归因业务结果,需要检查补救任务质量、客户选择和后续跟进是否真正推进成交。';
 }
 
 function numberInput(value: FormDataEntryValue | null) {
