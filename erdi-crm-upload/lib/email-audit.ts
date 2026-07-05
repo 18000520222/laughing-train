@@ -179,7 +179,7 @@ export async function reclassifyEmailMessages({
   let leads = 0;
 
   for (const msg of messages) {
-    const classification = classifyEmail(msg);
+    const classification = preserveEmailActionState(msg, classifyEmail(msg));
     counts[classification.category] = (counts[classification.category] || 0) + 1;
     if (classification.actionRequired) actionRequired++;
     if (classification.isLead) leads++;
@@ -241,6 +241,21 @@ export async function reclassifyEmailMessages({
   };
 }
 
+function preserveEmailActionState(
+  msg: {
+    classificationTags: string[];
+  },
+  classification: ReturnType<typeof classifyEmail>
+) {
+  const processedTags = (msg.classificationTags || []).filter((tag) => tag === '已转任务' || tag === '已清理');
+  if (processedTags.length === 0) return classification;
+  return {
+    ...classification,
+    actionRequired: false,
+    classificationTags: mergeTags(classification.classificationTags, processedTags),
+  };
+}
+
 function changedEmailFields(
   msg: {
     category: string;
@@ -260,6 +275,10 @@ function changedEmailFields(
   if (msg.isLead !== classification.isLead) fields.push('isLead');
   if (JSON.stringify(msg.classificationTags || []) !== JSON.stringify(classification.classificationTags)) fields.push('tags');
   return fields;
+}
+
+function mergeTags(current: string[], extra: string[]) {
+  return Array.from(new Set([...(current || []), ...extra]));
 }
 
 const emailSampleSelect = {
