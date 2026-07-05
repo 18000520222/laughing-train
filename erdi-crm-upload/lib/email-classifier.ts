@@ -261,7 +261,7 @@ function hasSeoSpamSignal(text: string) {
 }
 
 function hasMarketingSignal(text: string) {
-  return ['unsubscribe', 'newsletter', 'webinar', 'register now', 'free trial', 'promotion', 'limited time', 'click here'].some((k) => text.includes(k));
+  return ['unsubscribe', 'newsletter', 'webinar', 'register now', 'free trial', 'promotion', 'limited time', 'click here', 'points', 'rewards', 'member benefits'].some((k) => text.includes(k));
 }
 
 function hasDirectBusinessIntent(text: string) {

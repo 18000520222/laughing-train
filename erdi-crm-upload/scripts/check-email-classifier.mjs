@@ -81,11 +81,11 @@ const cases = [
   },
   {
     name: 'hotel rewards noise is not customs',
-    expected: 'OTHER',
+    expected: 'MARKETING_NEWSLETTER',
     input: {
       from: '"IHG One Rewards" <IHGOneRewards@mc.ihg.com>',
       subject: 'Yilin, 进阶奖赏等你来享',
-      textBody: 'COO and member benefits are waiting for you.',
+      textBody: 'COO, rewards points, refund options, and member benefits are waiting for you.',
     },
   },
   {
