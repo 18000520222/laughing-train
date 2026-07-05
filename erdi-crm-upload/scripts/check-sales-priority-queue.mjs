@@ -15,6 +15,8 @@ const morningWatchSource = fs.readFileSync(path.join(process.cwd(), 'lib/sales-m
 const morningClosureSource = fs.readFileSync(path.join(process.cwd(), 'lib/sales-morning-briefing-closure.ts'), 'utf8');
 const actionClosurePath = path.join(process.cwd(), 'lib/sales-action-closure.ts');
 const actionClosureSource = fs.readFileSync(actionClosurePath, 'utf8');
+const completionEvidencePath = path.join(process.cwd(), 'lib/sales-completion-evidence.ts');
+const completionEvidenceSource = fs.readFileSync(completionEvidencePath, 'utf8');
 const compiled = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.CommonJS,
@@ -46,6 +48,21 @@ const actionClosureSandbox = {
 };
 vm.runInNewContext(actionClosureCompiled.outputText, actionClosureSandbox, { filename: actionClosurePath });
 const { buildSalesActionClosureReport } = actionClosureSandbox.module.exports;
+const completionEvidenceCompiled = ts.transpileModule(completionEvidenceSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2020,
+    esModuleInterop: true,
+  },
+});
+const completionEvidenceExported = {};
+const completionEvidenceSandbox = {
+  exports: completionEvidenceExported,
+  module: { exports: completionEvidenceExported },
+  require,
+};
+vm.runInNewContext(completionEvidenceCompiled.outputText, completionEvidenceSandbox, { filename: completionEvidencePath });
+const { buildSalesCompletionEvidenceReport } = completionEvidenceSandbox.module.exports;
 
 const now = new Date('2026-07-04T12:00:00Z');
 const queue = buildSalesPriorityQueue({
@@ -159,6 +176,73 @@ const actionClosure = buildSalesActionClosureReport({
     },
   ],
 });
+const completionEvidence = buildSalesCompletionEvidenceReport({
+  tasks: [
+    {
+      id: 'done-missing',
+      title: 'Done without evidence',
+      source: 'DAILY_PRIORITY',
+      completedAt: new Date('2026-07-04T08:00:00Z'),
+      dueAt: new Date('2026-07-04T10:00:00Z'),
+      owner: { name: 'Sales A', email: 'a@example.com' },
+      company: { id: 'c1', name: 'Priority Buyer' },
+      opportunity: null,
+    },
+    {
+      id: 'done-weak',
+      title: 'Done with note only',
+      source: 'EMAIL_ACTION_BULK',
+      completedAt: new Date('2026-07-04T09:00:00Z'),
+      dueAt: new Date('2026-07-04T10:00:00Z'),
+      owner: { name: 'Sales B', email: 'b@example.com' },
+      company: { id: 'c2', name: 'Task Buyer' },
+      opportunity: null,
+    },
+    {
+      id: 'done-strong',
+      title: 'Done with outbound and opportunity',
+      source: 'OMNIBOX_BULK',
+      completedAt: new Date('2026-07-04T10:00:00Z'),
+      dueAt: new Date('2026-07-04T10:00:00Z'),
+      owner: { name: 'Sales C', email: 'c@example.com' },
+      company: { id: 'c3', name: 'Defense Buyer' },
+      opportunity: { id: 'opp1', title: 'Stalled defense order', amountUSD: 52000 },
+    },
+  ],
+  followUps: [
+    {
+      id: 'fu1',
+      companyId: 'c2',
+      content: 'Completed note only',
+      type: 'TASK',
+      createdAt: new Date('2026-07-04T09:01:00Z'),
+      user: { name: 'Sales B', email: 'b@example.com' },
+    },
+  ],
+  messages: [
+    {
+      id: 'out1',
+      companyId: 'c3',
+      direction: 'OUT',
+      senderName: 'Sales C',
+      originalText: 'Sent quotation to customer',
+      translatedText: '已发送报价',
+      sentAt: new Date('2026-07-04T10:05:00Z'),
+      createdAt: new Date('2026-07-04T10:05:00Z'),
+    },
+  ],
+  opportunities: [
+    {
+      id: 'opp1',
+      companyId: 'c3',
+      title: 'Stalled defense order',
+      stage: 'QUOTING',
+      amountUSD: 52000,
+      stageChangedAt: new Date('2026-07-04T10:10:00Z'),
+      updatedAt: new Date('2026-07-04T10:10:00Z'),
+    },
+  ],
+});
 
 const failures = [];
 if (!Array.isArray(queue.items) || queue.items.length < 5) failures.push('priority queue should include cross-module items');
@@ -182,6 +266,11 @@ if (actionClosure.overdueTasks < 1) failures.push('action closure should detect 
 if (actionClosure.doneTasks < 1) failures.push('action closure should detect done linked task');
 if (actionClosure.missingTasks < 1) failures.push('action closure should detect priority items not converted to tasks');
 if (!actionClosure.rows.some((row) => row.statusLabel === '逾期未完成')) failures.push('action closure overdue row missing');
+if (completionEvidence.completedTasks !== 3) failures.push('completion evidence should inspect completed tasks');
+if (completionEvidence.missingEvidence !== 1) failures.push('completion evidence should detect missing evidence');
+if (completionEvidence.weakEvidence !== 1) failures.push('completion evidence should detect note-only evidence');
+if (completionEvidence.strongEvidence !== 1) failures.push('completion evidence should detect outbound/stage evidence');
+if (!completionEvidence.rows.some((row) => row.statusLabel === '有业务结果')) failures.push('completion evidence strong row missing');
 if (!pageSource.includes('老板每日作战清单')) failures.push('daily priority panel UI missing');
 if (!pageSource.includes('老板晨会摘要')) failures.push('morning briefing UI missing');
 if (!pageSource.includes('晨会通知处理闭环')) failures.push('morning briefing closure UI missing');
@@ -190,6 +279,10 @@ if (!pageSource.includes('超过24h未读')) failures.push('morning briefing sta
 if (!pageSource.includes('作战清单执行闭环')) failures.push('action closure UI missing');
 if (!pageSource.includes('buildSalesActionClosureReport')) failures.push('action closure report not wired');
 if (!pageSource.includes("sourceRef: { in: priorityActionSourceRefs }")) failures.push('action closure does not query priority sourceRefs');
+if (!pageSource.includes('任务完成证据链')) failures.push('completion evidence UI missing');
+if (!pageSource.includes('buildSalesCompletionEvidenceReport')) failures.push('completion evidence report not wired');
+if (!pageSource.includes("direction: 'OUT'") && !pageSource.includes('direction: "OUT"')) failures.push('completion evidence should query outbound messages');
+if (!pageSource.includes('stageChangedAt: { gte: completionWindowStart }')) failures.push('completion evidence should query opportunity stage changes');
 if (!pageSource.includes('处理晨会前三项') || !pageSource.includes('一键处理全部高危')) failures.push('morning briefing bulk buttons missing');
 if (!pageSource.includes('通知前三项负责人') || !pageSource.includes('通知全部高危负责人')) failures.push('morning briefing notify buttons missing');
 if (!pageSource.includes('MorningNotifyResultBanner')) failures.push('morning briefing notify result banner missing');
@@ -235,6 +328,10 @@ if (!actionClosureSource.includes('buildSalesActionClosureReport')) failures.pus
 if (!actionClosureSource.includes('未转任务')) failures.push('action closure missing task status missing');
 if (!actionClosureSource.includes('逾期未完成')) failures.push('action closure overdue status missing');
 if (!actionClosureSource.includes('priority:${item.id}')) failures.push('action closure priority sourceRef lookup missing');
+if (!completionEvidenceSource.includes('buildSalesCompletionEvidenceReport')) failures.push('completion evidence builder missing');
+if (!completionEvidenceSource.includes('缺完成证据')) failures.push('completion evidence missing status missing');
+if (!completionEvidenceSource.includes('有业务结果')) failures.push('completion evidence strong status missing');
+if (!completionEvidenceSource.includes('商机推进')) failures.push('completion evidence opportunity proof missing');
 
 if (failures.length > 0) {
   for (const failure of failures) console.error(failure);

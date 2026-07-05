@@ -13,6 +13,7 @@ import { buildAutomationFunnelInsights } from '@/lib/automation-insights';
 import { buildSalesMorningBriefing, buildSalesOwnerPriorityReport, buildSalesPriorityQueue } from '@/lib/sales-priority-queue';
 import { buildMorningBriefingClosureReport } from '@/lib/sales-morning-briefing-closure';
 import { buildSalesActionClosureReport } from '@/lib/sales-action-closure';
+import { buildSalesCompletionEvidenceReport } from '@/lib/sales-completion-evidence';
 
 export const dynamic = 'force-dynamic';
 
@@ -553,6 +554,52 @@ export default async function SalesCommandPage({
     include: { owner: true, company: true, opportunity: true },
   });
   const actionClosure = buildSalesActionClosureReport({ items: priorityQueue.items, tasks: actionClosureTasks, now: new Date() });
+  const completionEvidenceTasks = await prisma.salesTask.findMany({
+    where: {
+      status: 'DONE',
+      completedAt: { gte: thirtyDaysAgo, lt: new Date() },
+      source: { in: ['DAILY_PRIORITY', 'EMAIL_ACTION_BULK', 'OMNIBOX_BULK', 'AUTOMATION_NO_REPLY_TIMEOUT', 'CUSTOMER_HEALTH_AUTOMATION', 'SALES_RADAR'] },
+    },
+    orderBy: { completedAt: 'desc' },
+    take: 60,
+    include: { owner: true, company: true, opportunity: true },
+  });
+  const completionCompanyIds = Array.from(new Set(completionEvidenceTasks.map((task) => task.companyId)));
+  const completionWindowStart = completionEvidenceTasks.reduce<Date | null>((min, task) => {
+    if (!task.completedAt) return min;
+    const candidate = new Date(task.completedAt.getTime() - 5 * 60000);
+    return !min || candidate < min ? candidate : min;
+  }, null) || thirtyDaysAgo;
+  const [completionFollowUps, completionMessages, completionOpportunities] = completionCompanyIds.length > 0
+    ? await Promise.all([
+        prisma.followUp.findMany({
+          where: { companyId: { in: completionCompanyIds }, createdAt: { gte: completionWindowStart } },
+          include: { user: true },
+          orderBy: { createdAt: 'desc' },
+          take: 500,
+        }),
+        prisma.inboxMessage.findMany({
+          where: {
+            companyId: { in: completionCompanyIds },
+            direction: 'OUT',
+            OR: [{ createdAt: { gte: completionWindowStart } }, { sentAt: { gte: completionWindowStart } }],
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 500,
+        }),
+        prisma.opportunity.findMany({
+          where: { companyId: { in: completionCompanyIds }, stageChangedAt: { gte: completionWindowStart } },
+          orderBy: { stageChangedAt: 'desc' },
+          take: 300,
+        }),
+      ])
+    : [[], [], []];
+  const completionEvidence = buildSalesCompletionEvidenceReport({
+    tasks: completionEvidenceTasks,
+    followUps: completionFollowUps,
+    messages: completionMessages,
+    opportunities: completionOpportunities,
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
@@ -591,6 +638,7 @@ export default async function SalesCommandPage({
       <MorningBriefingPanel briefing={morningBriefing} result={morningNotifyResult} />
       <MorningClosurePanel report={morningClosure} />
       <ActionClosurePanel report={actionClosure} />
+      <CompletionEvidencePanel report={completionEvidence} />
       <DailyPriorityPanel queue={priorityQueue} result={priorityActionResult} />
       <OwnerPriorityPanel report={ownerPriorityReport} />
 
@@ -1749,6 +1797,54 @@ function ActionClosurePanel({ report }: { report: ReturnType<typeof buildSalesAc
           </div>
         ))}
         {report.rows.length === 0 && <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm font-bold text-slate-500">暂无需要追踪的作战清单事项。</div>}
+      </div>
+    </section>
+  );
+}
+
+function CompletionEvidencePanel({ report }: { report: ReturnType<typeof buildSalesCompletionEvidenceReport> }) {
+  const evidenceRate = report.evidenceRate === null ? '-' : `${Math.round(report.evidenceRate * 100)}%`;
+  const strongRate = report.strongEvidenceRate === null ? '-' : `${Math.round(report.strongEvidenceRate * 100)}%`;
+  return (
+    <section id="completion-evidence" className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-bold text-gray-900">任务完成证据链</h2>
+          <p className="mt-1 text-xs text-gray-400">检查销售任务点完成后,是否沉淀跟进记录、出站消息或商机阶段推进。</p>
+        </div>
+        <Link href="/tasks?view=done" className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-200">查看已完成任务</Link>
+      </div>
+      <div className="mb-4 grid grid-cols-2 gap-2 text-xs font-black md:grid-cols-6">
+        <div className="rounded-lg bg-slate-100 px-3 py-2 text-slate-700"><div className="text-lg">{report.completedTasks}</div><div>完成任务</div></div>
+        <div className="rounded-lg bg-blue-50 px-3 py-2 text-blue-700"><div className="text-lg">{evidenceRate}</div><div>有证据率</div></div>
+        <div className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-700"><div className="text-lg">{strongRate}</div><div>强证据率</div></div>
+        <div className="rounded-lg bg-rose-50 px-3 py-2 text-rose-700"><div className="text-lg">{report.missingEvidence}</div><div>缺完成证据</div></div>
+        <div className="rounded-lg bg-amber-50 px-3 py-2 text-amber-700"><div className="text-lg">{report.weakEvidence}</div><div>仅有记录</div></div>
+        <div className="rounded-lg bg-violet-50 px-3 py-2 text-violet-700"><div className="text-lg">{report.onTimeDone}</div><div>按时完成</div></div>
+      </div>
+      <div className="mb-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{report.recommendation}</div>
+      <div className="grid gap-3 xl:grid-cols-3">
+        {report.rows.map((row) => (
+          <div key={row.taskId} className={`rounded-xl border p-4 ${row.tone === 'rose' ? 'border-rose-100 bg-rose-50 text-rose-900' : row.tone === 'amber' ? 'border-amber-100 bg-amber-50 text-amber-900' : 'border-emerald-100 bg-emerald-50 text-emerald-900'}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-black">{row.companyName}</div>
+                <div className="mt-1 truncate text-[11px] font-bold opacity-70">{row.ownerName} · {row.taskTitle}</div>
+              </div>
+              <div className="shrink-0 rounded-lg bg-white/75 px-2 py-1 text-[11px] font-black">{row.statusLabel}</div>
+            </div>
+            <div className="mt-3 rounded-lg bg-white/75 px-3 py-2 text-[11px] font-bold">
+              <div className="opacity-50">最强证据</div>
+              <div className="mt-0.5 leading-5">{row.strongestEvidence}</div>
+              <div className="mt-0.5 opacity-70">跟进 {row.followUpCount} · 出站 {row.outboundCount} · 商机推进 {row.stageChangeCount}</div>
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-3 text-[11px] font-black">
+              <span className="rounded-lg bg-white/75 px-2 py-1">完成 {new Date(row.completedAt).toLocaleString('zh-CN')}</span>
+              <Link href={row.href} className="rounded-lg bg-white px-2 py-1 hover:bg-gray-50">打开客户</Link>
+            </div>
+          </div>
+        ))}
+        {report.rows.length === 0 && <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm font-bold text-slate-500">近 30 天暂无可审计的已完成销售任务。</div>}
       </div>
     </section>
   );
