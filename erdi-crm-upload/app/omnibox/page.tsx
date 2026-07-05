@@ -7,7 +7,11 @@ import OmniboxClient from './OmniboxClient';
 
 export const dynamic = 'force-dynamic';
 
-export default async function OmniboxPage() {
+export default async function OmniboxPage({
+  searchParams = {},
+}: {
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
   const role = cookies().get('auth_role')?.value;
   if (!role || !['SUPER_ADMIN', 'ADMIN', 'SALES'].includes(role)) {
     redirect('/dashboard?error=unauthorized');
@@ -36,6 +40,11 @@ export default async function OmniboxPage() {
     REPLIED: messages.filter((m) => m.status === 'REPLIED').length,
   };
   const sla = buildInboxSlaReport(slaMessages);
+  const bulkResult = {
+    bulk: firstParam(searchParams.bulk),
+    count: firstParam(searchParams.count),
+    skipped: firstParam(searchParams.skipped),
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 p-8 font-sans">
@@ -128,6 +137,61 @@ export default async function OmniboxPage() {
         </div>
       </section>
 
+      <section className="mb-6 rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">收件箱清理作战台</h2>
+            <p className="mt-1 text-xs text-gray-500">参考 Intercom/Zendesk 批量动作和 Pipedrive 邮件转活动,把积压消息直接转成可追责的销售动作。</p>
+          </div>
+          <Link href="/tasks?view=week" className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-black text-white hover:bg-gray-800">
+            查看销售任务
+          </Link>
+        </div>
+        {bulkResult.bulk && <BulkResultBanner bulk={bulkResult.bulk} count={bulkResult.count} skipped={bulkResult.skipped} />}
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <BulkActionCard
+            title="一键转任务"
+            count={sla.taskRows.length}
+            detail="已关联客户且有负责人,转为24小时内跟进任务。"
+            action="create_tasks"
+            buttonLabel="生成跟进任务"
+            ids={sla.taskRows.map((row) => row.id)}
+            tone="blue"
+          />
+          <BulkActionCard
+            title="认领未分配"
+            count={sla.claimRows.length}
+            detail="已关联客户但缺负责人,由当前账号接手。"
+            action="claim"
+            buttonLabel="认领客户"
+            ids={sla.claimRows.map((row) => row.id)}
+            tone="emerald"
+          />
+          <BulkActionCard
+            title="归档低价值"
+            count={sla.archiveRows.length}
+            detail="仅处理垃圾、寒暄、其他意图,不动询价和投诉。"
+            action="archive"
+            buttonLabel="归档消息"
+            ids={sla.archiveRows.map((row) => row.id)}
+            tone="slate"
+          />
+          <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
+            <div className="text-xs font-black text-amber-700">待关联客户</div>
+            <div className="mt-2 text-2xl font-black text-amber-900">{sla.unlinkedRows.length}</div>
+            <div className="mt-2 text-xs font-bold text-amber-700">先建客户或合并到现有客户,否则画像、商机、任务都会断链。</div>
+            <Link href="/customers" className="mt-4 inline-flex rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white hover:bg-amber-700">
+              去客户管理
+            </Link>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 xl:grid-cols-3">
+          <CleanupPreview title="转任务预览" rows={sla.taskRows} empty="暂无可转任务消息。" />
+          <CleanupPreview title="认领预览" rows={sla.claimRows} empty="暂无未分配关联客户。" />
+          <CleanupPreview title="低价值归档预览" rows={sla.archiveRows} empty="暂无可安全归档消息。" />
+        </div>
+      </section>
+
       <OmniboxClient initialMessages={JSON.parse(JSON.stringify(messages))} counts={counts} />
     </div>
   );
@@ -162,6 +226,7 @@ type SlaTone = 'blue' | 'emerald' | 'amber' | 'rose' | 'slate';
 
 const PENDING_STATUSES = new Set<InboxStatus>(['NEW', 'AI_DRAFTED']);
 const HIGH_INTENTS = new Set(['PRICE_INQUIRY', 'PRODUCT_QUESTION', 'SAMPLE_REQUEST', 'ORDER_STATUS', 'COMPLAINT']);
+const LOW_VALUE_INTENTS = new Set(['SPAM', 'GREETING', 'OTHER']);
 
 function buildInboxSlaReport(messages: OmniboxSlaMessage[]) {
   const rows = messages.map(inboxSlaRow);
@@ -176,9 +241,13 @@ function buildInboxSlaReport(messages: OmniboxSlaMessage[]) {
   const healthPenalty = overdueCount * 10 + dueSoonCount * 5 + unassignedCount * 5 + unlinkedCount * 3 + Math.max(0, pendingCount - 20);
   const healthScore = Math.max(0, Math.min(100, Math.round(100 - healthPenalty)));
 
-  const priorityRows = pendingRows
+  const sortedPendingRows = [...pendingRows]
     .sort((a, b) => b.priorityWeight - a.priorityWeight || b.ageHours - a.ageHours)
-    .slice(0, 8);
+  const priorityRows = sortedPendingRows.slice(0, 8);
+  const taskRows = sortedPendingRows.filter((row) => row.hasCompany && row.hasOwner && !row.lowValue).slice(0, 20);
+  const claimRows = sortedPendingRows.filter((row) => row.hasCompany && !row.hasOwner).slice(0, 20);
+  const archiveRows = sortedPendingRows.filter((row) => row.lowValue).slice(0, 20);
+  const unlinkedRows = sortedPendingRows.filter((row) => !row.hasCompany).slice(0, 20);
 
   const channelMap = new Map<string, { channel: string; channelLabel: string; pendingCount: number; overdueCount: number; totalAgeHours: number }>();
   for (const row of pendingRows) {
@@ -205,6 +274,10 @@ function buildInboxSlaReport(messages: OmniboxSlaMessage[]) {
     highIntentPending,
     healthScore,
     priorityRows,
+    taskRows,
+    claimRows,
+    archiveRows,
+    unlinkedRows,
     channelRows,
     maxChannelPending: Math.max(1, ...channelRows.map((row) => row.pendingCount)),
     recommendation: inboxSlaRecommendation({ pendingCount, overdueCount, dueSoonCount, draftReadyCount, unassignedCount, unlinkedCount, highIntentPending }),
@@ -218,6 +291,7 @@ function inboxSlaRow(message: OmniboxSlaMessage) {
   const hasOwner = Boolean(message.company?.owner);
   const hasDraft = Boolean(message.aiReplyZh);
   const highIntent = HIGH_INTENTS.has(String(message.intent || ''));
+  const lowValue = LOW_VALUE_INTENTS.has(String(message.intent || ''));
   const priorityWeight =
     (ageHours >= 24 ? 40 : ageHours >= 12 ? 24 : 0) +
     (highIntent ? 20 : 0) +
@@ -241,6 +315,7 @@ function inboxSlaRow(message: OmniboxSlaMessage) {
     hasOwner,
     hasDraft,
     highIntent,
+    lowValue,
     priorityWeight,
     action: inboxSlaAction({ ageHours, highIntent, hasDraft, hasOwner, hasCompany, status: String(message.status) }),
   };
@@ -298,6 +373,104 @@ function SlaBar({ label, value, max, detail }: { label: string; value: number; m
       <div className="mt-1 text-[11px] font-bold text-gray-400">{detail}</div>
     </div>
   );
+}
+
+function BulkResultBanner({ bulk, count, skipped }: { bulk: string; count?: string; skipped?: string }) {
+  const label: Record<string, string> = {
+    tasks: '已生成销售任务',
+    claimed: '已认领客户',
+    archived: '已归档低价值消息',
+    empty: '没有选中可处理消息',
+  };
+  return (
+    <div className="mb-4 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
+      {label[bulk] || '批量动作已执行'}: {count || '0'}
+      {skipped ? <span className="ml-2 text-emerald-600">跳过 {skipped}</span> : null}
+    </div>
+  );
+}
+
+function BulkActionCard({
+  title,
+  count,
+  detail,
+  action,
+  buttonLabel,
+  ids,
+  tone,
+}: {
+  title: string;
+  count: number;
+  detail: string;
+  action: string;
+  buttonLabel: string;
+  ids: string[];
+  tone: SlaTone;
+}) {
+  const color: Record<SlaTone, string> = {
+    blue: 'border-blue-100 bg-blue-50 text-blue-900',
+    emerald: 'border-emerald-100 bg-emerald-50 text-emerald-900',
+    amber: 'border-amber-100 bg-amber-50 text-amber-900',
+    rose: 'border-rose-100 bg-rose-50 text-rose-900',
+    slate: 'border-slate-100 bg-slate-50 text-slate-900',
+  };
+  const buttonColor: Record<SlaTone, string> = {
+    blue: 'bg-blue-600 hover:bg-blue-700',
+    emerald: 'bg-emerald-600 hover:bg-emerald-700',
+    amber: 'bg-amber-600 hover:bg-amber-700',
+    rose: 'bg-rose-600 hover:bg-rose-700',
+    slate: 'bg-slate-700 hover:bg-slate-800',
+  };
+  return (
+    <div className={`rounded-xl border p-4 ${color[tone] || color.slate}`}>
+      <div className="text-xs font-black opacity-75">{title}</div>
+      <div className="mt-2 text-2xl font-black">{count}</div>
+      <div className="mt-2 min-h-[34px] text-xs font-bold opacity-75">{detail}</div>
+      <form action="/api/omnibox/bulk" method="post" className="mt-4">
+        <input type="hidden" name="action" value={action} />
+        <input type="hidden" name="ids" value={ids.join(',')} />
+        <button
+          type="submit"
+          disabled={ids.length === 0}
+          className={`w-full rounded-lg px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:bg-gray-300 ${buttonColor[tone] || buttonColor.slate}`}
+        >
+          {buttonLabel}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function CleanupPreview({
+  title,
+  rows,
+  empty,
+}: {
+  title: string;
+  rows: ReturnType<typeof inboxSlaRow>[];
+  empty: string;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+      <div className="text-xs font-black text-gray-500">{title}</div>
+      <div className="mt-3 space-y-2">
+        {rows.slice(0, 5).map((row) => (
+          <div key={row.id} className="rounded-lg bg-white px-3 py-2">
+            <div className="truncate text-xs font-black text-gray-800">{row.senderLabel}</div>
+            <div className="mt-0.5 truncate text-[11px] font-bold text-gray-400">
+              {row.companyLabel} · {row.channelLabel} · {row.ageLabel}
+            </div>
+          </div>
+        ))}
+        {rows.length > 5 && <div className="text-[11px] font-bold text-gray-400">另有 {rows.length - 5} 条已纳入本次批量队列。</div>}
+        {rows.length === 0 && <div className="rounded-lg bg-white p-3 text-xs font-bold text-gray-400">{empty}</div>}
+      </div>
+    </div>
+  );
+}
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 function hoursSince(value: Date | string | null | undefined) {
