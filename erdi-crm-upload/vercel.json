@@ -25,6 +25,10 @@
       "schedule": "15 * * * *"
     },
     {
+      "path": "/api/cron/automation-health",
+      "schedule": "50 9 * * *"
+    },
+    {
       "path": "/api/cron/kpi-watch",
       "schedule": "0 10 * * *"
     }
