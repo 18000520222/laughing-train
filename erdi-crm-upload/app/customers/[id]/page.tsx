@@ -331,6 +331,9 @@ export default async function CustomerDetailPage(props: any) {
   }
 
   const id = props.params.id as string;
+  const searchParams = props.searchParams || {};
+  const highlightedCompletionTaskId = typeof searchParams.completionTask === 'string' ? searchParams.completionTask : '';
+  const completionResolved = typeof searchParams.completionResolved === 'string' ? searchParams.completionResolved : '';
 
   const company = await prisma.company.findUnique({
     where: { id },
@@ -375,6 +378,9 @@ export default async function CustomerDetailPage(props: any) {
     { label: '商机推进', value: customerHealth.pipelineScore, detail: `${customerHealth.openOpportunityCount} 个进行中 · ${customerHealth.stalledOpportunityCount} 个停滞` },
     { label: '下一步/负责人', value: customerHealth.ownerScore, detail: customerHealth.noNextAction ? '缺下一步动作' : customerHealth.ownerLabel },
   ];
+  const completionEvidenceTasks = company.salesTasks.filter((task) => task.source === 'COMPLETION_EVIDENCE_AUDIT');
+  const completionEvidenceEscalated = completionEvidenceTasks.filter((task) => task.escalatedAt).length;
+  const completionEvidenceOverdue = completionEvidenceTasks.filter((task) => task.dueAt && task.dueAt.getTime() < Date.now()).length;
 
   // 💡 智能行动指南 / 互动提示语逻辑
   const lastMailDate = company.inboxMessages[0]?.sentAt || company.inboxMessages[0]?.createdAt || null;
@@ -686,6 +692,77 @@ export default async function CustomerDetailPage(props: any) {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </section>
+
+      <section id="completion-evidence-workbench" className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6 scroll-mt-24">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="font-bold text-gray-900">补证据处理台</h2>
+            <p className="mt-1 text-xs text-gray-400">处理“已完成但缺业务结果”的任务,补客户回复、出站消息或商机推进证据后自动关闭补证据任务。</p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs font-black">
+            <span className="rounded-lg bg-slate-100 px-3 py-2 text-slate-700">待补 {completionEvidenceTasks.length}</span>
+            <span className="rounded-lg bg-rose-50 px-3 py-2 text-rose-700">已升级 {completionEvidenceEscalated}</span>
+            <span className="rounded-lg bg-amber-50 px-3 py-2 text-amber-700">已逾期 {completionEvidenceOverdue}</span>
+          </div>
+        </div>
+        {completionResolved && (
+          <div className={`mt-4 rounded-xl border px-4 py-3 text-sm font-bold ${
+            completionResolved === 'done'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : completionResolved === 'forbidden'
+              ? 'border-rose-200 bg-rose-50 text-rose-700'
+              : 'border-amber-200 bg-amber-50 text-amber-700'
+          }`}>
+            {completionResolved === 'done' ? '已补充完成证据并关闭任务。' : completionResolved === 'forbidden' ? '当前账号不能处理这条补证据任务。' : '补证据失败,请确认任务仍然待处理且证据内容不为空。'}
+          </div>
+        )}
+        {completionEvidenceTasks.length === 0 ? (
+          <div className="mt-5 rounded-xl border border-dashed border-gray-200 p-8 text-center text-sm text-gray-400">暂无待补证据任务。</div>
+        ) : (
+          <div className="mt-5 space-y-4">
+            {completionEvidenceTasks.map((task) => {
+              const isFocused = task.id === highlightedCompletionTaskId;
+              const originalTaskId = task.sourceRef?.startsWith('completion-evidence:') ? task.sourceRef.slice('completion-evidence:'.length) : '';
+              return (
+                <div key={task.id} className={`rounded-xl border p-4 ${isFocused ? 'border-rose-200 bg-rose-50/50' : 'border-gray-100 bg-slate-50'}`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="font-black text-gray-900">{task.title}</div>
+                      <div className="mt-1 text-xs leading-relaxed text-gray-500">{task.description || '系统要求补齐该完成任务的业务证据。'}</div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-gray-400">
+                        <span>负责人:{task.owner.name || task.owner.email}</span>
+                        <span>截止:{task.dueAt ? fmtDate(task.dueAt) : '-'}</span>
+                        {task.escalatedAt && <span className="text-rose-600">升级:{fmtDate(task.escalatedAt)}</span>}
+                        {originalTaskId && <span>原任务:{originalTaskId}</span>}
+                      </div>
+                    </div>
+                    <TaskPriority priority={task.escalatedAt ? 'URGENT' : task.priority} />
+                  </div>
+                  <form action="/api/customers/completion-evidence/resolve" method="post" className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[180px_1fr_auto]">
+                    <input type="hidden" name="taskId" value={task.id} />
+                    <select name="evidenceType" defaultValue="CUSTOMER_REPLY" className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-700 focus:border-indigo-500 focus:outline-none">
+                      <option value="CUSTOMER_REPLY">客户回复</option>
+                      <option value="OUTBOUND_MESSAGE">出站消息</option>
+                      <option value="OPPORTUNITY_PROGRESS">商机推进</option>
+                      <option value="CALL_NOTE">电话证据</option>
+                      <option value="OTHER">其他证据</option>
+                    </select>
+                    <textarea
+                      name="content"
+                      rows={2}
+                      required
+                      minLength={6}
+                      placeholder="填写真实证据,例如: 已向客户发送报价单并收到确认; 客户要求补发 1535nm 模块规格; 商机阶段已推进到规格确认。"
+                      className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                    />
+                    <button className="rounded-xl bg-rose-600 px-5 py-2 text-sm font-black text-white hover:bg-rose-500">补证据并完成</button>
+                  </form>
+                </div>
+              );
+            })}
           </div>
         )}
       </section>

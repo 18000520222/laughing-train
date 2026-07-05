@@ -254,7 +254,7 @@ async function completionEvidenceEscalationTargets(taskId: string, adminIds: str
   return userIds.map((userId) => ({
     userId,
     line: `补证据升级: ${task.company.name} / ${task.title} / ${task.owner.name || task.owner.email}`,
-    link: `/customers/${task.company.id}`,
+    link: `/customers/${task.company.id}?completionTask=${task.id}#completion-evidence-workbench`,
   }));
 }
 

@@ -96,7 +96,7 @@ function escalationRow(task: CompletionEvidenceRepairTaskInput, now: Date): Comp
     escalatedAt: task.escalatedAt,
     ageHours,
     originalTaskId,
-    href: task.company?.id ? `/customers/${task.company.id}` : '/tasks',
+    href: task.company?.id ? `/customers/${task.company.id}?completionTask=${task.id}#completion-evidence-workbench` : '/tasks?view=escalated',
     tone,
   };
 }

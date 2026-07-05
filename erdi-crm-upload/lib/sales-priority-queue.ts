@@ -440,7 +440,7 @@ function completionEvidenceEscalationItem(row: CompletionEvidenceEscalationInput
     title: row.companyName,
     subject: row.taskTitle,
     ownerName: row.ownerName,
-    href: row.companyId ? `/customers/${row.companyId}` : '/tasks?view=escalated',
+    href: row.companyId ? `/customers/${row.companyId}?completionTask=${row.taskId}#completion-evidence-workbench` : '/tasks?view=escalated',
     score,
     impactUSD: 0,
     reason: row.statusLabel === '已升级' ? `已升级 · 逾期 ${row.ageHours}h` : `已逾期 ${row.ageHours}h`,
