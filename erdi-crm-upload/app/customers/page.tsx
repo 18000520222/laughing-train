@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { ensureCustomerCode } from '@/lib/customer-code';
+import { buildCustomerHealthReport } from '@/lib/customer-health';
 
 export const dynamic = 'force-dynamic';
 
@@ -436,148 +437,6 @@ function SegmentCard({ href, active, label, value }: { href: string; active: boo
   );
 }
 
-function buildCustomerHealthReport(customers: any[]) {
-  const rows = customers.map(customerHealthRow);
-  const customerCount = rows.length;
-  const avgScore = customerCount ? Math.round(rows.reduce((sum, row) => sum + row.score, 0) / customerCount) : 0;
-  const hotCount = rows.filter((row) => row.score >= 75 && (row.openOpportunityCount > 0 || row.daysSinceLastInteraction <= 14)).length;
-  const missingProfileCount = rows.filter((row) => row.fitScore < 14).length;
-  const unassignedCount = rows.filter((row) => row.ownerScore < 8).length;
-  const noNextActionCount = rows.filter((row) => row.noNextAction).length;
-  const staleCount = rows.filter((row) => row.isStale || row.stalledOpportunityCount > 0).length;
-  const priorityRows = rows
-    .filter((row) => row.shortfalls.length > 0 || row.score >= 75)
-    .sort((a, b) => b.priorityWeight - a.priorityWeight || b.score - a.score || a.daysSinceLastInteraction - b.daysSinceLastInteraction)
-    .slice(0, 8);
-  const dimensionRows = [
-    dimensionSummary(rows, 'fitScore', '资料完整'),
-    dimensionSummary(rows, 'contactScore', '联系人'),
-    dimensionSummary(rows, 'engagementScore', '互动热度'),
-    dimensionSummary(rows, 'pipelineScore', '商机推进'),
-    dimensionSummary(rows, 'ownerScore', '下一步/负责人'),
-  ];
-
-  return {
-    customerCount,
-    avgScore,
-    hotCount,
-    missingProfileCount,
-    unassignedCount,
-    noNextActionCount,
-    staleCount,
-    priorityRows,
-    dimensionRows,
-    recommendation: customerHealthRecommendation({ customerCount, avgScore, hotCount, missingProfileCount, unassignedCount, noNextActionCount, staleCount }),
-  };
-}
-
-function customerHealthRow(customer: any) {
-  const now = new Date();
-  const latestInboxAt = latestDate(customer.inboxMessages.map((m: any) => m.sentAt || m.createdAt));
-  const latestFollowUpAt = latestDate(customer.followUps.map((f: any) => f.createdAt));
-  const lastInteractionAt = latestDate([latestInboxAt, latestFollowUpAt, customer.updatedAt, customer.createdAt]);
-  const daysSinceLastInteraction = daysSince(lastInteractionAt, now);
-  const openOpportunities = customer.opportunities.filter((opp: any) => opp.stage !== 'CLOSED_WON' && opp.stage !== 'CLOSED_LOST');
-  const stalledOpportunityCount = openOpportunities.filter((opp: any) => daysSince(opp.stageChangedAt || opp.updatedAt, now) >= 14).length;
-  const hasEmailContact = customer.contacts.some((contact: any) => Boolean(contact.email));
-  const hasPhoneContact = customer.contacts.some((contact: any) => Boolean(contact.phone));
-  const hasRecentInbound = customer.inboxMessages.some((msg: any) => msg.direction === 'IN' && daysSince(msg.sentAt || msg.createdAt, now) <= 14);
-  const overdueTaskCount = customer.salesTasks.filter((task: any) => task.dueAt && new Date(task.dueAt).getTime() < now.getTime()).length;
-  const noNextAction = !String(customer.nextAction || '').trim();
-
-  const fitScore =
-    points(customer.customerCode, 3) +
-    points(customer.country, 3) +
-    points(customer.industry, 3) +
-    points(customer.website, 2) +
-    points(customer.mainProducts, 4) +
-    points(customer.customerProfile || customer.painPoints || customer.competitors, 5);
-  const contactScore = Math.min(20, customer.contacts.length * 5 + (hasEmailContact ? 8 : 0) + (hasPhoneContact ? 4 : 0) + (customer.contacts.length > 1 ? 3 : 0));
-  const engagementScore = daysSinceLastInteraction <= 7 ? 20 : daysSinceLastInteraction <= 14 ? 17 : daysSinceLastInteraction <= 30 ? 12 : daysSinceLastInteraction <= 90 ? 6 : 0;
-  const pipelineScore = Math.min(
-    20,
-    (openOpportunities.length > 0 ? 10 : 0) +
-      (customer.opportunities.some((opp: any) => opp.stage === 'CLOSED_WON') ? 7 : 0) +
-      (customer.opportunities.length > 0 ? 3 : 0) -
-      Math.min(8, stalledOpportunityCount * 4)
-  );
-  const ownerScore = Math.min(20, (customer.ownerId ? 8 : 0) + (!noNextAction ? 8 : 0) + (customer.salesTasks.length > 0 ? 4 : 0) - Math.min(8, overdueTaskCount * 4));
-  const score = Math.max(0, Math.min(100, fitScore + contactScore + engagementScore + pipelineScore + ownerScore));
-
-  const shortfalls: string[] = [];
-  if (fitScore < 14) shortfalls.push('资料');
-  if (contactScore < 14) shortfalls.push('联系人');
-  if (engagementScore < 12) shortfalls.push('互动');
-  if (pipelineScore < 10) shortfalls.push('商机');
-  if (ownerScore < 14) shortfalls.push('下一步');
-  if (stalledOpportunityCount > 0) shortfalls.push('停滞');
-  if (overdueTaskCount > 0) shortfalls.push('逾期任务');
-
-  const isStale = daysSinceLastInteraction >= 30;
-  const priorityWeight =
-    (score >= 75 ? 18 : 0) +
-    (hasRecentInbound ? 16 : 0) +
-    (openOpportunities.length > 0 ? 12 : 0) +
-    stalledOpportunityCount * 10 +
-    overdueTaskCount * 9 +
-    (isStale ? 8 : 0) +
-    (!customer.ownerId ? 7 : 0) +
-    (noNextAction ? 5 : 0);
-
-  return {
-    id: customer.id,
-    name: customer.name,
-    typeLabel: TYPE_LABEL[customer.type] || customer.type,
-    ownerLabel: customer.owner?.name || customer.owner?.email || '未分配',
-    score,
-    fitScore,
-    contactScore,
-    engagementScore,
-    pipelineScore,
-    ownerScore,
-    shortfalls,
-    action: customerHealthAction({ hasRecentInbound, openOpportunityCount: openOpportunities.length, stalledOpportunityCount, overdueTaskCount, isStale, noNextAction, hasOwner: Boolean(customer.ownerId), score }),
-    daysSinceLastInteraction,
-    openOpportunityCount: openOpportunities.length,
-    stalledOpportunityCount,
-    noNextAction,
-    isStale,
-    priorityWeight,
-  };
-}
-
-function dimensionSummary(rows: any[], key: string, label: string) {
-  const avgScore = rows.length ? Math.round(rows.reduce((sum, row) => sum + row[key], 0) / rows.length) : 0;
-  return {
-    key,
-    label,
-    avgScore,
-    passCount: rows.filter((row) => row[key] >= 14).length,
-  };
-}
-
-function customerHealthAction(input: { hasRecentInbound: boolean; openOpportunityCount: number; stalledOpportunityCount: number; overdueTaskCount: number; isStale: boolean; noNextAction: boolean; hasOwner: boolean; score: number }) {
-  if (!input.hasOwner) return '先分配负责人,否则任何线索都没有闭环责任人。';
-  if (input.overdueTaskCount > 0) return '先处理逾期任务,补跟进记录并更新下一步。';
-  if (input.stalledOpportunityCount > 0) return '先推进停滞商机,更新阶段、报价或丢单原因。';
-  if (input.hasRecentInbound) return '客户近期有来信,优先回复并把意向转成商机/报价。';
-  if (input.noNextAction) return '补一条明确下一步动作,例如发资料、报价或约测试反馈。';
-  if (input.isStale) return '客户已沉睡,发送激活邮件或释放到公海重分配。';
-  if (input.openOpportunityCount > 0) return '继续推进当前商机,保持 7 天内有阶段动作。';
-  if (input.score >= 75) return '资料和互动质量较好,可以创建商机或加入重点开发名单。';
-  return '先补客户资料、联系人和画像,再判断是否值得继续开发。';
-}
-
-function customerHealthRecommendation(input: { customerCount: number; avgScore: number; hotCount: number; missingProfileCount: number; unassignedCount: number; noNextActionCount: number; staleCount: number }) {
-  if (input.customerCount === 0) return '当前筛选下暂无客户。先导入/同步客户,再做五点体检。';
-  if (input.unassignedCount > 0) return `有 ${input.unassignedCount} 个客户未分配负责人。先分配责任人,否则后续跟进和自动化都无法闭环。`;
-  if (input.staleCount > 0) return `有 ${input.staleCount} 个客户存在沉睡或商机停滞。优先处理这些客户,避免询盘变成无效库存。`;
-  if (input.missingProfileCount > 0) return `有 ${input.missingProfileCount} 个客户资料/画像不足。补齐国家、行业、关注产品、痛点和竞品后,AI 跟进会更准。`;
-  if (input.noNextActionCount > 0) return `有 ${input.noNextActionCount} 个客户没有下一步动作。每个有效客户至少要有一个可执行动作。`;
-  if (input.hotCount > 0) return `当前有 ${input.hotCount} 个高意向客户。建议销售主管优先检查是否已报价、建商机和安排下一轮跟进。`;
-  return `客户平均健康度 ${input.avgScore},整体稳定。下一步可以把高分客户沉淀为重点账户运营。`;
-}
-
 function HealthMetric({ label, value, detail, tone }: { label: string; value: number | string; detail: string; tone: string }) {
   const color: Record<string, string> = {
     blue: 'border-blue-100 bg-blue-50 text-blue-800',
@@ -609,22 +468,4 @@ function HealthBar({ label, value, max, detail }: { label: string; value: number
       <div className="mt-1 text-[11px] font-bold text-gray-400">{detail}</div>
     </div>
   );
-}
-
-function points(value: unknown, score: number) {
-  return String(value || '').trim() ? score : 0;
-}
-
-function latestDate(values: Array<Date | string | null | undefined>) {
-  const times = values
-    .filter(Boolean)
-    .map((value) => new Date(value as Date | string).getTime())
-    .filter((time) => Number.isFinite(time));
-  if (!times.length) return null;
-  return new Date(Math.max(...times));
-}
-
-function daysSince(value: Date | string | null | undefined, now = new Date()) {
-  if (!value) return 999;
-  return Math.max(0, Math.floor((now.getTime() - new Date(value).getTime()) / 86400000));
 }

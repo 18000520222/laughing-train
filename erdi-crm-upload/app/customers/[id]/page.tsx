@@ -4,6 +4,7 @@ import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { chat, isLLMAvailable } from '@/lib/llm';
 import { buildSalesRadar } from '@/lib/sales-radar';
+import { buildCustomerHealthRow } from '@/lib/customer-health';
 
 export const dynamic = 'force-dynamic';
 
@@ -177,6 +178,62 @@ async function createCustomerRadarTask(formData: FormData) {
   redirect(`/customers/${companyId}`);
 }
 
+async function createCustomerHealthTask(formData: FormData) {
+  'use server';
+  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
+  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
+
+  const authEmail = cookies().get('auth_email')?.value;
+  if (!authEmail) return;
+  const user = await prisma.user.findUnique({ where: { email: authEmail } });
+  if (!user) return;
+
+  const companyId = String(formData.get('companyId') || '');
+  if (!companyId) return;
+  const company = await prisma.company.findUnique({ where: { id: companyId } });
+  if (!company) return;
+
+  const ownerId = company.ownerId || user.id;
+  const sourceRef = `CUSTOMER_HEALTH:${companyId}`;
+  const exists = await prisma.salesTask.findFirst({
+    where: { companyId, status: 'TODO', source: 'CUSTOMER_HEALTH', sourceRef },
+    select: { id: true },
+  });
+  if (exists) redirect(`/customers/${companyId}`);
+
+  const dueHours = Math.max(2, Math.min(168, parseInt(String(formData.get('dueHours') || '48'), 10) || 48));
+  const dueAt = new Date();
+  dueAt.setHours(dueAt.getHours() + dueHours);
+  const description = String(formData.get('description') || '').trim() || '根据客户五点体检生成的修复任务。';
+  const priority = String(formData.get('priority') || 'NORMAL') as any;
+
+  await prisma.salesTask.create({
+    data: {
+      title: String(formData.get('title') || '').trim() || `修复 ${company.name} 客户体检短板`,
+      description,
+      type: priority === 'URGENT' ? 'RISK_RESCUE' : 'FOLLOW_UP',
+      priority,
+      dueAt,
+      ownerId,
+      createdById: user.id,
+      companyId,
+      source: 'CUSTOMER_HEALTH',
+      sourceRef,
+    },
+  });
+  await prisma.company.update({ where: { id: companyId }, data: { nextAction: company.nextAction || description } });
+  await prisma.notification.create({
+    data: {
+      userId: ownerId,
+      type: 'SYSTEM',
+      title: '客户五点体检已生成任务',
+      body: `${company.name}: ${description}`,
+      link: `/customers/${companyId}`,
+    },
+  });
+  redirect(`/customers/${companyId}`);
+}
+
 async function completeCustomerSalesTask(formData: FormData) {
   'use server';
   const role = (cookies().get('auth_role')?.value || '').toUpperCase();
@@ -308,6 +365,16 @@ export default async function CustomerDetailPage(props: any) {
     (o) => o.stage !== 'CLOSED_WON' && o.stage !== 'CLOSED_LOST'
   ).length;
   const salesRadar = buildSalesRadar(company);
+  const customerHealth = buildCustomerHealthRow(company);
+  const customerHealthPriority = customerHealth.score < 55 || customerHealth.stalledOpportunityCount > 0 || customerHealth.overdueTaskCount > 0 ? 'URGENT' : customerHealth.score < 75 ? 'HIGH' : 'NORMAL';
+  const customerHealthDueHours = customerHealthPriority === 'URGENT' ? 24 : customerHealthPriority === 'HIGH' ? 48 : 72;
+  const customerHealthDimensions = [
+    { label: '资料完整', value: customerHealth.fitScore, detail: '国家/行业/产品/痛点/竞品' },
+    { label: '联系人', value: customerHealth.contactScore, detail: '邮箱、电话、多人关系' },
+    { label: '互动热度', value: customerHealth.engagementScore, detail: `${customerHealth.daysSinceLastInteraction >= 999 ? '暂无互动' : `${customerHealth.daysSinceLastInteraction} 天未互动`}` },
+    { label: '商机推进', value: customerHealth.pipelineScore, detail: `${customerHealth.openOpportunityCount} 个进行中 · ${customerHealth.stalledOpportunityCount} 个停滞` },
+    { label: '下一步/负责人', value: customerHealth.ownerScore, detail: customerHealth.noNextAction ? '缺下一步动作' : customerHealth.ownerLabel },
+  ];
 
   // 💡 智能行动指南 / 互动提示语逻辑
   const lastMailDate = company.inboxMessages[0]?.sentAt || company.inboxMessages[0]?.createdAt || null;
@@ -491,6 +558,43 @@ export default async function CustomerDetailPage(props: any) {
           </form>
         </details>
       </div>
+
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="font-bold text-gray-900">客户五点体检</h2>
+            <p className="text-xs text-gray-400 mt-1">把资料、联系人、互动、商机和下一步动作合成一张客户 360 体检卡。</p>
+          </div>
+          <CustomerHealthBadge score={customerHealth.score} />
+        </div>
+        <div className="mt-5 grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-4">
+          <div className="rounded-xl border border-gray-100 bg-slate-50 p-4">
+            <div className="text-xs font-bold text-gray-500">系统建议动作</div>
+            <div className="mt-2 text-base font-black text-gray-900">{customerHealth.action}</div>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold text-gray-500">
+              <span className="rounded bg-white px-2 py-1">短板: {customerHealth.shortfalls.join('、') || '暂无明显短板'}</span>
+              <span className="rounded bg-white px-2 py-1">互动间隔 {customerHealth.daysSinceLastInteraction >= 999 ? '-' : customerHealth.daysSinceLastInteraction} 天</span>
+              <span className="rounded bg-white px-2 py-1">待办逾期 {customerHealth.overdueTaskCount}</span>
+              <span className="rounded bg-white px-2 py-1">{customerHealth.hasRecentInbound ? '近期有客户来信' : '近期无客户来信'}</span>
+            </div>
+            <form action={createCustomerHealthTask} className="mt-4">
+              <input type="hidden" name="companyId" value={company.id} />
+              <input type="hidden" name="title" value={`修复 ${company.name} 客户体检短板`} />
+              <input type="hidden" name="description" value={customerHealth.action} />
+              <input type="hidden" name="priority" value={customerHealthPriority} />
+              <input type="hidden" name="dueHours" value={customerHealthDueHours} />
+              <button className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-700">
+                生成体检修复任务
+              </button>
+            </form>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            {customerHealthDimensions.map((item) => (
+              <CustomerHealthDimension key={item.label} label={item.label} value={item.value} detail={item.detail} />
+            ))}
+          </div>
+        </div>
+      </section>
 
       <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
         <div className="flex items-center justify-between mb-4">
@@ -899,6 +1003,34 @@ function RadarBadge({ level, label, score }: { level: string; label: string; sco
     <div className={`rounded-xl border px-5 py-3 text-center ${style[level] || style.normal}`}>
       <div className="text-2xl font-black">{score}</div>
       <div className="mt-1 text-xs font-bold">{label}</div>
+    </div>
+  );
+}
+
+function CustomerHealthBadge({ score }: { score: number }) {
+  const style = score >= 75 ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : score >= 55 ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-rose-200 bg-rose-50 text-rose-700';
+  const label = score >= 75 ? '健康' : score >= 55 ? '需补强' : '高风险';
+  return (
+    <div className={`rounded-xl border px-5 py-3 text-center ${style}`}>
+      <div className="text-2xl font-black">{score}</div>
+      <div className="mt-1 text-xs font-bold">{label}</div>
+    </div>
+  );
+}
+
+function CustomerHealthDimension({ label, value, detail }: { label: string; value: number; detail: string }) {
+  const width = Math.max(3, Math.round((value / 20) * 100));
+  const bar = value >= 14 ? 'bg-emerald-500' : value >= 10 ? 'bg-amber-500' : 'bg-rose-500';
+  return (
+    <div className="rounded-xl border border-gray-100 bg-slate-50 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="truncate text-xs font-black text-gray-700">{label}</div>
+        <div className="text-xs font-black text-gray-900">{value}/20</div>
+      </div>
+      <div className="mt-3 h-2 rounded-full bg-white">
+        <div className={`h-2 rounded-full ${bar}`} style={{ width: `${width}%` }} />
+      </div>
+      <div className="mt-2 text-[11px] font-bold text-gray-400">{detail}</div>
     </div>
   );
 }
