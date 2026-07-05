@@ -24,8 +24,11 @@ export async function GET(req: Request) {
   const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '500', 10) || 500, 1), 2000);
   const includeClassified = searchParams.get('all') === '1';
   const dryRun = ['1', 'true', 'yes'].includes((searchParams.get('dryRun') || '').toLowerCase());
+  const order = searchParams.get('order') === 'asc' ? 'asc' : 'desc';
+  const updateLimitParam = searchParams.get('updateLimit');
+  const updateLimit = updateLimitParam ? Math.min(Math.max(parseInt(updateLimitParam, 10) || limit, 1), limit) : undefined;
 
-  const result = await reclassifyEmailMessages({ limit, includeClassified, dryRun });
+  const result = await reclassifyEmailMessages({ limit, includeClassified, dryRun, order, updateLimit });
 
   return NextResponse.json({
     ok: true,

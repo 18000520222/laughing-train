@@ -138,15 +138,20 @@ export async function reclassifyEmailMessages({
   limit = 500,
   includeClassified = false,
   dryRun = false,
+  order = 'desc',
+  updateLimit,
 }: {
   limit?: number;
   includeClassified?: boolean;
   dryRun?: boolean;
+  order?: 'asc' | 'desc';
+  updateLimit?: number;
 } = {}) {
   const safeLimit = Math.min(Math.max(limit, 1), 2000);
+  const safeUpdateLimit = Math.min(Math.max(updateLimit ?? safeLimit, 1), safeLimit);
   const messages = await prisma.emailMessage.findMany({
     where: includeClassified ? {} : { category: 'UNCLASSIFIED' },
-    orderBy: { date: 'desc' },
+    orderBy: { date: order },
     take: safeLimit,
     select: {
       id: true,
@@ -169,6 +174,7 @@ export async function reclassifyEmailMessages({
   const migrations: Record<string, number> = {};
   const changedSamples = [];
   let changed = 0;
+  let updated = 0;
   let actionRequired = 0;
   let leads = 0;
 
@@ -205,7 +211,7 @@ export async function reclassifyEmailMessages({
       }
     }
 
-    if (!dryRun && changedFields.length > 0) {
+    if (!dryRun && changedFields.length > 0 && updated < safeUpdateLimit) {
       await prisma.emailMessage.update({
         where: { id: msg.id },
         data: {
@@ -218,6 +224,7 @@ export async function reclassifyEmailMessages({
           classificationTags: classification.classificationTags,
         },
       });
+      updated++;
     }
   }
 
@@ -225,6 +232,7 @@ export async function reclassifyEmailMessages({
     dryRun,
     scanned: messages.length,
     changed,
+    updated,
     actionRequired,
     leads,
     counts,
