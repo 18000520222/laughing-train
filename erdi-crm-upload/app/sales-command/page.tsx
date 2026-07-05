@@ -243,6 +243,12 @@ export default async function SalesCommandPage({
     updated: firstParam(searchParams.updated),
     skipped: firstParam(searchParams.skipped),
   };
+  const oppBulkResult = {
+    bulk: firstParam(searchParams.oppBulk),
+    created: firstParam(searchParams.created),
+    updated: firstParam(searchParams.updated),
+    skipped: firstParam(searchParams.skipped),
+  };
 
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -364,6 +370,14 @@ export default async function SalesCommandPage({
     .map((company) => ({ company, radar: buildSalesRadar(company) }))
     .sort((a, b) => (b.radar.level === 'risk' ? 1 : 0) - (a.radar.level === 'risk' ? 1 : 0) || b.radar.score - a.radar.score);
   const radarActionRows = salesRadarItems.filter(({ radar }) => radar.level === 'hot' || radar.level === 'risk' || radar.metrics.awaitingReply);
+  const staleOpportunityRows = staleOpportunities.map((opportunity) => {
+    const stageDate = opportunity.stageChangedAt || opportunity.updatedAt;
+    const ageDays = Math.max(0, Math.floor((Date.now() - new Date(stageDate).getTime()) / 86400000));
+    return { opportunity, ageDays };
+  });
+  const priorityOpportunityRows = staleOpportunityRows.filter(
+    ({ opportunity, ageDays }) => ageDays >= 14 || (opportunity.amountUSD || 0) >= 10000 || opportunity.stage === 'NEGOTIATING' || opportunity.stage === 'SPEC_CONFIRMING'
+  );
   const actionAttribution = await buildSalesActionAttributionReport({ since: thirtyDaysAgo, until: new Date() });
   const stageVelocity = await buildOpportunityStageVelocityReport({ since: thirtyDaysAgo, until: new Date() });
   const emailAudit = await buildEmailClassificationAudit({ sampleLimit: 8 });
@@ -550,6 +564,47 @@ export default async function SalesCommandPage({
               {stageVelocity.slowTransitions.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">近 30 天暂无超过 7 天才推进的阶段变更。</div>}
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">商机停滞救援台</h2>
+            <p className="mt-1 text-xs text-gray-400">参考 HubSpot/Zoho 的条件自动化、Pipedrive Deal rotting 和 Outreach Opportunity task,把停滞商机直接变成有负责人、有截止时间、有救援动作的任务。</p>
+          </div>
+          <Link href="/tasks?view=week" className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-black text-white hover:bg-gray-800">查看救援任务</Link>
+        </div>
+        {oppBulkResult.bulk && <OpportunityRescueResultBanner result={oppBulkResult} />}
+        <div className="grid gap-3 md:grid-cols-3">
+          <OpportunityRescueCard
+            title="批量救援停滞商机"
+            count={staleOpportunityRows.length}
+            detail="超过 7 天未推进的打开商机,统一补负责人、补下一步、建救援任务。"
+            action="rescue_stale"
+            buttonLabel="生成救援任务"
+            ids={staleOpportunityRows.map(({ opportunity }) => opportunity.id)}
+            tone="rose"
+          />
+          <OpportunityRescueCard
+            title="高风险优先救援"
+            count={priorityOpportunityRows.length}
+            detail="金额高、超 14 天、谈判中或规格确认中的商机,24 小时内优先处理。"
+            action="rescue_priority"
+            buttonLabel="优先救援"
+            ids={priorityOpportunityRows.map(({ opportunity }) => opportunity.id)}
+            tone="amber"
+          />
+          <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-slate-900">
+            <div className="text-xs font-black opacity-75">阶段 SLA 看板</div>
+            <div className="mt-2 text-2xl font-black">{stageVelocity.slowChanges}</div>
+            <div className="mt-2 min-h-[34px] text-xs font-bold opacity-75">近 30 天慢流转变更次数,结合下方阶段速度复盘定位堵点。</div>
+            <Link href="/sales-command#opportunity-stale-table" className="mt-4 block rounded-lg bg-slate-700 px-3 py-2 text-center text-xs font-black text-white hover:bg-slate-800">查看超期明细</Link>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 xl:grid-cols-2">
+          <OpportunityRescuePreview title="救援队列预览" rows={staleOpportunityRows} empty="暂无需要救援的停滞商机。" />
+          <OpportunityRescuePreview title="高风险预览" rows={priorityOpportunityRows} empty="暂无高风险停滞商机。" />
         </div>
       </section>
 
@@ -890,7 +945,7 @@ export default async function SalesCommandPage({
         </section>
       </div>
 
-      <section className="mt-6 grid grid-cols-1 xl:grid-cols-[1fr_0.8fr] gap-6">
+      <section id="opportunity-stale-table" className="mt-6 grid grid-cols-1 xl:grid-cols-[1fr_0.8fr] gap-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100">
             <h2 className="font-bold text-gray-900">阶段停留超期商机</h2>
@@ -1137,6 +1192,101 @@ function NextActionPreview({
           </div>
         ))}
         {rows.length > 5 && <div className="text-[11px] font-bold text-gray-400">另有 {rows.length - 5} 个客户已纳入本次批量队列。</div>}
+        {rows.length === 0 && <div className="rounded-lg bg-white p-3 text-xs font-bold text-gray-400">{empty}</div>}
+      </div>
+    </div>
+  );
+}
+
+function OpportunityRescueResultBanner({
+  result,
+}: {
+  result: { bulk?: string; created?: string; updated?: string; skipped?: string };
+}) {
+  const label: Record<string, string> = {
+    rescued: '商机救援任务已生成',
+    priority: '高风险商机已优先派发',
+    empty: '没有选中可救援商机',
+  };
+  return (
+    <div className="mb-4 rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-800">
+      {label[result.bulk || ''] || '商机救援批量动作已执行'}
+      <span className="ml-2">生成 {result.created || '0'}</span>
+      <span className="ml-2">更新 {result.updated || '0'}</span>
+      {result.skipped ? <span className="ml-2 text-rose-600">跳过 {result.skipped}</span> : null}
+    </div>
+  );
+}
+
+function OpportunityRescueCard({
+  title,
+  count,
+  detail,
+  action,
+  buttonLabel,
+  ids,
+  tone,
+}: {
+  title: string;
+  count: number;
+  detail: string;
+  action: string;
+  buttonLabel: string;
+  ids: string[];
+  tone: 'rose' | 'amber';
+}) {
+  const color: Record<string, string> = {
+    rose: 'border-rose-100 bg-rose-50 text-rose-900',
+    amber: 'border-amber-100 bg-amber-50 text-amber-900',
+  };
+  const buttonColor: Record<string, string> = {
+    rose: 'bg-rose-600 hover:bg-rose-700',
+    amber: 'bg-amber-600 hover:bg-amber-700',
+  };
+  return (
+    <div className={`rounded-xl border p-4 ${color[tone]}`}>
+      <div className="text-xs font-black opacity-75">{title}</div>
+      <div className="mt-2 text-2xl font-black">{count}</div>
+      <div className="mt-2 min-h-[34px] text-xs font-bold opacity-75">{detail}</div>
+      <form action="/api/sales-command/opportunity-rescue" method="post" className="mt-4">
+        <input type="hidden" name="action" value={action} />
+        <input type="hidden" name="ids" value={ids.join(',')} />
+        <button
+          type="submit"
+          disabled={ids.length === 0}
+          className={`w-full rounded-lg px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:bg-gray-300 ${buttonColor[tone]}`}
+        >
+          {buttonLabel}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function OpportunityRescuePreview({
+  title,
+  rows,
+  empty,
+}: {
+  title: string;
+  rows: Array<{ opportunity: any; ageDays: number }>;
+  empty: string;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+      <div className="text-xs font-black text-gray-500">{title}</div>
+      <div className="mt-3 space-y-2">
+        {rows.slice(0, 6).map(({ opportunity, ageDays }) => (
+          <div key={opportunity.id} className="rounded-lg bg-white px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <Link href={`/opportunity/${opportunity.id}`} className="min-w-0 truncate text-xs font-black text-indigo-700 hover:underline">{opportunity.title}</Link>
+              <span className="shrink-0 rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-black text-rose-600">{ageDays} 天</span>
+            </div>
+            <div className="mt-1 truncate text-[11px] font-bold text-gray-500">{opportunity.company?.name || '未关联客户'} · {STAGE_LABEL[opportunity.stage] || opportunity.stage} · ${Math.round(opportunity.amountUSD || 0).toLocaleString()}</div>
+            <div className="mt-1 truncate text-[11px] font-medium text-gray-400">{opportunity.owner?.name || opportunity.owner?.email || '未分配'} · {opportunity.nextStep || '缺下一步动作'}</div>
+          </div>
+        ))}
+        {rows.length > 6 && <div className="text-[11px] font-bold text-gray-400">另有 {rows.length - 6} 个商机已纳入本次批量队列。</div>}
         {rows.length === 0 && <div className="rounded-lg bg-white p-3 text-xs font-bold text-gray-400">{empty}</div>}
       </div>
     </div>
