@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { prisma } from '@/lib/prisma';
 import { createAutomationBlueprintPack } from '@/lib/automation-blueprint';
-import { buildAutomationFunnelInsights } from '@/lib/automation-insights';
+import { buildAutomationFunnelInsights, diagnoseAutomationFlowNodes } from '@/lib/automation-insights';
 import { bulkReplayFailedAutomationRuns, listFailedAutomationReplayQueue, replayAutomationRun } from '@/lib/automation-runner';
 import {
   AUTOMATION_BLUEPRINT_GROUPS,
@@ -382,6 +382,7 @@ export default async function AutomationPage(props: any) {
   const governance = buildAutomationGovernance(governanceFlows);
   const blueprint = buildAutomationBlueprint(governanceFlows);
   const funnel = buildAutomationFunnelInsights(governanceFlows);
+  const selectedDiagnostics = selected ? diagnoseAutomationFlowNodes(selected) : [];
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 md:p-8">
@@ -761,7 +762,7 @@ export default async function AutomationPage(props: any) {
                 </div>
 
                 <div className="bg-slate-100 p-5 overflow-x-auto">
-                  <FlowCanvas flow={selected} />
+                  <FlowCanvas flow={selected} diagnostics={selectedDiagnostics} />
                 </div>
 
                 <form action={updateFlow} className="p-5 border-t border-gray-100">
@@ -1355,26 +1356,32 @@ function ConfigPanel({ title, icon, label, json }: { title: string; icon: React.
   );
 }
 
-function FlowCanvas({ flow }: { flow: any }) {
+function FlowCanvas({ flow, diagnostics }: { flow: any; diagnostics: any[] }) {
   const hasCondition = Boolean(flow.conditionType);
+  const triggerDiagnostic = diagnostics.find((item) => item.node === 'trigger');
+  const conditionDiagnostic = diagnostics.find((item) => item.node === 'condition');
+  const actionDiagnostic = diagnostics.find((item) => item.node === 'action');
   return (
-    <div className="min-w-[780px] h-[330px] relative rounded-xl bg-white border border-slate-200">
-      <div className={`absolute left-8 top-16 w-56 rounded-lg border p-4 shadow-sm ${NODE_STYLE.trigger}`}>
+    <div className="min-w-[780px] h-[390px] relative rounded-xl bg-white border border-slate-200">
+      <div className={`absolute left-8 top-16 w-56 rounded-lg border p-4 shadow-sm ${canvasNodeStyle('trigger', triggerDiagnostic?.status)}`}>
         <div className="text-xs font-bold opacity-70 mb-2">触发器</div>
-        <div className="font-bold">{flow.triggerType}</div>
+        <div className="truncate font-bold" title={flow.triggerType}>{flow.triggerType}</div>
         <div className="mt-2 text-xs opacity-70">客户事件发生后启动流程</div>
+        <NodeHealth diagnostic={triggerDiagnostic} />
       </div>
       {hasCondition && (
-        <div className={`absolute left-[310px] top-16 w-56 rounded-lg border p-4 shadow-sm ${NODE_STYLE.condition}`}>
+        <div className={`absolute left-[310px] top-16 w-56 rounded-lg border p-4 shadow-sm ${canvasNodeStyle('condition', conditionDiagnostic?.status)}`}>
           <div className="text-xs font-bold opacity-70 mb-2">条件</div>
-          <div className="font-bold">{flow.conditionType}</div>
+          <div className="truncate font-bold" title={flow.conditionType}>{flow.conditionType}</div>
           <div className="mt-2 text-xs opacity-70">匹配后进入绿色分支,否则进入兜底路径</div>
+          <NodeHealth diagnostic={conditionDiagnostic} />
         </div>
       )}
-      <div className={`absolute ${hasCondition ? 'left-[590px]' : 'left-[310px]'} top-16 w-56 rounded-lg border p-4 shadow-sm ${NODE_STYLE.action}`}>
+      <div className={`absolute ${hasCondition ? 'left-[590px]' : 'left-[310px]'} top-16 w-56 rounded-lg border p-4 shadow-sm ${canvasNodeStyle('action', actionDiagnostic?.status)}`}>
         <div className="text-xs font-bold opacity-70 mb-2">动作</div>
-        <div className="font-bold">{flow.actionType}</div>
+        <div className="truncate font-bold" title={flow.actionType}>{flow.actionType}</div>
         <div className="mt-2 text-xs opacity-70">发送消息、生成草稿、打标签、分配负责人或提醒跟进</div>
+        <NodeHealth diagnostic={actionDiagnostic} />
       </div>
       <Connector left={264} top={104} width={hasCondition ? 46 : 46} label="下一步" />
       {hasCondition ? (
@@ -1392,6 +1399,39 @@ function FlowCanvas({ flow }: { flow: any }) {
       </div>
     </div>
   );
+}
+
+function NodeHealth({ diagnostic }: { diagnostic?: any }) {
+  if (!diagnostic) return null;
+  return (
+    <div title={diagnostic.advice} className="mt-3 rounded-md bg-white/75 px-2 py-1.5 text-[11px] font-bold shadow-sm ring-1 ring-black/5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="shrink-0 font-black">{nodeStatusLabel(diagnostic.status)}</span>
+        <span className="truncate opacity-70">{diagnostic.metric}</span>
+      </div>
+      <div className="mt-1 line-clamp-2 leading-snug opacity-75">{diagnostic.advice}</div>
+    </div>
+  );
+}
+
+function canvasNodeStyle(nodeType: string, status?: string) {
+  const colors: Record<string, string> = {
+    ok: 'border-emerald-200 bg-emerald-50 text-emerald-900',
+    risk: 'border-amber-300 bg-amber-50 text-amber-900',
+    blocked: 'border-rose-300 bg-rose-50 text-rose-900',
+    idle: 'border-slate-200 bg-slate-50 text-slate-700',
+  };
+  return colors[status || ''] || NODE_STYLE[nodeType] || colors.idle;
+}
+
+function nodeStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    ok: '正常',
+    risk: '风险',
+    blocked: '阻塞',
+    idle: '待运行',
+  };
+  return labels[status] || '待运行';
 }
 
 function Connector({ left, top, width, label, tone = 'gray' }: { left: number; top: number; width: number; label: string; tone?: 'gray' | 'green' }) {

@@ -299,6 +299,24 @@ export function buildAutomationNodeDiagnostics(input: {
   ];
 }
 
+export function diagnoseAutomationFlowNodes(flow: FlowForInsights): AutomationNodeDiagnostic[] {
+  const runs = flow.runs.length;
+  const matchedRuns = flow.runs.filter((run) => run.matched).length;
+  const actionRuns = flow.runs.filter((run) => run.status === 'ACTION_SENT').length;
+  const failedRuns = flow.runs.filter((run) => run.status === 'FAILED').length;
+  const skippedRuns = flow.runs.filter((run) => run.status === 'SKIPPED').length;
+  return buildAutomationNodeDiagnostics({
+    flow,
+    runs,
+    matchedRuns,
+    actionRuns,
+    failedRuns,
+    skippedRuns,
+    matchRate: runs ? matchedRuns / runs : null,
+    actionRate: runs ? actionRuns / runs : null,
+  });
+}
+
 export function automationRiskRepairAdvice(input: { reason: string; status: string; failedRuns: number; actionType: string }) {
   if (input.status === 'DRAFT' || input.status === 'PAUSED') {
     return {

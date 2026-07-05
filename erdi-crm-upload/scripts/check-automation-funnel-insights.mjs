@@ -30,6 +30,10 @@ const checks = [
     message: 'automation node diagnostics missing',
   },
   {
+    ok: insightsSource.includes('export function diagnoseAutomationFlowNodes') && insightsSource.includes('return buildAutomationNodeDiagnostics'),
+    message: 'selected flow node diagnostics helper missing',
+  },
+  {
     ok: insightsSource.includes("run.status === 'ACTION_SENT'") && insightsSource.includes("run.status === 'FAILED'") && insightsSource.includes("run.status === 'SKIPPED'"),
     message: 'run status funnel counts missing',
   },
@@ -62,6 +66,14 @@ const checks = [
     message: 'automation node diagnostics UI missing',
   },
   {
+    ok: pageSource.includes('diagnoseAutomationFlowNodes(selected)') && pageSource.includes('<FlowCanvas flow={selected} diagnostics={selectedDiagnostics} />'),
+    message: 'selected flow diagnostics are not wired into the canvas',
+  },
+  {
+    ok: pageSource.includes('function NodeHealth') && pageSource.includes('canvasNodeStyle') && pageSource.includes('nodeStatusLabel'),
+    message: 'automation canvas node health UI missing',
+  },
+  {
     ok: repairSource.includes('repairAutomationRiskFlow') && repairSource.includes('bulkReplayFailedAutomationRuns') && repairSource.includes('operatorNote'),
     message: 'automation risk repair helper missing',
   },
@@ -85,13 +97,13 @@ function runRuntimeChecks() {
   const runtimeSource = `${insightsSource.replace(
     /import[^\n]+automation';\n/,
     "const CHANNEL_LABEL = { EMAIL: '邮件', ALL: '全渠道' }; const RUN_STATUS_LABEL = {};\n"
-  )}\nexports.__result = { assessAutomationFlowRisk };`;
+  )}\nexports.__result = { assessAutomationFlowRisk, diagnoseAutomationFlowNodes };`;
   const compiled = ts.transpileModule(runtimeSource, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText;
   const sandbox = { exports: {}, console };
   vm.runInNewContext(compiled, sandbox, { filename: 'automation-insights.js' });
-  const { assessAutomationFlowRisk } = sandbox.exports.__result;
+  const { assessAutomationFlowRisk, diagnoseAutomationFlowNodes } = sandbox.exports.__result;
   const base = {
     id: 'flow',
     flowCode: 'FLOW',
@@ -130,6 +142,8 @@ function runRuntimeChecks() {
   });
 
   const runtimeFailures = [];
+  const selectedDiagnostics = diagnoseAutomationFlowNodes({ ...base, runs: [] });
+  if (!selectedDiagnostics.some((node) => node.node === 'trigger' && node.status === 'blocked')) runtimeFailures.push('selected flow canvas should diagnose trigger blocked');
   if (!cold?.nodeDiagnostics.some((node) => node.node === 'trigger' && node.status === 'blocked')) runtimeFailures.push('cold flow should diagnose trigger blocked');
   if (!skipped?.nodeDiagnostics.some((node) => node.node === 'condition' && node.status === 'risk')) runtimeFailures.push('high skipped flow should diagnose condition risk');
   if (!failed?.nodeDiagnostics.some((node) => node.node === 'action' && node.status === 'blocked')) runtimeFailures.push('failed flow should diagnose action blocked');
