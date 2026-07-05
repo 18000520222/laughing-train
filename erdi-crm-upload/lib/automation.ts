@@ -22,6 +22,7 @@ export const AUTOMATION_CORE_TEMPLATE_KEYS = [
   'language_reply',
   'off_hours_reply',
   'tag_product_interest',
+  'customer_health_repair',
   'nurture_silent_lead',
   'welcome_new_visitor',
 ];
@@ -42,8 +43,8 @@ export const AUTOMATION_BLUEPRINT_GROUPS = [
   {
     key: 'profile_nurture',
     title: '画像与持续开发',
-    description: '从客户消息沉淀产品兴趣,对未回复客户生成多轮开发信草稿。',
-    templateKeys: ['tag_product_interest', 'nurture_silent_lead'],
+    description: '从客户消息沉淀产品兴趣,对未回复客户和低健康客户生成修复/开发任务。',
+    templateKeys: ['tag_product_interest', 'customer_health_repair', 'nurture_silent_lead'],
   },
   {
     key: 'visitor_reception',
@@ -196,6 +197,28 @@ export const AUTOMATION_TEMPLATES: AutomationTemplate[] = [
     actionType: 'DRIP_EMAIL_DRAFT',
     actionLabel: '生成下一封开发信草稿',
     actionConfig: { languages: ['en', 'es', 'fr'], requireHumanApproval: true },
+  },
+  {
+    key: 'customer_health_repair',
+    name: '客户健康短板自动修复',
+    description: '客户来信时自动检查五点健康度,低分、无联系人、停滞商机或无负责人时生成修复任务。',
+    category: '客户健康',
+    channel: 'ALL',
+    triggerType: 'CUSTOMER_MESSAGE',
+    triggerLabel: '收到客户消息',
+    triggerConfig: { anyInbound: true },
+    conditionType: 'CUSTOMER_HEALTH',
+    conditionLabel: '客户五点体检存在短板',
+    conditionConfig: {
+      maxScore: 55,
+      shortfallsAny: ['资料', '联系人', '互动', '商机', '下一步', '停滞', '逾期任务'],
+      includeStalled: true,
+      includeOverdue: true,
+      includeUnassigned: true,
+    },
+    actionType: 'CREATE_HEALTH_REPAIR_TASK',
+    actionLabel: '生成客户健康修复任务',
+    actionConfig: { dueHours: 24, source: 'CUSTOMER_HEALTH_AUTOMATION' },
   },
   {
     key: 'score_high_value_lead',

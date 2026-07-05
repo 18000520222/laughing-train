@@ -1,15 +1,28 @@
 import { prisma } from '@/lib/prisma';
+import { buildCustomerHealthRow } from '@/lib/customer-health';
 
 type InboxWithCompany = Awaited<ReturnType<typeof loadInbox>>;
 type Flow = NonNullable<Awaited<ReturnType<typeof loadFlow>>>;
 
 const SALES_ROLES = ['SUPER_ADMIN', 'ADMIN', 'SALES'] as const;
 const FAILED_REPLAY_SCAN_LIMIT = 200;
+const automationCompanyInclude = {
+  owner: true,
+  contacts: { orderBy: { createdAt: 'asc' as const }, take: 3 },
+  opportunities: { orderBy: { updatedAt: 'desc' as const }, take: 6 },
+  followUps: { orderBy: { createdAt: 'desc' as const }, take: 3 },
+  inboxMessages: { orderBy: { createdAt: 'desc' as const }, take: 6 },
+  salesTasks: { where: { status: 'TODO' as const }, orderBy: [{ dueAt: 'asc' as const }, { createdAt: 'desc' as const }], take: 3 },
+};
 
 async function loadInbox(inboxId: string) {
   return prisma.inboxMessage.findUnique({
     where: { id: inboxId },
-    include: { company: { include: { owner: true } } },
+    include: {
+      company: {
+        include: automationCompanyInclude,
+      },
+    },
   });
 }
 
@@ -287,7 +300,7 @@ export async function runNoReplyTimeoutAutomations({ limit = 100 }: { limit?: nu
         ...(flow.channel === 'ALL' ? {} : { channel: flow.channel as any }),
         OR: [{ sentAt: { lte: cutoff } }, { sentAt: null, createdAt: { lte: cutoff } }],
       },
-      include: { company: { include: { owner: true } } },
+      include: { company: { include: automationCompanyInclude } },
       orderBy: [{ sentAt: 'asc' }, { createdAt: 'asc' }],
       take: Math.max(1, Math.min(200, limit)),
     });
@@ -446,6 +459,9 @@ function matchesCondition(flow: Flow, inbox: NonNullable<InboxWithCompany>) {
     const score = scoreLead(inbox);
     return score >= minScore ? { ok: true, score } : { ok: false, reason: `线索评分 ${score} 低于 ${minScore}`, score };
   }
+  if (type === 'CUSTOMER_HEALTH') {
+    return matchesCustomerHealthCondition(inbox, config);
+  }
   if (type === 'ROUTE_RULE') return { ok: true };
   if (type === 'LEAD_NOT_REPLIED') return { ok: false, reason: '超时未回复流程由定时任务处理' };
   return { ok: true };
@@ -495,6 +511,10 @@ async function executeInternalAction(flow: Flow, inbox: NonNullable<InboxWithCom
     return { status: 'ACTION_SENT' as const, priority: actionConfig.priority || 'normal' };
   }
 
+  if (actionType === 'CREATE_HEALTH_REPAIR_TASK') {
+    return executeCustomerHealthRepairAction(flow, inbox, actionConfig);
+  }
+
   if (actionType === 'SEND_MESSAGE') {
     await notifyUsers(flow, inbox, `已生成自动消息草稿,等待人工确认。询盘:${inquiryCode(inbox)}`);
     return { status: 'MATCHED' as const, draft: actionConfig.message || null, requireHumanApproval: true };
@@ -507,6 +527,66 @@ async function executeInternalAction(flow: Flow, inbox: NonNullable<InboxWithCom
 
   await notifyUsers(flow, inbox, `自动化流程已命中。询盘:${inquiryCode(inbox)}`);
   return { status: 'MATCHED' as const, actionType };
+}
+
+async function executeCustomerHealthRepairAction(flow: Flow, inbox: NonNullable<InboxWithCompany>, actionConfig: Record<string, unknown>) {
+  if (!inbox.companyId || !inbox.company) {
+    await notifyUsers(flow, inbox, `客户健康修复流程命中,但消息未关联客户。询盘:${inquiryCode(inbox)}`);
+    return { status: 'SKIPPED' as const, skippedReason: '未关联客户' };
+  }
+
+  const health = buildCustomerHealthRow(inbox.company);
+  const owner = inbox.company.owner || (await fallbackOwner());
+  if (!owner) {
+    await notifyUsers(flow, inbox, `客户健康修复流程命中,但未找到可分配负责人。客户:${inbox.company.name}`);
+    return { status: 'SKIPPED' as const, skippedReason: '未找到负责人', healthScore: health.score };
+  }
+
+  const sourceRef = `${flow.id}:${inbox.companyId}`;
+  const existingTask = await prisma.salesTask.findFirst({
+    where: { companyId: inbox.companyId, source: 'CUSTOMER_HEALTH_AUTOMATION', sourceRef, status: 'TODO' },
+    select: { id: true },
+  });
+  if (existingTask) {
+    return { status: 'MATCHED' as const, skippedReason: '已有客户健康自动化待办', healthScore: health.score, existingTaskId: existingTask.id };
+  }
+
+  const dueHours = Math.max(2, Math.min(168, Number(actionConfig.dueHours || dueHoursForHealth(health)) || dueHoursForHealth(health)));
+  const dueAt = new Date();
+  dueAt.setHours(dueAt.getHours() + dueHours);
+
+  if (!inbox.company.ownerId) {
+    await prisma.company.update({ where: { id: inbox.companyId }, data: { ownerId: owner.id } });
+  }
+  if (!String(inbox.company.nextAction || '').trim()) {
+    await prisma.company.update({ where: { id: inbox.companyId }, data: { nextAction: health.action } });
+  }
+
+  const task = await prisma.salesTask.create({
+    data: {
+      title: `自动化修复客户健康短板: ${inbox.company.name}`,
+      description: customerHealthAutomationDescription(flow, inbox, health),
+      type: health.score < 55 || health.stalledOpportunityCount > 0 || health.overdueTaskCount > 0 ? 'RISK_RESCUE' : 'FOLLOW_UP',
+      priority: health.score < 55 || !health.hasOwner || health.stalledOpportunityCount > 0 || health.overdueTaskCount > 0 ? 'URGENT' : health.score < 75 ? 'HIGH' : 'NORMAL',
+      dueAt,
+      ownerId: owner.id,
+      companyId: inbox.companyId,
+      source: 'CUSTOMER_HEALTH_AUTOMATION',
+      sourceRef,
+    },
+  });
+
+  await prisma.followUp.create({
+    data: {
+      companyId: inbox.companyId,
+      userId: owner.id,
+      type: 'AUTOMATION_HEALTH',
+      content: `自动化流程「${flow.name}」生成客户健康修复任务。健康度 ${health.score},短板:${health.shortfalls.join('、') || '无明显短板'}。询盘:${inquiryCode(inbox)}`,
+    },
+  }).catch(() => null);
+  await notifyUsers(flow, inbox, `客户健康度 ${health.score},已生成健康短板修复任务。短板:${health.shortfalls.join('、') || '无明显短板'}`);
+
+  return { status: 'ACTION_SENT' as const, createdTaskId: task.id, healthScore: health.score, shortfalls: health.shortfalls };
 }
 
 async function notifyUsers(flow: Flow, inbox: NonNullable<InboxWithCompany>, body: string) {
@@ -610,6 +690,59 @@ function scoreLead(inbox: NonNullable<InboxWithCompany>) {
   if (/(price|quotation|quote|rfq|invoice|purchase|sample|datasheet|rangefinder|laser|1535|905|测距|询价|报价)/i.test(text)) score += 25;
   if (inbox.intent === 'PRICE_INQUIRY' || inbox.intent === 'PRODUCT_QUESTION' || inbox.intent === 'SAMPLE_REQUEST') score += 20;
   return Math.min(score, 100);
+}
+
+function matchesCustomerHealthCondition(inbox: NonNullable<InboxWithCompany>, config: Record<string, unknown>) {
+  if (!inbox.company) return { ok: false, reason: '未关联客户' };
+
+  const health = buildCustomerHealthRow(inbox.company);
+  const maxScore = Number(config.maxScore || 55);
+  const minScore = Number(config.minScore || 0);
+  const shortfallsAny = stringArray(config.shortfallsAny);
+  const hitShortfall = shortfallsAny.length > 0 && shortfallsAny.some((item) => health.shortfalls.includes(item));
+  const hitLowScore = health.score <= maxScore && health.score >= minScore;
+  const hitStalled = Boolean(config.includeStalled) && health.stalledOpportunityCount > 0;
+  const hitOverdue = Boolean(config.includeOverdue) && health.overdueTaskCount > 0;
+  const hitUnassigned = Boolean(config.includeUnassigned) && !health.hasOwner;
+
+  if (hitLowScore || hitShortfall || hitStalled || hitOverdue || hitUnassigned) {
+    return {
+      ok: true,
+      score: health.score,
+      shortfalls: health.shortfalls,
+      matchedBy: {
+        lowScore: hitLowScore,
+        shortfall: hitShortfall,
+        stalled: hitStalled,
+        overdue: hitOverdue,
+        unassigned: hitUnassigned,
+      },
+    };
+  }
+  return { ok: false, reason: `客户健康度 ${health.score},无命中短板`, score: health.score, shortfalls: health.shortfalls };
+}
+
+function dueHoursForHealth(health: ReturnType<typeof buildCustomerHealthRow>) {
+  if (health.score < 55 || health.stalledOpportunityCount > 0 || health.overdueTaskCount > 0 || !health.hasOwner) return 24;
+  if (health.score < 75) return 48;
+  return 72;
+}
+
+function customerHealthAutomationDescription(flow: Flow, inbox: NonNullable<InboxWithCompany>, health: ReturnType<typeof buildCustomerHealthRow>) {
+  return [
+    `流程: ${flow.name}`,
+    `客户: ${inbox.company?.name || '-'}`,
+    `渠道: ${inbox.channel}`,
+    `询盘: ${inquiryCode(inbox)}`,
+    `客户健康度: ${health.score}`,
+    `五点短板: ${health.shortfalls.join('、') || '无明显短板'}`,
+    `五维得分: 资料${health.fitScore}/20, 联系人${health.contactScore}/20, 互动${health.engagementScore}/20, 商机${health.pipelineScore}/20, 下一步${health.ownerScore}/20`,
+    `互动间隔: ${health.daysSinceLastInteraction >= 999 ? '-' : health.daysSinceLastInteraction} 天`,
+    `进行中商机: ${health.openOpportunityCount}, 停滞商机: ${health.stalledOpportunityCount}, 逾期任务: ${health.overdueTaskCount}`,
+    `建议动作: ${health.action}`,
+    '',
+    `客户原文: ${String(inbox.translatedText || inbox.originalText || '').slice(0, 500)}`,
+  ].join('\n');
 }
 
 function freeMailDomain(senderId: string) {
