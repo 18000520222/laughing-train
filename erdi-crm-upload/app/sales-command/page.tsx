@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createDefaultSalesAssignmentRules, executeSalesAssignmentRules } from '@/lib/sales-assignment';
 import { buildSalesRadar } from '@/lib/sales-radar';
+import { buildCustomerHealthRow } from '@/lib/customer-health';
 import { runEmailActionAutopilot } from '@/lib/email-actions';
 import { buildEmailClassificationAudit, reclassifyEmailMessages } from '@/lib/email-audit';
 import { buildEmailSecurityAudit, runEmailSecurityWatch } from '@/lib/email-security-audit';
@@ -322,6 +323,7 @@ export default async function SalesCommandPage({
     needsNextAction,
     staleCustomers,
     topQueue,
+    healthQueue,
     nextActionQueue,
     staleActionQueue,
     staleOpportunities,
@@ -351,6 +353,19 @@ export default async function SalesCommandPage({
         followUps: { orderBy: { createdAt: 'desc' }, take: 3 },
         opportunities: { orderBy: { updatedAt: 'desc' }, take: 5 },
         _count: { select: { inboxMessages: true, opportunities: true } },
+      },
+    }),
+    prisma.company.findMany({
+      where: { type: { in: ['INQUIRY', 'QUOTED', 'CONTRACT_SENT', 'DEAL_WON', 'KEY_ACCOUNT', 'PROSPECT', 'NEW', 'EXISTING'] as any } },
+      orderBy: [{ updatedAt: 'asc' }, { priorityScore: 'desc' }],
+      take: 120,
+      include: {
+        owner: true,
+        contacts: { take: 3, orderBy: { createdAt: 'asc' } },
+        inboxMessages: { orderBy: { createdAt: 'desc' }, take: 6 },
+        followUps: { orderBy: { createdAt: 'desc' }, take: 3 },
+        opportunities: { orderBy: { updatedAt: 'desc' }, take: 6 },
+        salesTasks: { where: { status: 'TODO' }, orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }], take: 3 },
       },
     }),
     prisma.company.findMany({
@@ -417,6 +432,11 @@ export default async function SalesCommandPage({
     .map((company) => ({ company, radar: buildSalesRadar(company) }))
     .sort((a, b) => b.radar.score - a.radar.score)
     .slice(0, 6);
+  const customerHealthRows = healthQueue
+    .map((company) => ({ company, health: buildCustomerHealthRow(company) }))
+    .filter(({ health }) => health.shortfalls.length > 0 || health.score < 75)
+    .sort((a, b) => b.health.priorityWeight - a.health.priorityWeight || a.health.score - b.health.score)
+    .slice(0, 6);
   const nextActionRows = nextActionQueue
     .map((company) => ({ company, radar: buildSalesRadar(company) }))
     .sort((a, b) => b.radar.score - a.radar.score || b.company.priorityScore - a.company.priorityScore);
@@ -470,6 +490,35 @@ export default async function SalesCommandPage({
         <Metric label="销售待办任务" value={openTaskCount} tone="blue" />
         <Metric label="已逾期任务" value={overdueTaskCount} tone="rose" />
         <Metric label="24小时内到期" value={todayTaskCount} tone="amber" />
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">客户健康修复队列</h2>
+            <p className="mt-1 text-xs text-gray-400">按客户五点体检挑出最该补资料、补联系人、补互动、推商机、补负责人的客户。</p>
+          </div>
+          <Link href="/customers" className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-200">查看客户体检</Link>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+          {customerHealthRows.map(({ company, health }) => (
+            <HealthQueueCard
+              key={company.id}
+              href={`/customers/${company.id}`}
+              name={company.name}
+              owner={health.ownerLabel}
+              score={health.score}
+              shortfalls={health.shortfalls}
+              action={health.action}
+              fitScore={health.fitScore}
+              contactScore={health.contactScore}
+              engagementScore={health.engagementScore}
+              pipelineScore={health.pipelineScore}
+              ownerScore={health.ownerScore}
+            />
+          ))}
+          {customerHealthRows.length === 0 && <div className="text-sm text-gray-400">暂无明显健康短板客户。</div>}
+        </div>
       </section>
 
       <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
@@ -2223,6 +2272,75 @@ function RadarCard({
         </button>
       </form>
     </div>
+  );
+}
+
+function HealthQueueCard({
+  href,
+  name,
+  owner,
+  score,
+  shortfalls,
+  action,
+  fitScore,
+  contactScore,
+  engagementScore,
+  pipelineScore,
+  ownerScore,
+}: {
+  href: string;
+  name: string;
+  owner: string;
+  score: number;
+  shortfalls: string[];
+  action: string;
+  fitScore: number;
+  contactScore: number;
+  engagementScore: number;
+  pipelineScore: number;
+  ownerScore: number;
+}) {
+  const style = score >= 75 ? 'border-emerald-200 bg-emerald-50' : score >= 55 ? 'border-amber-200 bg-amber-50' : 'border-rose-200 bg-rose-50';
+  const label = score >= 75 ? '可优化' : score >= 55 ? '需补强' : '高风险';
+  const dimensions = [
+    { label: '资料', value: fitScore },
+    { label: '联系人', value: contactScore },
+    { label: '互动', value: engagementScore },
+    { label: '商机', value: pipelineScore },
+    { label: '下一步', value: ownerScore },
+  ];
+  return (
+    <Link href={href} className={`block rounded-xl border p-4 transition hover:-translate-y-0.5 hover:shadow-sm ${style}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-black text-gray-900">{name}</div>
+          <div className="mt-1 text-xs font-bold text-gray-500">{owner}</div>
+        </div>
+        <div className="shrink-0 rounded-lg bg-white/90 px-3 py-2 text-center shadow-sm">
+          <div className="text-lg font-black text-gray-900">{score}</div>
+          <div className="text-[10px] font-black text-gray-500">{label}</div>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {(shortfalls.length ? shortfalls : ['暂无明显短板']).slice(0, 5).map((item) => (
+          <span key={item} className="rounded-full bg-white/90 px-2 py-1 text-[11px] font-black text-gray-600">{item}</span>
+        ))}
+      </div>
+      <div className="mt-3 rounded-lg bg-white/80 p-3 text-xs leading-relaxed text-gray-700">{action}</div>
+      <div className="mt-3 grid grid-cols-5 gap-1.5">
+        {dimensions.map((item) => {
+          const tone = item.value >= 14 ? 'bg-emerald-500' : item.value >= 10 ? 'bg-amber-500' : 'bg-rose-500';
+          return (
+            <div key={item.label}>
+              <div className="mb-1 truncate text-[10px] font-black text-gray-500">{item.label}</div>
+              <div className="h-1.5 rounded-full bg-white/80">
+                <div className={`h-1.5 rounded-full ${tone}`} style={{ width: `${Math.max(5, Math.round((item.value / 20) * 100))}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Link>
   );
 }
 
