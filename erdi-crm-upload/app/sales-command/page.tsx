@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createDefaultSalesAssignmentRules, executeSalesAssignmentRules } from '@/lib/sales-assignment';
 import { buildSalesRadar } from '@/lib/sales-radar';
+import { runEmailActionAutopilot } from '@/lib/email-actions';
 import { buildEmailClassificationAudit, reclassifyEmailMessages } from '@/lib/email-audit';
 
 export const dynamic = 'force-dynamic';
@@ -139,6 +140,25 @@ async function rerunEmailClassification(formData: FormData) {
   redirect('/sales-command');
 }
 
+async function runEmailAutopilot(formData: FormData) {
+  'use server';
+  await requireAdminUser();
+  const apply = String(formData.get('apply') || '') === 'true';
+  const taskLimit = Math.max(0, Math.min(100, parseInt(String(formData.get('taskLimit') || '20'), 10) || 20));
+  const noiseLimit = Math.max(0, Math.min(200, parseInt(String(formData.get('noiseLimit') || '50'), 10) || 50));
+  const sinceDays = Math.max(1, Math.min(365, parseInt(String(formData.get('sinceDays') || '30'), 10) || 30));
+  const result = await runEmailActionAutopilot({ dryRun: !apply, taskLimit, noiseLimit, sinceDays });
+  const qs = new URLSearchParams({
+    emailAuto: apply ? 'applied' : 'dry',
+    taskCandidates: String(result.taskCandidates),
+    noiseCandidates: String(result.noiseCandidates),
+    created: String(result.createdTasks),
+    cleared: String(result.clearedTaskEmails + result.clearedNoiseEmails),
+    skipped: String(result.skipped),
+  });
+  redirect(`/sales-command?${qs.toString()}`);
+}
+
 async function createRadarTask(formData: FormData) {
   'use server';
   const user = await requireSalesUser();
@@ -233,6 +253,14 @@ export default async function SalesCommandPage({
   const canManage = role === 'SUPER_ADMIN' || role === 'ADMIN';
   const emailBulkResult = {
     bulk: firstParam(searchParams.emailBulk),
+    created: firstParam(searchParams.created),
+    cleared: firstParam(searchParams.cleared),
+    skipped: firstParam(searchParams.skipped),
+  };
+  const emailAutoResult = {
+    status: firstParam(searchParams.emailAuto),
+    taskCandidates: firstParam(searchParams.taskCandidates),
+    noiseCandidates: firstParam(searchParams.noiseCandidates),
     created: firstParam(searchParams.created),
     cleared: firstParam(searchParams.cleared),
     skipped: firstParam(searchParams.skipped),
@@ -616,6 +644,19 @@ export default async function SalesCommandPage({
           </div>
           {canManage && (
             <div className="flex flex-wrap gap-2">
+              <form action={runEmailAutopilot}>
+                <input type="hidden" name="taskLimit" value="20" />
+                <input type="hidden" name="noiseLimit" value="50" />
+                <input type="hidden" name="sinceDays" value="30" />
+                <button className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-700 hover:bg-indigo-100">预演自动驾驶</button>
+              </form>
+              <form action={runEmailAutopilot}>
+                <input type="hidden" name="apply" value="true" />
+                <input type="hidden" name="taskLimit" value="20" />
+                <input type="hidden" name="noiseLimit" value="50" />
+                <input type="hidden" name="sinceDays" value="30" />
+                <button className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 hover:bg-rose-100">执行自动驾驶</button>
+              </form>
               <a
                 href="/api/emails/classify?limit=500&all=1&dryRun=true"
                 className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 hover:bg-blue-100"
@@ -634,6 +675,7 @@ export default async function SalesCommandPage({
             </div>
           )}
         </div>
+        {emailAutoResult.status && <EmailAutopilotResultBanner result={emailAutoResult} />}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <AttributionMetric label="邮件总量" value={emailAudit.total} detail={`覆盖率 ${formatLocalPercent(emailAudit.classificationCoverage)}`} tone={emailAudit.total > 0 ? 'blue' : 'gray'} />
           <AttributionMetric label="待销售动作" value={emailAudit.actionRequired} detail={`动作率 ${formatLocalPercent(emailAudit.actionRate)}`} tone={emailAudit.actionRequired > 0 ? 'rose' : 'gray'} />
@@ -1865,6 +1907,24 @@ function EmailBulkResultBanner({
       <span className="ml-2">生成 {result.created || '0'}</span>
       <span className="ml-2">清理 {result.cleared || '0'}</span>
       {result.skipped ? <span className="ml-2 text-emerald-600">跳过 {result.skipped}</span> : null}
+    </div>
+  );
+}
+
+function EmailAutopilotResultBanner({
+  result,
+}: {
+  result: { status?: string; taskCandidates?: string; noiseCandidates?: string; created?: string; cleared?: string; skipped?: string };
+}) {
+  const dryRun = result.status === 'dry';
+  return (
+    <div className={`mb-3 rounded-lg border px-4 py-3 text-xs font-bold ${dryRun ? 'border-indigo-100 bg-indigo-50 text-indigo-800' : 'border-emerald-100 bg-emerald-50 text-emerald-800'}`}>
+      {dryRun ? '邮件自动驾驶预演完成' : '邮件自动驾驶已执行'}
+      <span className="ml-2">任务候选 {result.taskCandidates || '0'}</span>
+      <span className="ml-2">噪音候选 {result.noiseCandidates || '0'}</span>
+      <span className="ml-2">生成 {result.created || '0'}</span>
+      <span className="ml-2">清理 {result.cleared || '0'}</span>
+      {result.skipped ? <span className="ml-2 opacity-75">跳过 {result.skipped}</span> : null}
     </div>
   );
 }
