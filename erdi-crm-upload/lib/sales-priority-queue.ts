@@ -2,7 +2,7 @@ type PriorityTone = 'rose' | 'amber' | 'blue' | 'violet' | 'emerald' | 'slate';
 
 export type SalesPriorityItem = {
   id: string;
-  kind: 'MESSAGE_SLA' | 'SALES_TASK' | 'OPPORTUNITY_STALL' | 'CUSTOMER_HEALTH' | 'AUTOMATION_RISK' | 'EMAIL_ACTION' | 'HEALTH_TASK';
+  kind: 'MESSAGE_SLA' | 'SALES_TASK' | 'OPPORTUNITY_STALL' | 'CUSTOMER_HEALTH' | 'AUTOMATION_RISK' | 'EMAIL_ACTION' | 'HEALTH_TASK' | 'COMPLETION_EVIDENCE_ESCALATION';
   kindLabel: string;
   title: string;
   subject: string;
@@ -141,6 +141,17 @@ type ClosureTaskInput = {
   sourceLabel?: string;
 };
 
+type CompletionEvidenceEscalationInput = {
+  taskId: string;
+  taskTitle: string;
+  companyId: string;
+  companyName: string;
+  ownerName: string;
+  statusLabel: string;
+  ageHours: number;
+  escalatedAt: Date | null;
+};
+
 export function buildSalesPriorityQueue({
   channelSamples,
   salesTasks,
@@ -149,6 +160,7 @@ export function buildSalesPriorityQueue({
   automationRisks,
   emailTasks,
   healthTasks,
+  completionEvidenceEscalations = [],
   now = new Date(),
   limit = 12,
 }: {
@@ -159,6 +171,7 @@ export function buildSalesPriorityQueue({
   automationRisks: AutomationRiskInput[];
   emailTasks: ClosureTaskInput[];
   healthTasks: ClosureTaskInput[];
+  completionEvidenceEscalations?: CompletionEvidenceEscalationInput[];
   now?: Date;
   limit?: number;
 }) {
@@ -170,6 +183,7 @@ export function buildSalesPriorityQueue({
     ...automationRisks.map((row) => automationItem(row)),
     ...emailTasks.map((row) => closureTaskItem(row, 'EMAIL_ACTION')),
     ...healthTasks.map((row) => closureTaskItem(row, 'HEALTH_TASK')),
+    ...completionEvidenceEscalations.map((row) => completionEvidenceEscalationItem(row)),
   ]
     .filter((item) => item.score >= 55)
     .sort((a, b) => b.score - a.score || b.impactUSD - a.impactUSD || a.title.localeCompare(b.title, 'zh-CN'))
@@ -184,7 +198,15 @@ export function buildSalesPriorityQueue({
     items,
     urgentCount,
     revenueAtRisk,
-    totalCandidates: channelSamples.length + salesTasks.length + staleOpportunities.length + customerHealthRows.length + automationRisks.length + emailTasks.length + healthTasks.length,
+    totalCandidates:
+      channelSamples.length +
+      salesTasks.length +
+      staleOpportunities.length +
+      customerHealthRows.length +
+      automationRisks.length +
+      emailTasks.length +
+      healthTasks.length +
+      completionEvidenceEscalations.length,
     byKind,
     maxScore: Math.max(1, ...items.map((item) => item.score)),
     recommendation: priorityRecommendation({ items, urgentCount, revenueAtRisk, topItem }),
@@ -405,6 +427,29 @@ function closureTaskItem(row: ClosureTaskInput, kind: 'EMAIL_ACTION' | 'HEALTH_T
   };
 }
 
+function completionEvidenceEscalationItem(row: CompletionEvidenceEscalationInput): SalesPriorityItem {
+  const score = clamp(
+    62 +
+    (row.statusLabel === '已升级' ? 28 : row.statusLabel === '已逾期' ? 20 : 8) +
+    Math.min(18, Math.floor(Math.max(0, row.ageHours) / 4))
+  );
+  return {
+    id: `COMPLETION_EVIDENCE_ESCALATION:${row.taskId}`,
+    kind: 'COMPLETION_EVIDENCE_ESCALATION',
+    kindLabel: '补证据升级',
+    title: row.companyName,
+    subject: row.taskTitle,
+    ownerName: row.ownerName,
+    href: row.companyId ? `/customers/${row.companyId}` : '/tasks?view=escalated',
+    score,
+    impactUSD: 0,
+    reason: row.statusLabel === '已升级' ? `已升级 · 逾期 ${row.ageHours}h` : `已逾期 ${row.ageHours}h`,
+    action: '今天必须补客户回复、出站消息或商机推进证据,不要只补内部备注。',
+    evidence: row.escalatedAt ? `升级 ${row.escalatedAt.toLocaleString('zh-CN')}` : row.statusLabel,
+    tone: row.statusLabel === '已升级' ? 'rose' : 'amber',
+  };
+}
+
 function groupByKind(items: SalesPriorityItem[]) {
   const labels = new Map<SalesPriorityItem['kind'], string>();
   const counts = new Map<SalesPriorityItem['kind'], number>();
@@ -477,6 +522,7 @@ function morningPlaybook(items: SalesPriorityItem[], owners: SalesMorningBriefin
   if (items.some((item) => item.kind === 'MESSAGE_SLA')) playbook.add('先清逾期客户消息,回复后立刻转任务或商机。');
   if (items.some((item) => item.kind === 'OPPORTUNITY_STALL')) playbook.add('把停滞商机拉成救援任务,明确报价/样品/付款/规格堵点。');
   if (items.some((item) => item.kind === 'SALES_TASK' || item.kind === 'EMAIL_ACTION' || item.kind === 'HEALTH_TASK')) playbook.add('催负责人完成逾期任务,要求写跟进结果和下一步时间。');
+  if (items.some((item) => item.kind === 'COMPLETION_EVIDENCE_ESCALATION')) playbook.add('点名补证据升级任务,要求补客户回复、出站消息或商机推进证据。');
   if (items.some((item) => item.kind === 'AUTOMATION_RISK')) playbook.add('运营先复核自动化失败流程,避免客户消息卡住。');
   if (owners.length > 0) playbook.add(`晨会点名 ${owners.map((owner) => owner.ownerName).join('、')},逐项确认今天交付结果。`);
   return Array.from(playbook).slice(0, 5);

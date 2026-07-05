@@ -163,6 +163,18 @@ const queue = buildSalesPriorityQueue({
     },
   ],
   healthTasks: [],
+  completionEvidenceEscalations: [
+    {
+      taskId: 'repair-escalated',
+      taskTitle: '补完成证据: Done without evidence',
+      companyId: 'c1',
+      companyName: 'Priority Buyer',
+      ownerName: 'Sales A',
+      statusLabel: '已升级',
+      ageHours: 28,
+      escalatedAt: new Date('2026-07-04T06:00:00Z'),
+    },
+  ],
 });
 const ownerReport = buildSalesOwnerPriorityReport(queue.items);
 const morningBriefing = buildSalesMorningBriefing(queue.items, ownerReport.rows);
@@ -316,6 +328,7 @@ if (!Array.isArray(queue.items) || queue.items.length < 5) failures.push('priori
 if (queue.urgentCount < 2) failures.push(`urgent count too low: ${queue.urgentCount}`);
 if (queue.revenueAtRisk < 90000) failures.push(`revenue at risk too low: ${queue.revenueAtRisk}`);
 if (!queue.items.some((item) => item.kind === 'AUTOMATION_RISK')) failures.push('automation risk missing from queue');
+if (!queue.items.some((item) => item.kind === 'COMPLETION_EVIDENCE_ESCALATION' && item.kindLabel === '补证据升级')) failures.push('completion evidence escalation missing from queue');
 if (!queue.items.some((item) => item.kind === 'MESSAGE_SLA' && item.action.includes('先回复客户'))) failures.push('overdue message action missing');
 if (!queue.items.some((item) => item.kind === 'OPPORTUNITY_STALL' && item.href === '/opportunity/opp1')) failures.push('stalled opportunity link missing');
 if (!Array.isArray(ownerReport.rows) || ownerReport.rows.length < 5) failures.push('owner priority report should group owners');
@@ -329,6 +342,7 @@ if (morningBriefing.watchOwners.length < 3) failures.push('morning briefing shou
 if (morningBriefing.mustDoItems.length !== 3) failures.push('morning briefing should include 3 must-do items');
 if (morningBriefing.topItemIds.length !== 3 || morningBriefing.urgentItemIds.length < 2) failures.push('morning briefing bulk ids missing');
 if (!morningBriefing.playbook.some((line) => line.includes('晨会') || line.includes('客户消息') || line.includes('商机'))) failures.push('morning briefing playbook missing');
+if (!morningBriefing.playbook.some((line) => line.includes('补证据升级'))) failures.push('morning briefing should mention completion evidence escalations');
 if (actionClosure.overdueTasks < 1) failures.push('action closure should detect overdue linked task');
 if (actionClosure.doneTasks < 1) failures.push('action closure should detect done linked task');
 if (actionClosure.missingTasks < 1) failures.push('action closure should detect priority items not converted to tasks');
@@ -371,6 +385,7 @@ if (!pageSource.includes('buildSalesMorningBriefing')) failures.push('sales comm
 if (!pageSource.includes('负责人每日战报')) failures.push('owner priority panel UI missing');
 if (!pageSource.includes('处理此负责人') || !pageSource.includes('只处理高危')) failures.push('owner priority bulk buttons missing');
 if (!pageSource.includes('buildSalesPriorityQueue')) failures.push('sales command does not build priority queue');
+if (!pageSource.includes('completionEvidenceEscalations: completionEscalation.rows')) failures.push('sales command priority queue missing completion evidence escalations');
 if (!pageSource.includes('buildSalesOwnerPriorityReport')) failures.push('sales command does not build owner priority report');
 if (!pageSource.includes('buildAutomationFunnelInsights')) failures.push('automation risk feed not wired into sales command');
 if (!pageSource.includes('priorityQueue')) failures.push('priority queue variable missing from sales command');
@@ -400,6 +415,9 @@ if (!completionEvidenceEscalationCronSource.includes('COMPLETION_EVIDENCE_ESCALA
 if (!morningWatchSource.includes('buildSalesMorningBriefingFromDatabase')) failures.push('morning briefing database builder missing');
 if (!morningWatchSource.includes('sendMorningBriefingNotifications')) failures.push('morning briefing shared notification sender missing');
 if (!morningWatchSource.includes('resolveBriefingTarget')) failures.push('morning briefing target resolver missing');
+if (!morningWatchSource.includes('buildCompletionEvidenceEscalationReport')) failures.push('morning briefing completion evidence escalation report missing');
+if (!morningWatchSource.includes('completionEvidenceEscalationTargets')) failures.push('morning briefing completion evidence escalation targets missing');
+if (!morningWatchSource.includes('COMPLETION_EVIDENCE_ESCALATION')) failures.push('morning briefing completion evidence escalation kind missing');
 if (!morningWatchSource.includes('groupTargets')) failures.push('morning briefing grouping missing');
 if (!morningWatchSource.includes('老板晨会摘要: 今日必须处理')) failures.push('morning briefing notification title missing');
 if (!morningWatchSource.includes('createdAt: { gte: input.todayStart }')) failures.push('morning briefing daily dedupe missing');
@@ -425,6 +443,9 @@ if (!completionEvidenceEscalationSource.includes('buildCompletionEvidenceEscalat
 if (!completionEvidenceEscalationSource.includes('ownerRows')) failures.push('completion evidence escalation owner rows missing');
 if (!completionEvidenceEscalationSource.includes('companyRows')) failures.push('completion evidence escalation company rows missing');
 if (!completionEvidenceEscalationSource.includes('补证据任务已升级')) failures.push('completion evidence escalation recommendation missing');
+if (!source.includes("COMPLETION_EVIDENCE_ESCALATION")) failures.push('priority queue completion evidence escalation kind missing');
+if (!source.includes('completionEvidenceEscalationItem')) failures.push('priority queue completion evidence escalation item missing');
+if (!source.includes('点名补证据升级任务')) failures.push('priority queue completion evidence escalation playbook missing');
 if (!completionEvidenceRepairSource.includes("COMPLETION_EVIDENCE_REPAIR_SOURCE = 'COMPLETION_EVIDENCE_AUDIT'")) failures.push('completion evidence shared source missing');
 if (!completionEvidenceRepairSource.includes('runCompletionEvidenceRepairWatch')) failures.push('completion evidence watch helper missing');
 if (!completionEvidenceRepairSource.includes('escalateStaleCompletionEvidenceRepairs')) failures.push('completion evidence escalation helper missing');

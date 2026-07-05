@@ -3,6 +3,7 @@ import { buildAutomationFunnelInsights } from '@/lib/automation-insights';
 import { buildChannelMessageRevenueReport } from '@/lib/channel-revenue-insights';
 import { buildCustomerHealthRow } from '@/lib/customer-health';
 import { buildEmailActionClosureAudit } from '@/lib/email-audit';
+import { buildCompletionEvidenceEscalationReport } from '@/lib/sales-completion-evidence-escalation';
 import { buildSalesMorningBriefing, buildSalesOwnerPriorityReport, buildSalesPriorityQueue } from '@/lib/sales-priority-queue';
 
 const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'];
@@ -18,7 +19,7 @@ export async function buildSalesMorningBriefingFromDatabase(options: { now?: Dat
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-  const [salesTasks, staleOpportunities, healthCompanies, flows, channelMessages, channelTasks, channelOpportunities, emailActionClosure] = await Promise.all([
+  const [salesTasks, staleOpportunities, healthCompanies, flows, channelMessages, channelTasks, channelOpportunities, emailActionClosure, completionRepairTasks] = await Promise.all([
     prisma.salesTask.findMany({
       where: { status: 'TODO' },
       orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
@@ -77,6 +78,19 @@ export async function buildSalesMorningBriefingFromDatabase(options: { now?: Dat
       take: 800,
     }),
     buildEmailActionClosureAudit({ since: thirtyDaysAgo, until: now, sampleLimit: 8 }),
+    prisma.salesTask.findMany({
+      where: {
+        source: 'COMPLETION_EVIDENCE_AUDIT',
+        OR: [
+          { createdAt: { gte: thirtyDaysAgo } },
+          { escalatedAt: { gte: thirtyDaysAgo } },
+          { status: 'TODO' },
+        ],
+      },
+      orderBy: [{ escalatedAt: 'desc' }, { dueAt: 'asc' }, { createdAt: 'desc' }],
+      take: 80,
+      include: { owner: true, company: true },
+    }),
   ]);
 
   const channelRevenue = buildChannelMessageRevenueReport({
@@ -91,6 +105,10 @@ export async function buildSalesMorningBriefingFromDatabase(options: { now?: Dat
     .sort((a, b) => b.health.priorityWeight - a.health.priorityWeight || a.health.score - b.health.score)
     .slice(0, 8);
   const automationFunnel = buildAutomationFunnelInsights(flows);
+  const completionEscalation = buildCompletionEvidenceEscalationReport({
+    tasks: completionRepairTasks,
+    now,
+  });
   const staleOpportunityRows = staleOpportunities.map((opportunity) => {
     const stageDate = opportunity.stageChangedAt || opportunity.updatedAt;
     const ageDays = Math.max(0, Math.floor((now.getTime() - new Date(stageDate).getTime()) / 86400000));
@@ -105,6 +123,7 @@ export async function buildSalesMorningBriefingFromDatabase(options: { now?: Dat
     automationRisks: automationFunnel.riskFlows,
     emailTasks: emailActionClosure.topTasks,
     healthTasks: [],
+    completionEvidenceEscalations: completionEscalation.rows.filter((row) => row.statusLabel === '已升级' || row.statusLabel === '已逾期'),
     now,
   });
   const ownerReport = buildSalesOwnerPriorityReport(queue.items);
@@ -168,6 +187,7 @@ async function resolveBriefingTarget(kind: string, targetId: string, adminIds: s
   if (kind === 'OPPORTUNITY_STALL') return opportunityTargets(targetId, adminIds);
   if (kind === 'CUSTOMER_HEALTH') return companyTargets(targetId, adminIds);
   if (kind === 'SALES_TASK' || kind === 'EMAIL_ACTION' || kind === 'HEALTH_TASK') return taskTargets(targetId);
+  if (kind === 'COMPLETION_EVIDENCE_ESCALATION') return completionEvidenceEscalationTargets(targetId, adminIds);
   if (kind === 'AUTOMATION_RISK') return automationTargets(targetId, adminIds);
   return [];
 }
@@ -222,6 +242,20 @@ async function taskTargets(taskId: string) {
     line: `销售任务: ${task.company.name} / ${task.title}`,
     link: '/tasks?view=week',
   }];
+}
+
+async function completionEvidenceEscalationTargets(taskId: string, adminIds: string[]) {
+  const task = await prisma.salesTask.findUnique({
+    where: { id: taskId },
+    include: { company: { select: { id: true, name: true } }, owner: { select: { name: true, email: true } } },
+  });
+  if (!task) return [];
+  const userIds = Array.from(new Set([task.ownerId, ...adminIds].filter(Boolean)));
+  return userIds.map((userId) => ({
+    userId,
+    line: `补证据升级: ${task.company.name} / ${task.title} / ${task.owner.name || task.owner.email}`,
+    link: `/customers/${task.company.id}`,
+  }));
 }
 
 async function automationTargets(flowId: string, adminIds: string[]) {

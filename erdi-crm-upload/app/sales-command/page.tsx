@@ -529,6 +529,29 @@ export default async function SalesCommandPage({
     until: new Date(),
   });
   const healthAutomationEffect = await buildCustomerHealthAutomationEffectReport({ since: thirtyDaysAgo, until: new Date() });
+  const [completionRepairTasks, completionEscalationNotifications] = await Promise.all([
+    prisma.salesTask.findMany({
+      where: {
+        source: 'COMPLETION_EVIDENCE_AUDIT',
+        OR: [
+          { createdAt: { gte: thirtyDaysAgo } },
+          { escalatedAt: { gte: thirtyDaysAgo } },
+          { status: 'TODO' },
+        ],
+      },
+      orderBy: [{ escalatedAt: 'desc' }, { dueAt: 'asc' }, { createdAt: 'desc' }],
+      take: 120,
+      include: { owner: true, company: true },
+    }),
+    prisma.notification.count({
+      where: { title: '补证据任务逾期升级', createdAt: { gte: thirtyDaysAgo } },
+    }),
+  ]);
+  const completionEscalation = buildCompletionEvidenceEscalationReport({
+    tasks: completionRepairTasks,
+    escalationNotifications: completionEscalationNotifications,
+    now: new Date(),
+  });
   const priorityQueue = buildSalesPriorityQueue({
     channelSamples: channelRevenue.samples,
     salesTasks,
@@ -537,6 +560,7 @@ export default async function SalesCommandPage({
     automationRisks: automationFunnel.riskFlows,
     emailTasks: emailActionClosure.topTasks,
     healthTasks: healthAutomationEffect.topTasks,
+    completionEvidenceEscalations: completionEscalation.rows.filter((row) => row.statusLabel === '已升级' || row.statusLabel === '已逾期'),
     now: new Date(),
   });
   const ownerPriorityReport = buildSalesOwnerPriorityReport(priorityQueue.items);
@@ -605,29 +629,6 @@ export default async function SalesCommandPage({
     followUps: completionFollowUps,
     messages: completionMessages,
     opportunities: completionOpportunities,
-  });
-  const [completionRepairTasks, completionEscalationNotifications] = await Promise.all([
-    prisma.salesTask.findMany({
-      where: {
-        source: 'COMPLETION_EVIDENCE_AUDIT',
-        OR: [
-          { createdAt: { gte: thirtyDaysAgo } },
-          { escalatedAt: { gte: thirtyDaysAgo } },
-          { status: 'TODO' },
-        ],
-      },
-      orderBy: [{ escalatedAt: 'desc' }, { dueAt: 'asc' }, { createdAt: 'desc' }],
-      take: 120,
-      include: { owner: true, company: true },
-    }),
-    prisma.notification.count({
-      where: { title: '补证据任务逾期升级', createdAt: { gte: thirtyDaysAgo } },
-    }),
-  ]);
-  const completionEscalation = buildCompletionEvidenceEscalationReport({
-    tasks: completionRepairTasks,
-    escalationNotifications: completionEscalationNotifications,
-    now: new Date(),
   });
 
   return (
