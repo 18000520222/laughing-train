@@ -321,6 +321,11 @@ export default async function SalesCommandPage({
     notified: firstParam(searchParams.morningNotified),
     skipped: firstParam(searchParams.morningSkipped),
   };
+  const completionEvidenceResult = {
+    status: firstParam(searchParams.completionEvidence),
+    created: firstParam(searchParams.completionCreated),
+    skipped: firstParam(searchParams.completionSkipped),
+  };
 
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -638,7 +643,7 @@ export default async function SalesCommandPage({
       <MorningBriefingPanel briefing={morningBriefing} result={morningNotifyResult} />
       <MorningClosurePanel report={morningClosure} />
       <ActionClosurePanel report={actionClosure} />
-      <CompletionEvidencePanel report={completionEvidence} />
+      <CompletionEvidencePanel report={completionEvidence} result={completionEvidenceResult} />
       <DailyPriorityPanel queue={priorityQueue} result={priorityActionResult} />
       <OwnerPriorityPanel report={ownerPriorityReport} />
 
@@ -1802,9 +1807,16 @@ function ActionClosurePanel({ report }: { report: ReturnType<typeof buildSalesAc
   );
 }
 
-function CompletionEvidencePanel({ report }: { report: ReturnType<typeof buildSalesCompletionEvidenceReport> }) {
+function CompletionEvidencePanel({
+  report,
+  result,
+}: {
+  report: ReturnType<typeof buildSalesCompletionEvidenceReport>;
+  result: { status?: string; created?: string; skipped?: string };
+}) {
   const evidenceRate = report.evidenceRate === null ? '-' : `${Math.round(report.evidenceRate * 100)}%`;
   const strongRate = report.strongEvidenceRate === null ? '-' : `${Math.round(report.strongEvidenceRate * 100)}%`;
+  const repairTaskIds = report.rows.filter((row) => row.statusLabel !== '有业务结果').map((row) => row.taskId);
   return (
     <section id="completion-evidence" className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -1812,8 +1824,15 @@ function CompletionEvidencePanel({ report }: { report: ReturnType<typeof buildSa
           <h2 className="font-bold text-gray-900">任务完成证据链</h2>
           <p className="mt-1 text-xs text-gray-400">检查销售任务点完成后,是否沉淀跟进记录、出站消息或商机阶段推进。</p>
         </div>
-        <Link href="/tasks?view=done" className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-200">查看已完成任务</Link>
+        <div className="flex flex-wrap gap-2">
+          <form action="/api/sales-command/completion-evidence" method="post">
+            <input type="hidden" name="taskIds" value={repairTaskIds.join(',')} />
+            <button disabled={repairTaskIds.length === 0} className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-black text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300">批量补证据</button>
+          </form>
+          <Link href="/tasks?view=done" className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-200">查看已完成任务</Link>
+        </div>
       </div>
+      <CompletionEvidenceResultBanner result={result} />
       <div className="mb-4 grid grid-cols-2 gap-2 text-xs font-black md:grid-cols-6">
         <div className="rounded-lg bg-slate-100 px-3 py-2 text-slate-700"><div className="text-lg">{report.completedTasks}</div><div>完成任务</div></div>
         <div className="rounded-lg bg-blue-50 px-3 py-2 text-blue-700"><div className="text-lg">{evidenceRate}</div><div>有证据率</div></div>
@@ -1840,7 +1859,15 @@ function CompletionEvidencePanel({ report }: { report: ReturnType<typeof buildSa
             </div>
             <div className="mt-3 flex items-center justify-between gap-3 text-[11px] font-black">
               <span className="rounded-lg bg-white/75 px-2 py-1">完成 {new Date(row.completedAt).toLocaleString('zh-CN')}</span>
-              <Link href={row.href} className="rounded-lg bg-white px-2 py-1 hover:bg-gray-50">打开客户</Link>
+              <div className="flex gap-2">
+                {row.statusLabel !== '有业务结果' && (
+                  <form action="/api/sales-command/completion-evidence" method="post">
+                    <input type="hidden" name="taskIds" value={row.taskId} />
+                    <button className="rounded-lg bg-white px-2 py-1 hover:bg-gray-50">补证据</button>
+                  </form>
+                )}
+                <Link href={row.href} className="rounded-lg bg-white px-2 py-1 hover:bg-gray-50">打开客户</Link>
+              </div>
             </div>
           </div>
         ))}
@@ -1848,6 +1875,18 @@ function CompletionEvidencePanel({ report }: { report: ReturnType<typeof buildSa
       </div>
     </section>
   );
+}
+
+function CompletionEvidenceResultBanner({ result }: { result: { status?: string; created?: string; skipped?: string } }) {
+  if (!result.status) return null;
+  const created = Number(result.created || 0);
+  const skipped = Number(result.skipped || 0);
+  const text = result.status === 'created'
+    ? `已生成 ${created} 个补完成证据任务${skipped ? `,跳过 ${skipped} 个已有/无权限项` : ''}。`
+    : result.status === 'duplicate'
+    ? `没有新建任务,${skipped || 0} 个事项已存在补证据任务或无权限。`
+    : '未选择需要补证据的任务。';
+  return <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-bold text-blue-700">{text}</div>;
 }
 
 function DailyPriorityPanel({
