@@ -8,6 +8,7 @@ import { buildCustomerHealthRow } from '@/lib/customer-health';
 import { runEmailActionAutopilot } from '@/lib/email-actions';
 import { buildEmailActionClosureAudit, buildEmailClassificationAudit, reclassifyEmailMessages } from '@/lib/email-audit';
 import { buildEmailSecurityAudit, runEmailSecurityWatch } from '@/lib/email-security-audit';
+import { buildChannelMessageRevenueReport } from '@/lib/channel-revenue-insights';
 
 export const dynamic = 'force-dynamic';
 
@@ -458,6 +459,41 @@ export default async function SalesCommandPage({
   const emailActionClosure = await buildEmailActionClosureAudit({ since: thirtyDaysAgo, until: new Date(), sampleLimit: 8 });
   const emailSecurity = await buildEmailSecurityAudit({ sampleLimit: 8 });
   const channelQuality = await buildChannelQualityReport({ since: ninetyDaysAgo });
+  const [channelRevenueMessages, channelRevenueTasks, channelRevenueOpportunities] = await Promise.all([
+    prisma.inboxMessage.findMany({
+      where: { direction: 'IN', companyId: { not: null }, createdAt: { gte: thirtyDaysAgo, lt: new Date() } },
+      include: { company: { select: { id: true, name: true, owner: { select: { name: true, email: true } } } } },
+      orderBy: { createdAt: 'desc' },
+      take: 1000,
+    }),
+    prisma.salesTask.findMany({
+      where: {
+        createdAt: { gte: thirtyDaysAgo, lt: new Date() },
+        OR: [
+          { sourceRef: { startsWith: 'inbox:' } },
+          { source: { in: ['OMNIBOX_BULK', 'AUTOMATION_NO_REPLY_TIMEOUT', 'EMAIL_ACTION_BULK'] } },
+        ],
+      },
+      select: { id: true, source: true, sourceRef: true, companyId: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+      take: 1000,
+    }),
+    prisma.opportunity.findMany({
+      where: {
+        stageChangedAt: { gte: thirtyDaysAgo, lt: new Date() },
+        stage: { in: ['REPLIED', 'QUOTING', 'NEGOTIATING', 'SPEC_CONFIRMING', 'CLOSED_WON'] as any },
+      },
+      select: { id: true, title: true, companyId: true, stage: true, amountUSD: true, stageChangedAt: true, updatedAt: true, owner: { select: { name: true, email: true } } },
+      orderBy: [{ stageChangedAt: 'desc' }, { amountUSD: 'desc' }],
+      take: 800,
+    }),
+  ]);
+  const channelRevenue = buildChannelMessageRevenueReport({
+    messages: channelRevenueMessages,
+    tasks: channelRevenueTasks,
+    opportunities: channelRevenueOpportunities,
+    until: new Date(),
+  });
   const healthAutomationEffect = await buildCustomerHealthAutomationEffectReport({ since: thirtyDaysAgo, until: new Date() });
 
   return (
@@ -626,6 +662,67 @@ export default async function SalesCommandPage({
                 </div>
               ))}
               {actionAttribution.topOutcomes.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无近期推进结果。</div>}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">全渠道消息收入闭环</h2>
+            <p className="mt-1 text-xs text-gray-400">近 30 天入站消息,按渠道复盘回复 SLA、任务转化、后续商机推进和赢单收入。</p>
+          </div>
+          <Link href="/omnibox" className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-200">查看全渠道收件箱</Link>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <AttributionMetric label="入站消息" value={channelRevenue.total} detail={`${channelRevenue.highIntent} 条高意向`} tone={channelRevenue.total > 0 ? 'blue' : 'gray'} />
+          <AttributionMetric label="回复率" value={formatLocalPercent(channelRevenue.replyRate)} detail={`24h SLA ${formatLocalPercent(channelRevenue.slaRate)}`} tone={channelRevenue.replyRate && channelRevenue.replyRate >= 0.8 ? 'emerald' : channelRevenue.pending > 0 ? 'amber' : 'gray'} />
+          <AttributionMetric label="待处理" value={channelRevenue.pending} detail={`${channelRevenue.overduePending} 条逾期`} tone={channelRevenue.overduePending > 0 ? 'rose' : channelRevenue.pending > 0 ? 'amber' : 'emerald'} />
+          <AttributionMetric label="转任务" value={channelRevenue.taskConverted} detail={`转化率 ${formatLocalPercent(channelRevenue.taskRate)}`} tone={channelRevenue.taskConverted > 0 ? 'violet' : 'gray'} />
+          <AttributionMetric label="后续推进" value={channelRevenue.downstreamOutcomes} detail={`消息到商机 ${formatLocalPercent(channelRevenue.outcomeRate)}`} tone={channelRevenue.downstreamOutcomes > 0 ? 'blue' : 'gray'} />
+          <AttributionMetric label="影响收入" value={`$${Math.round(channelRevenue.influencedRevenue).toLocaleString()}`} detail={`${channelRevenue.wonDeals} 个赢单`} tone={channelRevenue.influencedRevenue > 0 ? 'emerald' : 'gray'} />
+        </div>
+        <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{channelRevenue.recommendation}</div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">渠道收入与 SLA</h3>
+            <div className="mt-3 space-y-3">
+              {channelRevenue.byChannel.map((row) => (
+                <div key={row.channel} className="rounded-lg bg-gray-50 px-3 py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0 truncate text-xs font-black text-gray-900">{row.channelLabel}</div>
+                    <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] font-black text-emerald-700">${Math.round(row.influencedRevenue).toLocaleString()}</span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] font-bold text-gray-500 md:grid-cols-4">
+                    <span>消息 {row.messages}</span>
+                    <span>回复 {formatLocalPercent(row.replyRate)}</span>
+                    <span>任务 {formatLocalPercent(row.taskRate)}</span>
+                    <span>推进 {row.downstreamOutcomes}</span>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
+                    <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.max(4, Math.round((row.influencedRevenue / channelRevenue.maxChannelRevenue) * 100))}%` }} />
+                  </div>
+                  <div className="mt-1 text-[11px] font-bold text-gray-400">SLA {formatLocalPercent(row.slaRate)} · 待处理 {row.pending} · 逾期 {row.overduePending} · 健康分 {row.healthScore}</div>
+                </div>
+              ))}
+              {channelRevenue.byChannel.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无可归因渠道消息。</div>}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">关键消息样本</h3>
+            <div className="mt-3 space-y-2">
+              {channelRevenue.samples.map((item) => (
+                <div key={item.id} className="rounded-lg bg-gray-50 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Link href={`/customers/${item.companyId}`} className="min-w-0 truncate text-xs font-black text-indigo-700 hover:underline">{item.companyName}</Link>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-black ${item.isOverdue ? 'bg-rose-50 text-rose-700' : item.taskConverted ? 'bg-violet-50 text-violet-700' : 'bg-white text-gray-600'}`}>{item.statusLabel}</span>
+                  </div>
+                  <div className="mt-1 truncate text-[11px] font-bold text-gray-500">{item.channelLabel} · {item.intentLabel} · {item.ownerName}</div>
+                  <div className="mt-1 text-[11px] font-bold text-gray-400">等待 {item.ageHours}h · 推进 {item.downstreamOutcomes} · 赢单 ${Math.round(item.wonRevenue).toLocaleString()}</div>
+                </div>
+              ))}
+              {channelRevenue.samples.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无可展示消息样本。</div>}
             </div>
           </div>
         </div>
