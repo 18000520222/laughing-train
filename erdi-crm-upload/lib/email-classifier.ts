@@ -156,6 +156,10 @@ export function classifyEmail(input: { from?: string | null; subject?: string | 
     return result('MARKETING_NEWSLETTER', 'sender-loyalty-marketing', 20, false, false, ['营销新闻']);
   }
 
+  if (hasTravelBookingSignal(text) && !hasProductSignal(text)) {
+    return result('PLATFORM_ALERT', 'travel-booking-notice', 35, false, false, ['平台通知']);
+  }
+
   if (hasSeoSpamSignal(text)) {
     return result('SEO_SPAM', 'seo-spam-signal', 10, false, false, ['SEO垃圾']);
   }
@@ -266,6 +270,11 @@ function hasSeoSpamSignal(text: string) {
 
 function hasMarketingSignal(text: string) {
   return ['unsubscribe', 'newsletter', 'webinar', 'register now', 'free trial', 'promotion', 'limited time', 'click here', 'points', 'rewards', 'member benefits'].some((k) => text.includes(k));
+}
+
+function hasTravelBookingSignal(text: string) {
+  const travelWords = ['hotel', 'holiday inn', 'ihg', 'booking', 'reservation', 'your stay', 'check-in', 'check out', '预订', '酒店', '假日酒店', '入住'];
+  return travelWords.some((k) => text.includes(k));
 }
 
 function isLoyaltyMarketingSender(from: string, domain: string | null) {

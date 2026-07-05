@@ -98,6 +98,15 @@ const cases = [
     },
   },
   {
+    name: 'hotel booking notice is not quote',
+    expected: 'PLATFORM_ALERT',
+    input: {
+      from: '"Holiday Inn Express" <reservations@ihg.com>',
+      subject: '您在 Holiday Inn Express 成都龙泉驿北智选假日酒店 的预订已更改',
+      textBody: 'Your hotel reservation and stay details have changed.',
+    },
+  },
+  {
     name: 'refund down payment',
     expected: 'PAYMENT_FINANCE',
     input: {
