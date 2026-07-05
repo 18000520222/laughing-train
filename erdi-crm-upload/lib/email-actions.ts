@@ -15,6 +15,7 @@ export const EMAIL_TASK_CATEGORIES = new Set([
 ]);
 
 export const EMAIL_NOISE_CATEGORIES = new Set(['SEO_SPAM', 'MARKETING_NEWSLETTER', 'PLATFORM_ALERT', 'INTERNAL', 'OTHER']);
+const EMAIL_AUTOPILOT_TASK_CATEGORIES = Array.from(EMAIL_TASK_CATEGORIES).filter((category) => category !== 'AUTH_SECURITY');
 
 type EmailActionSample = {
   id: string;
@@ -141,7 +142,7 @@ export async function runEmailActionAutopilot({
       ? prisma.emailMessage.findMany({
           where: {
             actionRequired: true,
-            category: { in: Array.from(EMAIL_TASK_CATEGORIES) },
+            category: { in: EMAIL_AUTOPILOT_TASK_CATEGORIES },
             date: { gte: since },
           },
           orderBy: [{ classificationScore: 'desc' }, { date: 'asc' }],
