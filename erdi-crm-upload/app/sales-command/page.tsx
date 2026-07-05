@@ -530,7 +530,7 @@ export default async function SalesCommandPage({
           <Link href="/tasks?view=week" className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-black text-white hover:bg-gray-800">查看任务队列</Link>
         </div>
         {nextBulkResult.bulk && <NextActionBulkResultBanner result={nextBulkResult} />}
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <NextActionCard
             title="补下一步动作"
             count={nextActionRows.length}
@@ -557,6 +557,15 @@ export default async function SalesCommandPage({
             buttonLabel="处理雷达风险"
             ids={radarActionRows.map(({ company }) => company.id)}
             tone="rose"
+          />
+          <NextActionCard
+            title="修复健康短板"
+            count={customerHealthRows.length}
+            detail="体检低分或存在资料、联系人、互动、商机、负责人短板的客户,批量生成修复任务。"
+            action="customer_health_repair"
+            buttonLabel="生成修复任务"
+            ids={customerHealthRows.map(({ company }) => company.id)}
+            tone="slate"
           />
         </div>
         <div className="mt-4 grid gap-3 xl:grid-cols-3">
@@ -1290,6 +1299,7 @@ function NextActionBulkResultBanner({
   const label: Record<string, string> = {
     planned: '下一步任务已生成',
     reactivated: '沉睡激活任务已生成',
+    health_repaired: '客户健康修复任务已生成',
     empty: '没有选中可处理客户',
   };
   return (
@@ -1317,17 +1327,19 @@ function NextActionCard({
   action: string;
   buttonLabel: string;
   ids: string[];
-  tone: 'amber' | 'violet' | 'rose';
+  tone: 'amber' | 'violet' | 'rose' | 'slate';
 }) {
   const color: Record<string, string> = {
     amber: 'border-amber-100 bg-amber-50 text-amber-900',
     violet: 'border-violet-100 bg-violet-50 text-violet-900',
     rose: 'border-rose-100 bg-rose-50 text-rose-900',
+    slate: 'border-slate-100 bg-slate-50 text-slate-900',
   };
   const buttonColor: Record<string, string> = {
     amber: 'bg-amber-600 hover:bg-amber-700',
     violet: 'bg-violet-600 hover:bg-violet-700',
     rose: 'bg-rose-600 hover:bg-rose-700',
+    slate: 'bg-slate-900 hover:bg-slate-700',
   };
   return (
     <div className={`rounded-xl border p-4 ${color[tone]}`}>

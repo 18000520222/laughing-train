@@ -2,11 +2,13 @@ import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { buildSalesRadar } from '@/lib/sales-radar';
+import { buildCustomerHealthRow } from '@/lib/customer-health';
 
 export const dynamic = 'force-dynamic';
 
 const ALLOWED_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SALES']);
 const ACTIVE_CUSTOMER_TYPES = ['INQUIRY', 'QUOTED', 'CONTRACT_SENT', 'PROSPECT', 'NEW'];
+const HEALTH_CUSTOMER_TYPES = ['INQUIRY', 'QUOTED', 'CONTRACT_SENT', 'DEAL_WON', 'KEY_ACCOUNT', 'PROSPECT', 'NEW', 'EXISTING'];
 
 export async function POST(req: Request) {
   const auth = await requireSalesUser();
@@ -18,7 +20,7 @@ export async function POST(req: Request) {
   if (ids.length === 0) return redirectBack(req, 'empty', 0);
 
   const result = await createNextActionTasks(ids, auth.user.id, action);
-  return redirectBack(req, action === 'stale_reactivate' ? 'reactivated' : 'planned', result.created, result.updated, result.skipped);
+  return redirectBack(req, bulkResultKey(action), result.created, result.updated, result.skipped);
 }
 
 async function requireSalesUser() {
@@ -38,14 +40,16 @@ async function requireSalesUser() {
 }
 
 async function createNextActionTasks(ids: string[], currentUserId: string, action: string) {
+  const typeScope = action === 'customer_health_repair' ? HEALTH_CUSTOMER_TYPES : ACTIVE_CUSTOMER_TYPES;
   const companies = await prisma.company.findMany({
-    where: { id: { in: ids }, type: { in: ACTIVE_CUSTOMER_TYPES as any } },
+    where: { id: { in: ids }, type: { in: typeScope as any } },
     include: {
       owner: true,
-      contacts: { take: 2, orderBy: { createdAt: 'asc' } },
+      contacts: { take: 3, orderBy: { createdAt: 'asc' } },
       inboxMessages: { orderBy: { createdAt: 'desc' }, take: 6 },
       followUps: { orderBy: { createdAt: 'desc' }, take: 3 },
-      opportunities: { orderBy: { updatedAt: 'desc' }, take: 5 },
+      opportunities: { orderBy: { updatedAt: 'desc' }, take: 6 },
+      salesTasks: { where: { status: 'TODO' }, orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }], take: 3 },
       _count: { select: { inboxMessages: true, opportunities: true } },
     },
     orderBy: [{ priorityScore: 'desc' }, { updatedAt: 'asc' }],
@@ -56,9 +60,14 @@ async function createNextActionTasks(ids: string[], currentUserId: string, actio
   let skipped = ids.length - companies.length;
   for (const company of companies) {
     const radar = buildSalesRadar(company);
+    const health = buildCustomerHealthRow(company);
+    if (action === 'customer_health_repair' && health.shortfalls.length === 0 && health.score >= 75) {
+      skipped++;
+      continue;
+    }
     const sourceRef = `${action}:${company.id}`;
     const existing = await prisma.salesTask.findFirst({
-      where: { source: 'NEXT_ACTION_BULK', sourceRef, status: 'TODO' },
+      where: { source: sourceFor(action), sourceRef, status: 'TODO' },
       select: { id: true },
     });
     if (existing) {
@@ -72,7 +81,7 @@ async function createNextActionTasks(ids: string[], currentUserId: string, actio
       updated++;
     }
 
-    const recommendedAction = buildRecommendedNextAction(company, radar, action);
+    const recommendedAction = buildRecommendedNextAction(company, radar, health, action);
     if (!String(company.nextAction || '').trim()) {
       await prisma.company.update({
         where: { id: company.id },
@@ -82,18 +91,18 @@ async function createNextActionTasks(ids: string[], currentUserId: string, actio
     }
 
     const dueAt = new Date();
-    dueAt.setHours(dueAt.getHours() + dueHoursFor(company, radar, action));
+    dueAt.setHours(dueAt.getHours() + dueHoursFor(company, radar, health, action));
     await prisma.salesTask.create({
       data: {
         title: taskTitle(company.name, action, radar.title),
-        description: taskDescription(company, radar, recommendedAction),
-        type: radar.metrics.awaitingReply ? 'EMAIL' : action === 'stale_reactivate' ? 'RISK_RESCUE' : 'FOLLOW_UP',
-        priority: radar.level === 'hot' || radar.level === 'risk' ? 'HIGH' : 'NORMAL',
+        description: taskDescription(company, radar, health, recommendedAction, action),
+        type: taskType(action, radar, health),
+        priority: taskPriority(action, radar, health),
         dueAt,
         ownerId,
         createdById: currentUserId,
         companyId: company.id,
-        source: 'NEXT_ACTION_BULK',
+        source: sourceFor(action),
         sourceRef,
       },
     });
@@ -101,7 +110,7 @@ async function createNextActionTasks(ids: string[], currentUserId: string, actio
       data: {
         userId: ownerId,
         type: 'SYSTEM',
-        title: action === 'stale_reactivate' ? '已生成沉睡客户激活任务' : '已生成客户下一步任务',
+        title: notificationTitle(action),
         body: `${company.name}: ${recommendedAction}`,
         link: '/tasks?view=week',
       },
@@ -138,8 +147,10 @@ function buildRecommendedNextAction(
     contacts: Array<{ email: string | null; phone: string | null }>;
   },
   radar: ReturnType<typeof buildSalesRadar>,
+  health: ReturnType<typeof buildCustomerHealthRow>,
   action: string
 ) {
+  if (action === 'customer_health_repair') return health.action;
   if (String(company.nextAction || '').trim()) return String(company.nextAction);
   if (action === 'stale_reactivate') {
     return '发送唤醒邮件或 WhatsApp,带最新产品/案例/交付能力,确认项目是否继续推进。';
@@ -154,8 +165,14 @@ function buildRecommendedNextAction(
 function dueHoursFor(
   company: { priorityScore: number | null },
   radar: ReturnType<typeof buildSalesRadar>,
+  health: ReturnType<typeof buildCustomerHealthRow>,
   action: string
 ) {
+  if (action === 'customer_health_repair') {
+    if (health.score < 55 || health.stalledOpportunityCount > 0 || health.overdueTaskCount > 0 || !health.hasOwner) return 24;
+    if (health.score < 75) return 48;
+    return 72;
+  }
   if (radar.metrics.awaitingReply || radar.level === 'hot' || radar.level === 'risk') return 24;
   if (action === 'stale_reactivate') return 72;
   if ((company.priorityScore || 0) >= 60) return 48;
@@ -163,6 +180,7 @@ function dueHoursFor(
 }
 
 function taskTitle(companyName: string, action: string, radarTitle: string) {
+  if (action === 'customer_health_repair') return `修复客户健康短板: ${companyName}`;
   if (action === 'stale_reactivate') return `激活沉睡客户: ${companyName}`;
   return `补齐下一步动作: ${companyName} (${radarTitle})`;
 }
@@ -177,18 +195,67 @@ function taskDescription(
     contacts: Array<{ email: string | null; phone: string | null }>;
   },
   radar: ReturnType<typeof buildSalesRadar>,
-  nextAction: string
+  health: ReturnType<typeof buildCustomerHealthRow>,
+  nextAction: string,
+  action: string
 ) {
-  return [
+  const base = [
     `客户: ${company.name}`,
     `类型/来源: ${company.type} / ${company.source}`,
     `负责人: ${company.owner?.name || company.owner?.email || '当前执行人'}`,
     `优先级分: ${company.priorityScore || 0}`,
     `联系人: ${company.contacts.map((item) => item.email || item.phone).filter(Boolean).join(', ') || '-'}`,
+  ];
+  const healthLines =
+    action === 'customer_health_repair'
+      ? [
+          `客户健康度: ${health.score}`,
+          `五点短板: ${health.shortfalls.join('、') || '暂无明显短板'}`,
+          `五维得分: 资料${health.fitScore}/20, 联系人${health.contactScore}/20, 互动${health.engagementScore}/20, 商机${health.pipelineScore}/20, 下一步${health.ownerScore}/20`,
+        ]
+      : [];
+  return [
+    ...base,
+    ...healthLines,
     `雷达: ${radar.levelLabel} · ${radar.score} · ${radar.title}`,
     `建议动作: ${nextAction}`,
     '',
     '原因:',
-    ...radar.reasons.map((reason) => `- ${reason}`),
+    ...(action === 'customer_health_repair' ? health.shortfalls.map((item) => `- 体检短板: ${item}`) : radar.reasons.map((reason) => `- ${reason}`)),
   ].join('\n');
+}
+
+function bulkResultKey(action: string) {
+  if (action === 'stale_reactivate') return 'reactivated';
+  if (action === 'customer_health_repair') return 'health_repaired';
+  return 'planned';
+}
+
+function sourceFor(action: string) {
+  return action === 'customer_health_repair' ? 'CUSTOMER_HEALTH_BULK' : 'NEXT_ACTION_BULK';
+}
+
+function taskType(action: string, radar: ReturnType<typeof buildSalesRadar>, health: ReturnType<typeof buildCustomerHealthRow>) {
+  if (action === 'customer_health_repair') {
+    if (health.score < 55 || health.stalledOpportunityCount > 0 || health.overdueTaskCount > 0) return 'RISK_RESCUE';
+    return 'FOLLOW_UP';
+  }
+  if (radar.metrics.awaitingReply) return 'EMAIL';
+  if (action === 'stale_reactivate') return 'RISK_RESCUE';
+  return 'FOLLOW_UP';
+}
+
+function taskPriority(action: string, radar: ReturnType<typeof buildSalesRadar>, health: ReturnType<typeof buildCustomerHealthRow>) {
+  if (action === 'customer_health_repair') {
+    if (health.score < 55 || health.stalledOpportunityCount > 0 || health.overdueTaskCount > 0 || !health.hasOwner) return 'URGENT';
+    if (health.score < 75) return 'HIGH';
+    return 'NORMAL';
+  }
+  return radar.level === 'hot' || radar.level === 'risk' ? 'HIGH' : 'NORMAL';
+}
+
+function notificationTitle(action: string) {
+  if (action === 'customer_health_repair') return '已生成客户健康修复任务';
+  if (action === 'stale_reactivate') return '已生成沉睡客户激活任务';
+  return '已生成客户下一步任务';
 }
