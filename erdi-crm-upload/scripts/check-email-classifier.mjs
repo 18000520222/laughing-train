@@ -80,6 +80,24 @@ const cases = [
     },
   },
   {
+    name: 'hotel rewards noise is not customs',
+    expected: 'OTHER',
+    input: {
+      from: '"IHG One Rewards" <IHGOneRewards@mc.ihg.com>',
+      subject: 'Yilin, 进阶奖赏等你来享',
+      textBody: 'COO and member benefits are waiting for you.',
+    },
+  },
+  {
+    name: 'refund down payment',
+    expected: 'PAYMENT_FINANCE',
+    input: {
+      from: 'Ariel <ariel@example-defense.com>',
+      subject: 'Refund for down payment for Diode Pump Micro-Optics Module',
+      textBody: 'Please arrange the refund for the down payment.',
+    },
+  },
+  {
     name: 'seo spam',
     expected: 'SEO_SPAM',
     input: {

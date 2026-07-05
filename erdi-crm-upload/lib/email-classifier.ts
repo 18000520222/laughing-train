@@ -73,15 +73,15 @@ const CATEGORY_RULES: Array<{
     actionRequired: true,
     isLead: false,
     score: 80,
-    keywords: ['customs', 'clearance', 'hs code', 'tariff code', 'certificate of origin', 'coo', 'msds', 'export license', 'import permit', 'declaration', '海关', '清关', '报关', '原产地证'],
+    keywords: ['customs', 'clearance', 'hs code', 'tariff code', 'certificate of origin', 'msds', 'export license', 'import permit', 'declaration', '海关', '清关', '报关', '原产地证'],
   },
   {
     category: 'PAYMENT_FINANCE',
     tags: ['付款财务'],
     actionRequired: true,
     isLead: false,
-    score: 76,
-    keywords: ['payment', 'paid', 'receipt', 'bill', 'billing', 'commission', '付款', '账单', '收据', '入账', 'invoice'],
+    score: 86,
+    keywords: ['payment', 'down payment', 'refund', 'paid', 'receipt', 'bill', 'billing', 'commission', 'bank transfer', 'remittance', '付款', '退款', '账单', '收据', '入账', 'invoice'],
   },
   {
     category: 'LOGISTICS',
@@ -158,6 +158,11 @@ export function classifyEmail(input: { from?: string | null; subject?: string | 
 
   if (hasMarketingSignal(text) && !hasDirectBusinessIntent(text)) {
     return result('MARKETING_NEWSLETTER', 'marketing-without-business-intent', 20, false, false, ['营销新闻']);
+  }
+
+  const settlementHit = settlementSignal(text);
+  if (settlementHit) {
+    return result('PAYMENT_FINANCE', `settlement:${settlementHit}`, 92, true, false, ['付款财务']);
   }
 
   const matched = CATEGORY_RULES.map((rule) => {
@@ -263,6 +268,10 @@ function hasDirectBusinessIntent(text: string) {
   return ['please quote', 'quotation', 'rfq', 'purchase order', 'proforma invoice', 'we need', 'we require', 'send price', 'technical datasheet'].some((k) =>
     text.includes(k)
   );
+}
+
+function settlementSignal(text: string) {
+  return ['refund', 'down payment', 'bank transfer', 'remittance', 'payment received', 'payment confirmation'].find((k) => text.includes(k)) || null;
 }
 
 function categoryPriority(category: EmailCategory) {
