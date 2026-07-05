@@ -134,6 +134,171 @@ export async function buildEmailClassificationAudit({ sampleLimit = 10 }: { samp
   };
 }
 
+export async function buildEmailActionClosureAudit({
+  since,
+  until = new Date(),
+  sampleLimit = 8,
+}: {
+  since: Date;
+  until?: Date;
+  sampleLimit?: number;
+}) {
+  const [tasks, convertedEmailCount, clearedNoiseCount] = await Promise.all([
+    prisma.salesTask.findMany({
+      where: {
+        source: 'EMAIL_ACTION_BULK',
+        createdAt: { gte: since, lt: until },
+      },
+      include: {
+        owner: true,
+        company: {
+          include: {
+            opportunities: {
+              where: { stageChangedAt: { gte: since, lt: until } },
+              select: { id: true, stage: true, amountUSD: true, stageChangedAt: true, updatedAt: true },
+            },
+          },
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }, { dueAt: 'asc' }],
+      take: 500,
+    }),
+    prisma.emailMessage.count({
+      where: {
+        classificationTags: { has: '已转任务' },
+        classifiedAt: { gte: since, lt: until },
+      },
+    }),
+    prisma.emailMessage.count({
+      where: {
+        classificationTags: { has: '已清理' },
+        classifiedAt: { gte: since, lt: until },
+      },
+    }),
+  ]);
+
+  if (tasks.length === 0) {
+    return emptyEmailActionClosureAudit({ convertedEmailCount, clearedNoiseCount });
+  }
+
+  const emailIds = Array.from(new Set(tasks.map((task) => emailIdFromSourceRef(task.sourceRef)).filter(Boolean) as string[]));
+  const emails = emailIds.length
+    ? await prisma.emailMessage.findMany({
+        where: { id: { in: emailIds } },
+        select: {
+          id: true,
+          from: true,
+          subject: true,
+          category: true,
+          classificationScore: true,
+          classificationTags: true,
+          date: true,
+          account: { select: { email: true } },
+        },
+      })
+    : [];
+  const emailsById = new Map(emails.map((email) => [email.id, email]));
+  const now = new Date();
+  const companyIds = new Set<string>();
+  const ownerIds = new Set<string>();
+  const byCategory = new Map<string, EmailActionCategoryRow>();
+  const topTasks: EmailActionTaskRow[] = [];
+  let doneTasks = 0;
+  let openTasks = 0;
+  let overdueTasks = 0;
+  let downstreamOutcomes = 0;
+  let wonDeals = 0;
+  let wonRevenue = 0;
+
+  for (const task of tasks) {
+    companyIds.add(task.companyId);
+    ownerIds.add(task.ownerId);
+    const email = emailsById.get(emailIdFromSourceRef(task.sourceRef) || '');
+    const category = email?.category || 'UNKNOWN';
+    const row = byCategory.get(category) || {
+      category,
+      categoryLabel: category === 'UNKNOWN' ? '未知邮件' : emailCategoryLabel(category),
+      totalTasks: 0,
+      doneTasks: 0,
+      openTasks: 0,
+      overdueTasks: 0,
+      downstreamOutcomes: 0,
+      wonDeals: 0,
+      wonRevenue: 0,
+    };
+    const opportunityRows = task.company.opportunities.filter((opp) => {
+      const stageAt = opp.stageChangedAt || opp.updatedAt;
+      return stageAt >= task.createdAt && stageAt <= until;
+    });
+    const taskOutcomes = opportunityRows.length;
+    const taskWonDeals = opportunityRows.filter((opp) => opp.stage === 'CLOSED_WON').length;
+    const taskWonRevenue = opportunityRows.filter((opp) => opp.stage === 'CLOSED_WON').reduce((sum, opp) => sum + (opp.amountUSD || 0), 0);
+    const isDone = task.status === 'DONE';
+    const isOpen = task.status === 'TODO';
+    const isOverdue = isOpen && !!task.dueAt && task.dueAt < now;
+
+    row.totalTasks += 1;
+    row.doneTasks += isDone ? 1 : 0;
+    row.openTasks += isOpen ? 1 : 0;
+    row.overdueTasks += isOverdue ? 1 : 0;
+    row.downstreamOutcomes += taskOutcomes;
+    row.wonDeals += taskWonDeals;
+    row.wonRevenue += taskWonRevenue;
+    byCategory.set(category, row);
+
+    doneTasks += isDone ? 1 : 0;
+    openTasks += isOpen ? 1 : 0;
+    overdueTasks += isOverdue ? 1 : 0;
+    downstreamOutcomes += taskOutcomes;
+    wonDeals += taskWonDeals;
+    wonRevenue += taskWonRevenue;
+
+    topTasks.push({
+      id: task.id,
+      companyId: task.companyId,
+      companyName: task.company.name,
+      ownerName: task.owner.name || task.owner.email,
+      title: task.title,
+      status: task.status,
+      statusLabel: task.status === 'DONE' ? '已完成' : task.status === 'TODO' ? (isOverdue ? '已逾期' : '待处理') : '已取消',
+      isOverdue,
+      categoryLabel: row.categoryLabel,
+      emailSubject: email?.subject || '无主题',
+      emailFrom: email ? trimSender(email.from) : '邮件记录未找到',
+      score: email?.classificationScore || 0,
+      createdAtLabel: task.createdAt.toLocaleDateString('zh-CN'),
+      downstreamOutcomes: taskOutcomes,
+      wonRevenue: taskWonRevenue,
+    });
+  }
+
+  const byCategoryRows = Array.from(byCategory.values()).sort((a, b) => b.wonRevenue - a.wonRevenue || b.downstreamOutcomes - a.downstreamOutcomes || b.totalTasks - a.totalTasks);
+  const sortedTopTasks = topTasks
+    .sort((a, b) => b.wonRevenue - a.wonRevenue || b.downstreamOutcomes - a.downstreamOutcomes || Number(b.isOverdue) - Number(a.isOverdue) || b.score - a.score)
+    .slice(0, sampleLimit);
+  const totalTasks = tasks.length;
+
+  return {
+    totalTasks,
+    convertedEmailCount,
+    clearedNoiseCount,
+    doneTasks,
+    openTasks,
+    overdueTasks,
+    companyCount: companyIds.size,
+    ownerCount: ownerIds.size,
+    downstreamOutcomes,
+    wonDeals,
+    wonRevenue,
+    completionRate: totalTasks > 0 ? doneTasks / totalTasks : null,
+    downstreamRate: totalTasks > 0 ? downstreamOutcomes / totalTasks : null,
+    byCategory: byCategoryRows,
+    topTasks: sortedTopTasks,
+    maxCategoryTasks: Math.max(1, ...byCategoryRows.map((row) => row.totalTasks)),
+    recommendation: emailActionClosureRecommendation({ totalTasks, doneTasks, openTasks, overdueTasks, downstreamOutcomes, wonRevenue, clearedNoiseCount }),
+  };
+}
+
 export async function reclassifyEmailMessages({
   limit = 500,
   includeClassified = false,
@@ -331,6 +496,94 @@ function emailAuditRecommendation(input: { total: number; unclassified: number; 
   if (input.staleUnclassified > 0) return `有 ${input.staleUnclassified} 封超过 2 天未分类的旧邮件,需要检查同步任务或分类 cron。`;
   if (input.actionRequired > 0) return `当前有 ${input.actionRequired} 封需要动作的邮件,应优先转客户、建商机或生成跟进任务。`;
   return '邮件分类覆盖良好。下一步重点是把询盘/报价/订单类邮件自动关联客户和商机。';
+}
+
+type EmailActionCategoryRow = {
+  category: string;
+  categoryLabel: string;
+  totalTasks: number;
+  doneTasks: number;
+  openTasks: number;
+  overdueTasks: number;
+  downstreamOutcomes: number;
+  wonDeals: number;
+  wonRevenue: number;
+};
+
+type EmailActionTaskRow = {
+  id: string;
+  companyId: string;
+  companyName: string;
+  ownerName: string;
+  title: string;
+  status: string;
+  statusLabel: string;
+  isOverdue: boolean;
+  categoryLabel: string;
+  emailSubject: string;
+  emailFrom: string;
+  score: number;
+  createdAtLabel: string;
+  downstreamOutcomes: number;
+  wonRevenue: number;
+};
+
+function emptyEmailActionClosureAudit({
+  convertedEmailCount,
+  clearedNoiseCount,
+}: {
+  convertedEmailCount: number;
+  clearedNoiseCount: number;
+}) {
+  return {
+    totalTasks: 0,
+    convertedEmailCount,
+    clearedNoiseCount,
+    doneTasks: 0,
+    openTasks: 0,
+    overdueTasks: 0,
+    companyCount: 0,
+    ownerCount: 0,
+    downstreamOutcomes: 0,
+    wonDeals: 0,
+    wonRevenue: 0,
+    completionRate: null,
+    downstreamRate: null,
+    byCategory: [] as EmailActionCategoryRow[],
+    topTasks: [] as EmailActionTaskRow[],
+    maxCategoryTasks: 1,
+    recommendation: convertedEmailCount > 0 || clearedNoiseCount > 0
+      ? `近 30 天已有 ${convertedEmailCount} 封邮件标记为已转任务、${clearedNoiseCount} 封噪音已清理,但暂未找到对应的邮件动作任务。`
+      : '近 30 天暂无邮件动作任务。先在邮件动作清理台把询盘/报价/订单等邮件转成销售任务。',
+  };
+}
+
+function emailActionClosureRecommendation(input: {
+  totalTasks: number;
+  doneTasks: number;
+  openTasks: number;
+  overdueTasks: number;
+  downstreamOutcomes: number;
+  wonRevenue: number;
+  clearedNoiseCount: number;
+}) {
+  if (input.totalTasks === 0) return '近 30 天暂无邮件动作任务。先把高价值邮件转销售任务,再观察客户和商机结果。';
+  if (input.overdueTasks > 0) return `有 ${input.overdueTasks} 个邮件动作任务已逾期。先处理逾期询盘/报价/订单邮件,避免客户等待。`;
+  if (input.doneTasks === 0) return `已生成 ${input.totalTasks} 个邮件动作任务,但还没有完成记录。要求销售完成任务并写明处理结果。`;
+  if (input.downstreamOutcomes > 0 && input.wonRevenue > 0) return `邮件动作任务已带来 ${input.downstreamOutcomes} 次商机推进和 $${Math.round(input.wonRevenue).toLocaleString()} 赢单收入,应复盘有效邮件类型。`;
+  if (input.downstreamOutcomes > 0) return `邮件动作任务已带来 ${input.downstreamOutcomes} 次商机推进,但暂未形成赢单收入。继续盯报价、谈判和规格确认。`;
+  if (input.clearedNoiseCount > input.totalTasks) return `噪音清理量高于邮件转任务量。检查是否漏掉询盘/报价关键词,防止高价值邮件被当作低价值处理。`;
+  return `邮件动作任务完成率 ${formatPercent(input.totalTasks ? input.doneTasks / input.totalTasks : null)},但暂未看到后续商机推进。需要检查任务是否具体到报价、样品或技术确认。`;
+}
+
+function emailIdFromSourceRef(sourceRef: string | null) {
+  if (!sourceRef?.startsWith('email:')) return null;
+  return sourceRef.slice('email:'.length);
+}
+
+function formatPercent(value: number | null) {
+  if (value === null) return '-';
+  return `${Math.round(value * 100)}%`;
 }
 
 function topDomains(fromRows: string[]) {

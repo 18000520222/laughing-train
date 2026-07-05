@@ -6,7 +6,7 @@ import { createDefaultSalesAssignmentRules, executeSalesAssignmentRules } from '
 import { buildSalesRadar } from '@/lib/sales-radar';
 import { buildCustomerHealthRow } from '@/lib/customer-health';
 import { runEmailActionAutopilot } from '@/lib/email-actions';
-import { buildEmailClassificationAudit, reclassifyEmailMessages } from '@/lib/email-audit';
+import { buildEmailActionClosureAudit, buildEmailClassificationAudit, reclassifyEmailMessages } from '@/lib/email-audit';
 import { buildEmailSecurityAudit, runEmailSecurityWatch } from '@/lib/email-security-audit';
 
 export const dynamic = 'force-dynamic';
@@ -455,6 +455,7 @@ export default async function SalesCommandPage({
   const actionAttribution = await buildSalesActionAttributionReport({ since: thirtyDaysAgo, until: new Date() });
   const stageVelocity = await buildOpportunityStageVelocityReport({ since: thirtyDaysAgo, until: new Date() });
   const emailAudit = await buildEmailClassificationAudit({ sampleLimit: 8 });
+  const emailActionClosure = await buildEmailActionClosureAudit({ since: thirtyDaysAgo, until: new Date(), sampleLimit: 8 });
   const emailSecurity = await buildEmailSecurityAudit({ sampleLimit: 8 });
   const channelQuality = await buildChannelQualityReport({ since: ninetyDaysAgo });
   const healthAutomationEffect = await buildCustomerHealthAutomationEffectReport({ since: thirtyDaysAgo, until: new Date() });
@@ -820,6 +821,52 @@ export default async function SalesCommandPage({
           重跑分类前先用预演接口查看 `changed/migrations/changedSamples`;确认后再执行“复核最近 500 封”。
         </div>
         <GmailReadinessPanel readiness={emailAudit.gmailReadiness} plans={emailAudit.gmailLabelPlan} />
+        <section className="mt-4 rounded-xl border border-gray-100 bg-white p-4">
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-xs font-black text-gray-500">邮件动作闭环复盘</h3>
+              <p className="mt-1 text-[11px] font-bold text-gray-400">复盘邮件转任务后是否完成、是否逾期、是否带来客户商机推进和赢单。</p>
+            </div>
+            <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">近 30 天</span>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <AttributionMetric label="邮件任务" value={emailActionClosure.totalTasks} detail={`${emailActionClosure.convertedEmailCount} 封已转任务`} tone={emailActionClosure.totalTasks > 0 ? 'blue' : 'gray'} />
+            <AttributionMetric label="已完成" value={emailActionClosure.doneTasks} detail={`完成率 ${formatLocalPercent(emailActionClosure.completionRate)}`} tone={emailActionClosure.doneTasks > 0 ? 'emerald' : 'gray'} />
+            <AttributionMetric label="当前待办" value={emailActionClosure.openTasks} detail={`${emailActionClosure.overdueTasks} 个逾期`} tone={emailActionClosure.overdueTasks > 0 ? 'rose' : emailActionClosure.openTasks > 0 ? 'amber' : 'emerald'} />
+            <AttributionMetric label="噪音清理" value={emailActionClosure.clearedNoiseCount} detail="已清除待动作" tone={emailActionClosure.clearedNoiseCount > 0 ? 'violet' : 'gray'} />
+            <AttributionMetric label="后续推进" value={emailActionClosure.downstreamOutcomes} detail={`有效率 ${formatLocalPercent(emailActionClosure.downstreamRate)}`} tone={emailActionClosure.downstreamOutcomes > 0 ? 'blue' : 'gray'} />
+            <AttributionMetric label="赢单收入" value={`$${Math.round(emailActionClosure.wonRevenue).toLocaleString()}`} detail={`${emailActionClosure.wonDeals} 个赢单`} tone={emailActionClosure.wonRevenue > 0 ? 'emerald' : 'gray'} />
+          </div>
+          <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{emailActionClosure.recommendation}</div>
+          <div className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+            <div className="rounded-xl border border-gray-100 p-4">
+              <h4 className="text-xs font-black text-gray-500">按邮件类型</h4>
+              <div className="mt-3 space-y-3">
+                {emailActionClosure.byCategory.map((row) => (
+                  <AttributionBar key={row.category} label={row.categoryLabel} value={row.totalTasks} max={emailActionClosure.maxCategoryTasks} detail={`${row.doneTasks} 完成 · ${row.downstreamOutcomes} 推进 · $${Math.round(row.wonRevenue).toLocaleString()}`} />
+                ))}
+                {emailActionClosure.byCategory.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无邮件动作任务。</div>}
+              </div>
+            </div>
+            <div className="rounded-xl border border-gray-100 p-4">
+              <h4 className="text-xs font-black text-gray-500">关键样本</h4>
+              <div className="mt-3 space-y-2">
+                {emailActionClosure.topTasks.map((item) => (
+                  <div key={item.id} className="rounded-lg bg-gray-50 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <Link href={`/customers/${item.companyId}`} className="min-w-0 truncate text-xs font-black text-indigo-700 hover:underline">{item.companyName}</Link>
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-black ${item.status === 'DONE' ? 'bg-emerald-50 text-emerald-700' : item.isOverdue ? 'bg-rose-50 text-rose-700' : 'bg-white text-gray-600'}`}>{item.statusLabel}</span>
+                    </div>
+                    <div className="mt-1 truncate text-[11px] font-bold text-gray-500">{item.categoryLabel} · {item.ownerName} · {item.createdAtLabel}</div>
+                    <div className="mt-1 truncate text-[11px] font-bold text-gray-400">{item.emailSubject} · {item.emailFrom}</div>
+                    <div className="mt-1 text-[11px] font-bold text-gray-400">后续推进 {item.downstreamOutcomes} · 赢单 ${Math.round(item.wonRevenue).toLocaleString()}</div>
+                  </div>
+                ))}
+                {emailActionClosure.topTasks.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无可复盘样本。</div>}
+              </div>
+            </div>
+          </div>
+        </section>
         <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4">
           <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
             <div>
