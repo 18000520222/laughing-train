@@ -612,7 +612,7 @@ export default async function SalesCommandPage({
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-bold text-gray-900">Gmail / 邮件分类审计</h2>
-            <p className="text-xs text-gray-400 mt-1">按外贸销售动作审计 CRM 邮件表:询盘、报价、订单、财务、物流、平台通知、营销噪音和低置信复核。</p>
+            <p className="text-xs text-gray-400 mt-1">按外贸销售动作审计 CRM 邮件表:询盘、报价、订单、财务、物流、海关合规、平台通知、营销噪音和低置信复核。</p>
           </div>
           {canManage && (
             <div className="flex flex-wrap gap-2">
@@ -636,6 +636,7 @@ export default async function SalesCommandPage({
           <AttributionMetric label="低置信" value={emailAudit.lowConfidence} detail="需人工复核" tone={emailAudit.lowConfidence > 0 ? 'violet' : 'gray'} />
         </div>
         <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{emailAudit.recommendation}</div>
+        <GmailReadinessPanel readiness={emailAudit.gmailReadiness} plans={emailAudit.gmailLabelPlan} />
         <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4">
           <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -649,7 +650,7 @@ export default async function SalesCommandPage({
             <EmailBulkActionCard
               title="邮件转任务"
               count={emailAudit.taskQueue.length}
-              detail="询盘、报价、订单、财务、物流、技术和验证码邮件,转成可追责任务。"
+              detail="询盘、报价、订单、财务、物流、海关合规、会议、采购、技术和验证码邮件,转成可追责任务。"
               action="create_tasks"
               buttonLabel="生成邮件任务"
               ids={emailAudit.taskQueue.map((msg) => msg.id)}
@@ -1784,6 +1785,37 @@ function AttributionMetric({ label, value, detail, tone }: { label: string; valu
       <div className="text-xs font-black opacity-75">{label}</div>
       <div className="mt-1 truncate text-2xl font-black">{value}</div>
       <div className="mt-1 text-xs font-bold opacity-70">{detail}</div>
+    </div>
+  );
+}
+
+function GmailReadinessPanel({ readiness, plans }: { readiness: any; plans: any[] }) {
+  const color = readiness.status === 'ready'
+    ? 'border-emerald-100 bg-emerald-50 text-emerald-900'
+    : readiness.status === 'empty'
+      ? 'border-amber-100 bg-amber-50 text-amber-900'
+      : 'border-rose-100 bg-rose-50 text-rose-900';
+  return (
+    <div className={`mt-4 rounded-xl border p-4 ${color}`}>
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <h3 className="text-sm font-black">{readiness.title}</h3>
+          <p className="mt-1 text-xs font-bold opacity-75">{readiness.detail}</p>
+        </div>
+        <div className="rounded-lg bg-white/70 px-3 py-2 text-xs font-black">Gmail 标签计划 {plans.length}</div>
+      </div>
+      <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        {plans.slice(0, 9).map((plan) => (
+          <div key={plan.key} className="rounded-lg bg-white/75 px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 truncate text-xs font-black">{plan.labelName}</div>
+              <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-600">{plan.slaHours ? `${plan.slaHours}h` : '清理'}</span>
+            </div>
+            <div className="mt-1 text-[11px] font-bold opacity-70">{plan.categoryLabel} · {plan.crmAction}</div>
+            <div className="mt-1 truncate text-[11px] font-medium opacity-60">{plan.gmailQuery}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

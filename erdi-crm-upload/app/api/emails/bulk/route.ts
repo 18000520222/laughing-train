@@ -6,7 +6,18 @@ import { prisma } from '@/lib/prisma';
 export const dynamic = 'force-dynamic';
 
 const ALLOWED_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SALES']);
-const TASK_CATEGORIES = new Set(['INQUIRY', 'QUOTE_PI', 'ORDER_PO', 'PAYMENT_FINANCE', 'LOGISTICS', 'TECH_SUPPORT', 'AUTH_SECURITY']);
+const TASK_CATEGORIES = new Set([
+  'INQUIRY',
+  'QUOTE_PI',
+  'ORDER_PO',
+  'PAYMENT_FINANCE',
+  'LOGISTICS',
+  'TECH_SUPPORT',
+  'CUSTOMS_COMPLIANCE',
+  'MEETING_FOLLOWUP',
+  'SUPPLIER_PURCHASE',
+  'AUTH_SECURITY',
+]);
 const NOISE_CATEGORIES = new Set(['SEO_SPAM', 'MARKETING_NEWSLETTER', 'PLATFORM_ALERT', 'INTERNAL', 'OTHER']);
 
 export async function POST(req: Request) {
@@ -229,6 +240,9 @@ function taskTitle(email: { category: string; subject: string | null; from: stri
     PAYMENT_FINANCE: '处理付款财务邮件',
     LOGISTICS: '处理物流邮件',
     TECH_SUPPORT: '处理技术售后邮件',
+    CUSTOMS_COMPLIANCE: '处理海关合规邮件',
+    MEETING_FOLLOWUP: '处理会议跟进邮件',
+    SUPPLIER_PURCHASE: '处理供应采购邮件',
     AUTH_SECURITY: '处理安全验证码邮件',
   };
   return `${label[email.category] || '处理邮件'}: ${email.subject || trimSender(email.from)}`;
@@ -268,14 +282,14 @@ function taskDescription(
 function taskType(category: string): SalesTaskType {
   if (category === 'QUOTE_PI' || category === 'ORDER_PO') return 'QUOTE';
   if (category === 'TECH_SUPPORT') return 'TECH_CHECK';
-  if (category === 'PAYMENT_FINANCE' || category === 'LOGISTICS' || category === 'AUTH_SECURITY') return 'GENERAL';
+  if (category === 'PAYMENT_FINANCE' || category === 'LOGISTICS' || category === 'CUSTOMS_COMPLIANCE' || category === 'SUPPLIER_PURCHASE' || category === 'AUTH_SECURITY') return 'GENERAL';
   return 'EMAIL';
 }
 
 function taskPriority(category: string, score: number, date: Date): SalesTaskPriority {
   const ageHours = Math.floor((Date.now() - date.getTime()) / 3600000);
   if (ageHours >= 48 || category === 'ORDER_PO' || category === 'AUTH_SECURITY') return 'URGENT';
-  if (category === 'QUOTE_PI' || category === 'INQUIRY' || score >= 85) return 'HIGH';
+  if (category === 'QUOTE_PI' || category === 'INQUIRY' || category === 'CUSTOMS_COMPLIANCE' || score >= 85) return 'HIGH';
   return 'NORMAL';
 }
 

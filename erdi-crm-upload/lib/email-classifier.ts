@@ -5,6 +5,9 @@ export type EmailCategory =
   | 'PAYMENT_FINANCE'
   | 'LOGISTICS'
   | 'TECH_SUPPORT'
+  | 'CUSTOMS_COMPLIANCE'
+  | 'MEETING_FOLLOWUP'
+  | 'SUPPLIER_PURCHASE'
   | 'PLATFORM_ALERT'
   | 'AUTH_SECURITY'
   | 'MARKETING_NEWSLETTER'
@@ -38,7 +41,7 @@ const CATEGORY_RULES: Array<{
     actionRequired: true,
     isLead: true,
     score: 95,
-    keywords: ['purchase order', 'new order', ' po', 'po260', 'order confirmation', '订单', '采购订单'],
+    keywords: ['purchase order', 'new order', 'po260', 'order confirmation', '订单', '采购订单', 'place an order', 'official order'],
   },
   {
     category: 'QUOTE_PI',
@@ -46,7 +49,7 @@ const CATEGORY_RULES: Array<{
     actionRequired: true,
     isLead: true,
     score: 90,
-    keywords: ['quotation', 'quote', '报价', 'pi ', 'proforma invoice', 'invoice request', '价格', 'price'],
+    keywords: ['quotation', 'quote', '报价', 'proforma invoice', 'invoice request', '价格', 'price', 'best price', 'price list', 'commercial offer'],
   },
   {
     category: 'INQUIRY',
@@ -54,7 +57,7 @@ const CATEGORY_RULES: Array<{
     actionRequired: true,
     isLead: true,
     score: 88,
-    keywords: ['inquiry', 'requirement', 'request for', 'rfq', 'laser rangefinder', 'lrf', 'rangefinder', 'module', 'target designator', '测距', '询盘'],
+    keywords: ['inquiry', 'requirement', 'request for', 'rfq', 'laser rangefinder', 'lrf', 'rangefinder', 'module', 'target designator', 'datasheet', 'specification', '测距', '询盘', '样品', 'sample'],
   },
   {
     category: 'TECH_SUPPORT',
@@ -62,7 +65,15 @@ const CATEGORY_RULES: Array<{
     actionRequired: true,
     isLead: true,
     score: 82,
-    keywords: ['problem', 'issue', 'troubleshooting', 'sdk', 'uart', 'protocol', 'screw', 'orientation', 'support', '故障', '问题'],
+    keywords: ['problem', 'issue', 'troubleshooting', 'sdk', 'uart', 'protocol', 'screw', 'orientation', 'support', 'warranty', 'repair', '故障', '问题', '售后'],
+  },
+  {
+    category: 'CUSTOMS_COMPLIANCE',
+    tags: ['海关合规'],
+    actionRequired: true,
+    isLead: false,
+    score: 80,
+    keywords: ['customs', 'clearance', 'hs code', 'tariff code', 'certificate of origin', 'coo', 'msds', 'export license', 'import permit', 'declaration', '海关', '清关', '报关', '原产地证'],
   },
   {
     category: 'PAYMENT_FINANCE',
@@ -78,7 +89,23 @@ const CATEGORY_RULES: Array<{
     actionRequired: true,
     isLead: false,
     score: 72,
-    keywords: ['dhl', 'shipment', 'pickup', 'tracking', 'logistics', 'delivery', 'express', '取件', '发件', '运单'],
+    keywords: ['dhl', 'fedex', 'ups', 'shipment', 'pickup', 'tracking', 'logistics', 'delivery', 'express', 'air waybill', 'awb', '取件', '发件', '运单'],
+  },
+  {
+    category: 'MEETING_FOLLOWUP',
+    tags: ['会议跟进'],
+    actionRequired: true,
+    isLead: true,
+    score: 70,
+    keywords: ['meeting', 'call schedule', 'schedule a call', 'appointment', 'zoom', 'teams meeting', 'calendar invite', '会议', '约时间', '电话沟通'],
+  },
+  {
+    category: 'SUPPLIER_PURCHASE',
+    tags: ['供应采购'],
+    actionRequired: true,
+    isLead: false,
+    score: 68,
+    keywords: ['supplier quotation', 'vendor quote', 'factory price', 'component', 'raw material', '采购报价', '供应商', '物料', '元器件'],
   },
   {
     category: 'AUTH_SECURITY',
@@ -94,7 +121,7 @@ const CATEGORY_RULES: Array<{
     actionRequired: false,
     isLead: false,
     score: 45,
-    keywords: ['vercel', 'google workspace', 'google payments', 'shopline', 'amazon accelerate', 'whatsapp business', 'slack', 'onedrive', 'pingpong'],
+    keywords: ['vercel', 'google workspace', 'google payments', 'shopline', 'amazon accelerate', 'whatsapp business', 'slack', 'onedrive', 'pingpong', 'github', 'supabase', 'cloudflare'],
   },
   {
     category: 'SEO_SPAM',
@@ -118,18 +145,39 @@ export function classifyEmail(input: { from?: string | null; subject?: string | 
   const from = String(input.from || '').toLowerCase();
   const subject = String(input.subject || '');
   const body = String(input.textBody || input.htmlBody || '');
-  const text = `${from}\n${subject}\n${body}`.toLowerCase();
+  const text = `${from}\n${subject}\n${body}`.toLowerCase().replace(/\s+/g, ' ');
   const domain = extractDomain(from);
 
   if (domain && OWN_DOMAINS.some((d) => domain === d || domain.endsWith('.' + d))) {
     return result('INTERNAL', 'sender-own-domain', 35, false, false, ['内部邮件']);
   }
 
-  for (const rule of CATEGORY_RULES) {
-    const hit = rule.keywords.find((k) => text.includes(k.toLowerCase()));
-    if (hit) {
-      return result(rule.category, `keyword:${hit}`, boostScore(rule.score, domain, rule.isLead), rule.actionRequired, rule.isLead, rule.tags);
-    }
+  if (hasSeoSpamSignal(text)) {
+    return result('SEO_SPAM', 'seo-spam-signal', 10, false, false, ['SEO垃圾']);
+  }
+
+  if (hasMarketingSignal(text) && !hasDirectBusinessIntent(text)) {
+    return result('MARKETING_NEWSLETTER', 'marketing-without-business-intent', 20, false, false, ['营销新闻']);
+  }
+
+  const matched = CATEGORY_RULES.map((rule) => {
+    const hits = rule.keywords.filter((k) => includesKeyword(text, k));
+    if (hits.length === 0) return null;
+    const score = boostScore(rule.score + Math.min(8, (hits.length - 1) * 2), domain, rule.isLead);
+    return { rule, hits, score };
+  })
+    .filter(Boolean)
+    .sort((a, b) => (b!.score === a!.score ? categoryPriority(b!.rule.category) - categoryPriority(a!.rule.category) : b!.score - a!.score))[0];
+
+  if (matched) {
+    return result(
+      matched.rule.category,
+      `keyword:${matched.hits[0]}${matched.hits.length > 1 ? `(+${matched.hits.length - 1})` : ''}`,
+      matched.score,
+      matched.rule.actionRequired,
+      matched.rule.isLead,
+      matched.rule.tags
+    );
   }
 
   if (from.includes('noreply') || from.includes('no-reply') || from.includes('notification')) {
@@ -155,6 +203,9 @@ export function emailCategoryLabel(category: string) {
     PAYMENT_FINANCE: '付款财务',
     LOGISTICS: '物流',
     TECH_SUPPORT: '技术售后',
+    CUSTOMS_COMPLIANCE: '海关合规',
+    MEETING_FOLLOWUP: '会议跟进',
+    SUPPLIER_PURCHASE: '供应采购',
     PLATFORM_ALERT: '平台通知',
     AUTH_SECURITY: '安全验证码',
     MARKETING_NEWSLETTER: '营销新闻',
@@ -190,4 +241,47 @@ function extractDomain(from: string) {
 
 function hasProductSignal(text: string) {
   return ['lrf', 'laser', 'rangefinder', '1535nm', '905nm', '1064nm', 'erbium', '测距', '激光'].some((k) => text.includes(k));
+}
+
+function includesKeyword(text: string, keyword: string) {
+  const needle = keyword.toLowerCase().replace(/\s+/g, ' ');
+  if (needle.trim() !== needle) return text.includes(needle.trim());
+  return text.includes(needle);
+}
+
+function hasSeoSpamSignal(text: string) {
+  return ['backlink', 'guest post', 'domain authority', 'high da', 'high dr', 'dofollow', 'seo service', 'rank higher', 'increase traffic'].some((k) =>
+    text.includes(k)
+  );
+}
+
+function hasMarketingSignal(text: string) {
+  return ['unsubscribe', 'newsletter', 'webinar', 'register now', 'free trial', 'promotion', 'limited time', 'click here'].some((k) => text.includes(k));
+}
+
+function hasDirectBusinessIntent(text: string) {
+  return ['please quote', 'quotation', 'rfq', 'purchase order', 'proforma invoice', 'we need', 'we require', 'send price', 'technical datasheet'].some((k) =>
+    text.includes(k)
+  );
+}
+
+function categoryPriority(category: EmailCategory) {
+  const priority: Record<EmailCategory, number> = {
+    ORDER_PO: 100,
+    QUOTE_PI: 95,
+    INQUIRY: 90,
+    TECH_SUPPORT: 80,
+    CUSTOMS_COMPLIANCE: 78,
+    PAYMENT_FINANCE: 75,
+    LOGISTICS: 72,
+    MEETING_FOLLOWUP: 68,
+    SUPPLIER_PURCHASE: 64,
+    AUTH_SECURITY: 62,
+    PLATFORM_ALERT: 30,
+    SEO_SPAM: 20,
+    MARKETING_NEWSLETTER: 15,
+    INTERNAL: 10,
+    OTHER: 0,
+  };
+  return priority[category] || 0;
 }

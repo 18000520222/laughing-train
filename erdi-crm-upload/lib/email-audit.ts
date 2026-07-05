@@ -1,9 +1,21 @@
 import { prisma } from '@/lib/prisma';
 import { classifyEmail, emailCategoryLabel } from '@/lib/email-classifier';
+import { buildGmailLabelReadiness, labelPlanWithLabels } from '@/lib/email-label-plan';
 
 const LOW_CONFIDENCE_SCORE = 50;
 const REVIEW_CATEGORIES = ['UNCLASSIFIED', 'OTHER'];
-const TASK_CATEGORIES = ['INQUIRY', 'QUOTE_PI', 'ORDER_PO', 'PAYMENT_FINANCE', 'LOGISTICS', 'TECH_SUPPORT', 'AUTH_SECURITY'];
+const TASK_CATEGORIES = [
+  'INQUIRY',
+  'QUOTE_PI',
+  'ORDER_PO',
+  'PAYMENT_FINANCE',
+  'LOGISTICS',
+  'TECH_SUPPORT',
+  'CUSTOMS_COMPLIANCE',
+  'MEETING_FOLLOWUP',
+  'SUPPLIER_PURCHASE',
+  'AUTH_SECURITY',
+];
 const NOISE_CATEGORIES = ['SEO_SPAM', 'MARKETING_NEWSLETTER', 'PLATFORM_ALERT', 'INTERNAL', 'OTHER'];
 
 export async function buildEmailClassificationAudit({ sampleLimit = 10 }: { sampleLimit?: number } = {}) {
@@ -89,6 +101,7 @@ export async function buildEmailClassificationAudit({ sampleLimit = 10 }: { samp
     share: total > 0 ? row._count._all / total : 0,
   }));
   const leadDomains = topDomains(leadDomainRows.map((row) => row.from));
+  const activeAccountCount = accountRows.filter((account) => account.isActive).length;
 
   return {
     total,
@@ -115,6 +128,8 @@ export async function buildEmailClassificationAudit({ sampleLimit = 10 }: { samp
       updatedAtLabel: account.updatedAt.toLocaleDateString('zh-CN'),
     })),
     leadDomains,
+    gmailReadiness: buildGmailLabelReadiness({ activeAccountCount, totalMessages: total }),
+    gmailLabelPlan: labelPlanWithLabels(),
     recommendation: emailAuditRecommendation({ total, unclassified, lowConfidence, actionRequired, staleUnclassified }),
   };
 }

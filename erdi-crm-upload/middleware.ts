@@ -22,6 +22,7 @@ const PUBLIC_PREFIXES = [
   '/api/automation/runs/replay', // 自动化运行重放(自带 ?key= / Bearer 校验)
   '/api/automation/runs/bulk-replay', // 自动化失败运行批量恢复(自带 ?key= / Bearer 校验)
   '/api/emails/classify', // 邮件历史分类回填(自带 ?key= / Bearer 校验)
+  '/api/emails/label-plan', // Gmail/邮件标签映射只读计划(自带 ?key= / Bearer 校验)
   '/api/tasks/calendar', // ICS 日历订阅(自带签名 token / session 校验)
 ];
 
