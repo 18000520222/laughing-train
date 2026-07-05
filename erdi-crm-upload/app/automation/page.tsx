@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { prisma } from '@/lib/prisma';
 import { createAutomationBlueprintPack } from '@/lib/automation-blueprint';
+import { buildAutomationFunnelInsights } from '@/lib/automation-insights';
 import { bulkReplayFailedAutomationRuns, listFailedAutomationReplayQueue, replayAutomationRun } from '@/lib/automation-runner';
 import {
   AUTOMATION_BLUEPRINT_GROUPS,
@@ -372,6 +373,7 @@ export default async function AutomationPage(props: any) {
   const totalContacts = flows.reduce((sum, flow) => sum + flow.uniqueContactCount, 0);
   const governance = buildAutomationGovernance(governanceFlows);
   const blueprint = buildAutomationBlueprint(governanceFlows);
+  const funnel = buildAutomationFunnelInsights(governanceFlows);
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 md:p-8">
@@ -499,6 +501,64 @@ export default async function AutomationPage(props: any) {
             </tbody>
           </table>
           {governance.riskRows.length === 0 && <div className="p-8 text-center text-sm font-bold text-gray-400">当前没有明显自动化治理风险。</div>}
+        </div>
+      </section>
+
+      <section className="mb-6 rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">自动化渠道/动作漏斗</h2>
+            <p className="mt-1 text-xs text-gray-500">按 SaleSmartly 的渠道维度、HubSpot 分支逻辑和 Pipedrive trigger-action 模型,复盘流程从运行、命中到动作执行的质量。</p>
+          </div>
+          <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">最近 20 条/流程样本</span>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <GovernanceMetric label="样本运行" value={funnel.runCount} detail={`${funnel.flowCount} 个流程`} tone="blue" />
+          <GovernanceMetric label="命中运行" value={funnel.matchedRuns} detail={`命中率 ${formatAutomationPercent(funnel.matchRate)}`} tone={(funnel.matchRate || 0) >= 0.5 ? 'emerald' : 'amber'} />
+          <GovernanceMetric label="动作执行" value={funnel.actionRuns} detail={`执行率 ${formatAutomationPercent(funnel.actionRate)}`} tone={(funnel.actionRate || 0) >= 0.25 ? 'emerald' : 'amber'} />
+          <GovernanceMetric label="失败" value={funnel.failedRuns} detail={`失败率 ${formatAutomationPercent(funnel.failureRate)}`} tone={funnel.failedRuns > 0 ? 'rose' : 'emerald'} />
+          <GovernanceMetric label="跳过" value={funnel.skippedRuns} detail="条件未命中" tone={funnel.skippedRuns > 0 ? 'amber' : 'emerald'} />
+          <GovernanceMetric label="风险流程" value={funnel.riskFlows.length} detail="需运营复核" tone={funnel.riskFlows.length > 0 ? 'rose' : 'emerald'} />
+        </div>
+        <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{funnel.recommendation}</div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-3">
+          <AutomationFunnelPanel title="按渠道" rows={funnel.byChannel} max={funnel.maxChannelRuns} />
+          <AutomationFunnelPanel title="按动作" rows={funnel.byAction} max={funnel.maxActionRuns} />
+          <AutomationFunnelPanel title="按条件" rows={funnel.byCondition} max={funnel.maxConditionRuns} />
+        </div>
+        <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-gray-50 text-xs font-black text-gray-500">
+              <tr>
+                <th className="p-3">风险流程</th>
+                <th className="p-3">渠道/动作</th>
+                <th className="p-3">运行</th>
+                <th className="p-3">命中/执行</th>
+                <th className="p-3">风险</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {funnel.riskFlows.map((row) => (
+                <tr key={row.id} className="hover:bg-gray-50">
+                  <td className="p-3">
+                    <Link href={`/automation?flow=${row.id}`} className="font-black text-gray-900 hover:text-indigo-700">{row.name}</Link>
+                    <div className="mt-0.5 text-[11px] font-mono text-gray-400">{row.flowCode} · {row.category}</div>
+                  </td>
+                  <td className="p-3">
+                    <div className="text-xs font-black text-gray-700">{row.channelLabel}</div>
+                    <div className="mt-0.5 text-[11px] font-bold text-gray-400">{row.actionType}</div>
+                  </td>
+                  <td className="p-3 font-bold text-gray-700">{row.runs}</td>
+                  <td className="p-3 text-xs font-bold text-gray-600">{formatAutomationPercent(row.matchRate)} / {formatAutomationPercent(row.actionRate)}</td>
+                  <td className="p-3">
+                    <div className="text-xs font-black text-rose-600">{row.reason}</div>
+                    <div className="mt-0.5 text-[11px] font-bold text-gray-400">{row.lastRunAtLabel}</div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {funnel.riskFlows.length === 0 && <div className="p-8 text-center text-sm font-bold text-gray-400">暂无自动化漏斗风险。</div>}
         </div>
       </section>
 
@@ -1126,6 +1186,33 @@ function AutomationBar({ label, value, max, detail }: { label: string; value: nu
         <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${width}%` }} />
       </div>
       <div className="mt-1 text-[11px] font-bold text-gray-400">{detail}</div>
+    </div>
+  );
+}
+
+function AutomationFunnelPanel({ title, rows, max }: { title: string; rows: any[]; max: number }) {
+  return (
+    <div className="rounded-xl border border-gray-100 p-4">
+      <h3 className="text-xs font-black text-gray-500">{title}</h3>
+      <div className="mt-3 space-y-3">
+        {rows.slice(0, 8).map((row) => (
+          <div key={row.key}>
+            <div className="mb-1 flex items-center justify-between gap-3">
+              <div className="min-w-0 truncate text-xs font-black text-gray-700">{row.label}</div>
+              <div className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${row.healthScore >= 80 ? 'bg-emerald-50 text-emerald-700' : row.healthScore >= 55 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>
+                {row.healthScore}
+              </div>
+            </div>
+            <div className="h-2 rounded-full bg-gray-100">
+              <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${Math.max(3, Math.round((row.runs / Math.max(1, max)) * 100))}%` }} />
+            </div>
+            <div className="mt-1 text-[11px] font-bold text-gray-400">
+              {row.activeFlows}/{row.flowCount} 开启 · 运行 {row.runs} · 命中 {formatAutomationPercent(row.matchRate)} · 执行 {formatAutomationPercent(row.actionRate)}
+            </div>
+          </div>
+        ))}
+        {rows.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无漏斗数据。</div>}
+      </div>
     </div>
   );
 }
