@@ -237,6 +237,12 @@ export default async function SalesCommandPage({
     cleared: firstParam(searchParams.cleared),
     skipped: firstParam(searchParams.skipped),
   };
+  const nextBulkResult = {
+    bulk: firstParam(searchParams.nextBulk),
+    created: firstParam(searchParams.created),
+    updated: firstParam(searchParams.updated),
+    skipped: firstParam(searchParams.skipped),
+  };
 
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -256,6 +262,8 @@ export default async function SalesCommandPage({
     needsNextAction,
     staleCustomers,
     topQueue,
+    nextActionQueue,
+    staleActionQueue,
     staleOpportunities,
     lostReasonRows,
     openTaskCount,
@@ -279,6 +287,38 @@ export default async function SalesCommandPage({
       include: {
         owner: true,
         contacts: { take: 1 },
+        inboxMessages: { orderBy: { createdAt: 'desc' }, take: 6 },
+        followUps: { orderBy: { createdAt: 'desc' }, take: 3 },
+        opportunities: { orderBy: { updatedAt: 'desc' }, take: 5 },
+        _count: { select: { inboxMessages: true, opportunities: true } },
+      },
+    }),
+    prisma.company.findMany({
+      where: {
+        type: { in: ['INQUIRY', 'QUOTED', 'CONTRACT_SENT', 'PROSPECT', 'NEW'] as any },
+        OR: [{ nextAction: null }, { nextAction: '' }],
+      },
+      orderBy: [{ priorityScore: 'desc' }, { updatedAt: 'asc' }],
+      take: 20,
+      include: {
+        owner: true,
+        contacts: { take: 2, orderBy: { createdAt: 'asc' } },
+        inboxMessages: { orderBy: { createdAt: 'desc' }, take: 6 },
+        followUps: { orderBy: { createdAt: 'desc' }, take: 3 },
+        opportunities: { orderBy: { updatedAt: 'desc' }, take: 5 },
+        _count: { select: { inboxMessages: true, opportunities: true } },
+      },
+    }),
+    prisma.company.findMany({
+      where: {
+        type: { in: ['INQUIRY', 'QUOTED', 'CONTRACT_SENT', 'PROSPECT', 'NEW'] as any },
+        updatedAt: { lt: sevenDaysAgo },
+      },
+      orderBy: [{ updatedAt: 'asc' }, { priorityScore: 'desc' }],
+      take: 20,
+      include: {
+        owner: true,
+        contacts: { take: 2, orderBy: { createdAt: 'asc' } },
         inboxMessages: { orderBy: { createdAt: 'desc' }, take: 6 },
         followUps: { orderBy: { createdAt: 'desc' }, take: 3 },
         opportunities: { orderBy: { updatedAt: 'desc' }, take: 5 },
@@ -317,6 +357,13 @@ export default async function SalesCommandPage({
     .map((company) => ({ company, radar: buildSalesRadar(company) }))
     .sort((a, b) => b.radar.score - a.radar.score)
     .slice(0, 6);
+  const nextActionRows = nextActionQueue
+    .map((company) => ({ company, radar: buildSalesRadar(company) }))
+    .sort((a, b) => b.radar.score - a.radar.score || b.company.priorityScore - a.company.priorityScore);
+  const staleActionRows = staleActionQueue
+    .map((company) => ({ company, radar: buildSalesRadar(company) }))
+    .sort((a, b) => (b.radar.level === 'risk' ? 1 : 0) - (a.radar.level === 'risk' ? 1 : 0) || b.radar.score - a.radar.score);
+  const radarActionRows = salesRadarItems.filter(({ radar }) => radar.level === 'hot' || radar.level === 'risk' || radar.metrics.awaitingReply);
   const actionAttribution = await buildSalesActionAttributionReport({ since: thirtyDaysAgo, until: new Date() });
   const stageVelocity = await buildOpportunityStageVelocityReport({ since: thirtyDaysAgo, until: new Date() });
   const emailAudit = await buildEmailClassificationAudit({ sampleLimit: 8 });
@@ -354,6 +401,51 @@ export default async function SalesCommandPage({
         <Metric label="销售待办任务" value={openTaskCount} tone="blue" />
         <Metric label="已逾期任务" value={overdueTaskCount} tone="rose" />
         <Metric label="24小时内到期" value={todayTaskCount} tone="amber" />
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">下一步动作编排台</h2>
+            <p className="mt-1 text-xs text-gray-400">按 Pipedrive Next activity、HubSpot Sales Workspace、Salesforce/Zoho Activities 的思路,把缺下一步和沉睡客户批量变成有负责人、有截止时间的销售任务。</p>
+          </div>
+          <Link href="/tasks?view=week" className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-black text-white hover:bg-gray-800">查看任务队列</Link>
+        </div>
+        {nextBulkResult.bulk && <NextActionBulkResultBanner result={nextBulkResult} />}
+        <div className="grid gap-3 md:grid-cols-3">
+          <NextActionCard
+            title="补下一步动作"
+            count={nextActionRows.length}
+            detail="无 nextAction 的客户,批量写入建议动作并生成跟进任务。"
+            action="next_action"
+            buttonLabel="生成下一步任务"
+            ids={nextActionRows.map(({ company }) => company.id)}
+            tone="amber"
+          />
+          <NextActionCard
+            title="激活沉睡客户"
+            count={staleActionRows.length}
+            detail="7 天未动的询盘/报价/合同客户,批量生成唤醒任务。"
+            action="stale_reactivate"
+            buttonLabel="生成激活任务"
+            ids={staleActionRows.map(({ company }) => company.id)}
+            tone="violet"
+          />
+          <NextActionCard
+            title="雷达高风险"
+            count={radarActionRows.length}
+            detail="高意向、风险预警或客户等待回复的客户,优先生成任务。"
+            action="next_action"
+            buttonLabel="处理雷达风险"
+            ids={radarActionRows.map(({ company }) => company.id)}
+            tone="rose"
+          />
+        </div>
+        <div className="mt-4 grid gap-3 xl:grid-cols-3">
+          <NextActionPreview title="缺下一步预览" rows={nextActionRows} empty="暂无缺下一步客户。" />
+          <NextActionPreview title="沉睡客户预览" rows={staleActionRows} empty="暂无沉睡客户。" />
+          <NextActionPreview title="雷达风险预览" rows={radarActionRows} empty="暂无高风险雷达客户。" />
+        </div>
       </section>
 
       <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
@@ -950,6 +1042,103 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: st
     <div className={`rounded-xl border border-gray-100 border-l-4 bg-white p-4 shadow-sm ${color[tone]}`}>
       <div className="text-xs font-bold text-gray-500">{label}</div>
       <div className="mt-1 text-2xl font-black">{value}</div>
+    </div>
+  );
+}
+
+function NextActionBulkResultBanner({
+  result,
+}: {
+  result: { bulk?: string; created?: string; updated?: string; skipped?: string };
+}) {
+  const label: Record<string, string> = {
+    planned: '下一步任务已生成',
+    reactivated: '沉睡激活任务已生成',
+    empty: '没有选中可处理客户',
+  };
+  return (
+    <div className="mb-4 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
+      {label[result.bulk || ''] || '下一步批量动作已执行'}
+      <span className="ml-2">生成 {result.created || '0'}</span>
+      <span className="ml-2">更新 {result.updated || '0'}</span>
+      {result.skipped ? <span className="ml-2 text-emerald-600">跳过 {result.skipped}</span> : null}
+    </div>
+  );
+}
+
+function NextActionCard({
+  title,
+  count,
+  detail,
+  action,
+  buttonLabel,
+  ids,
+  tone,
+}: {
+  title: string;
+  count: number;
+  detail: string;
+  action: string;
+  buttonLabel: string;
+  ids: string[];
+  tone: 'amber' | 'violet' | 'rose';
+}) {
+  const color: Record<string, string> = {
+    amber: 'border-amber-100 bg-amber-50 text-amber-900',
+    violet: 'border-violet-100 bg-violet-50 text-violet-900',
+    rose: 'border-rose-100 bg-rose-50 text-rose-900',
+  };
+  const buttonColor: Record<string, string> = {
+    amber: 'bg-amber-600 hover:bg-amber-700',
+    violet: 'bg-violet-600 hover:bg-violet-700',
+    rose: 'bg-rose-600 hover:bg-rose-700',
+  };
+  return (
+    <div className={`rounded-xl border p-4 ${color[tone]}`}>
+      <div className="text-xs font-black opacity-75">{title}</div>
+      <div className="mt-2 text-2xl font-black">{count}</div>
+      <div className="mt-2 min-h-[34px] text-xs font-bold opacity-75">{detail}</div>
+      <form action="/api/sales-command/next-actions" method="post" className="mt-4">
+        <input type="hidden" name="action" value={action} />
+        <input type="hidden" name="ids" value={ids.join(',')} />
+        <button
+          type="submit"
+          disabled={ids.length === 0}
+          className={`w-full rounded-lg px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:bg-gray-300 ${buttonColor[tone]}`}
+        >
+          {buttonLabel}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function NextActionPreview({
+  title,
+  rows,
+  empty,
+}: {
+  title: string;
+  rows: Array<{ company: any; radar: ReturnType<typeof buildSalesRadar> }>;
+  empty: string;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+      <div className="text-xs font-black text-gray-500">{title}</div>
+      <div className="mt-3 space-y-2">
+        {rows.slice(0, 5).map(({ company, radar }) => (
+          <div key={company.id} className="rounded-lg bg-white px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <Link href={`/customers/${company.id}`} className="min-w-0 truncate text-xs font-black text-indigo-700 hover:underline">{company.name}</Link>
+              <span className="shrink-0 rounded-full bg-gray-50 px-2 py-0.5 text-[11px] font-black text-gray-600">{radar.score}</span>
+            </div>
+            <div className="mt-1 truncate text-[11px] font-bold text-gray-500">{company.owner?.name || company.owner?.email || '未分配'} · {radar.levelLabel} · {company.nextAction || '缺下一步'}</div>
+            <div className="mt-1 truncate text-[11px] font-medium text-gray-400">{radar.recommendedAction}</div>
+          </div>
+        ))}
+        {rows.length > 5 && <div className="text-[11px] font-bold text-gray-400">另有 {rows.length - 5} 个客户已纳入本次批量队列。</div>}
+        {rows.length === 0 && <div className="rounded-lg bg-white p-3 text-xs font-bold text-gray-400">{empty}</div>}
+      </div>
     </div>
   );
 }

@@ -1,0 +1,194 @@
+import { cookies } from 'next/headers';
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { buildSalesRadar } from '@/lib/sales-radar';
+
+export const dynamic = 'force-dynamic';
+
+const ALLOWED_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SALES']);
+const ACTIVE_CUSTOMER_TYPES = ['INQUIRY', 'QUOTED', 'CONTRACT_SENT', 'PROSPECT', 'NEW'];
+
+export async function POST(req: Request) {
+  const auth = await requireSalesUser();
+  if (!auth) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+
+  const form = await req.formData();
+  const action = String(form.get('action') || 'next_action');
+  const ids = parseIds(form.get('ids'));
+  if (ids.length === 0) return redirectBack(req, 'empty', 0);
+
+  const result = await createNextActionTasks(ids, auth.user.id, action);
+  return redirectBack(req, action === 'stale_reactivate' ? 'reactivated' : 'planned', result.created, result.updated, result.skipped);
+}
+
+async function requireSalesUser() {
+  const cookieStore = cookies();
+  const role = (cookieStore.get('auth_role')?.value || '').toUpperCase();
+  const email = cookieStore.get('auth_email')?.value || '';
+  const userId = cookieStore.get('auth_userId')?.value || '';
+  if (!ALLOWED_ROLES.has(role)) return null;
+
+  const user = userId
+    ? await prisma.user.findUnique({ where: { id: userId } })
+    : email
+    ? await prisma.user.findUnique({ where: { email } })
+    : null;
+  if (!user || !user.isActive) return null;
+  return { user, role };
+}
+
+async function createNextActionTasks(ids: string[], currentUserId: string, action: string) {
+  const companies = await prisma.company.findMany({
+    where: { id: { in: ids }, type: { in: ACTIVE_CUSTOMER_TYPES as any } },
+    include: {
+      owner: true,
+      contacts: { take: 2, orderBy: { createdAt: 'asc' } },
+      inboxMessages: { orderBy: { createdAt: 'desc' }, take: 6 },
+      followUps: { orderBy: { createdAt: 'desc' }, take: 3 },
+      opportunities: { orderBy: { updatedAt: 'desc' }, take: 5 },
+      _count: { select: { inboxMessages: true, opportunities: true } },
+    },
+    orderBy: [{ priorityScore: 'desc' }, { updatedAt: 'asc' }],
+  });
+
+  let created = 0;
+  let updated = 0;
+  let skipped = ids.length - companies.length;
+  for (const company of companies) {
+    const radar = buildSalesRadar(company);
+    const sourceRef = `${action}:${company.id}`;
+    const existing = await prisma.salesTask.findFirst({
+      where: { source: 'NEXT_ACTION_BULK', sourceRef, status: 'TODO' },
+      select: { id: true },
+    });
+    if (existing) {
+      skipped++;
+      continue;
+    }
+
+    const ownerId = company.ownerId || currentUserId;
+    if (!company.ownerId) {
+      await prisma.company.update({ where: { id: company.id }, data: { ownerId } });
+      updated++;
+    }
+
+    const recommendedAction = buildRecommendedNextAction(company, radar, action);
+    if (!String(company.nextAction || '').trim()) {
+      await prisma.company.update({
+        where: { id: company.id },
+        data: { nextAction: recommendedAction },
+      });
+      updated++;
+    }
+
+    const dueAt = new Date();
+    dueAt.setHours(dueAt.getHours() + dueHoursFor(company, radar, action));
+    await prisma.salesTask.create({
+      data: {
+        title: taskTitle(company.name, action, radar.title),
+        description: taskDescription(company, radar, recommendedAction),
+        type: radar.metrics.awaitingReply ? 'EMAIL' : action === 'stale_reactivate' ? 'RISK_RESCUE' : 'FOLLOW_UP',
+        priority: radar.level === 'hot' || radar.level === 'risk' ? 'HIGH' : 'NORMAL',
+        dueAt,
+        ownerId,
+        createdById: currentUserId,
+        companyId: company.id,
+        source: 'NEXT_ACTION_BULK',
+        sourceRef,
+      },
+    });
+    await prisma.notification.create({
+      data: {
+        userId: ownerId,
+        type: 'SYSTEM',
+        title: action === 'stale_reactivate' ? '已生成沉睡客户激活任务' : '已生成客户下一步任务',
+        body: `${company.name}: ${recommendedAction}`,
+        link: '/tasks?view=week',
+      },
+    });
+    created++;
+  }
+
+  return { created, updated, skipped };
+}
+
+function parseIds(value: FormDataEntryValue | null) {
+  return Array.from(
+    new Set(
+      String(value || '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean)
+    )
+  ).slice(0, 100);
+}
+
+function redirectBack(req: Request, bulk: string, created: number, updated = 0, skipped = 0) {
+  const url = new URL('/sales-command', req.url);
+  url.searchParams.set('nextBulk', bulk);
+  url.searchParams.set('created', String(created));
+  url.searchParams.set('updated', String(updated));
+  if (skipped > 0) url.searchParams.set('skipped', String(skipped));
+  return NextResponse.redirect(url, { status: 303 });
+}
+
+function buildRecommendedNextAction(
+  company: {
+    nextAction: string | null;
+    contacts: Array<{ email: string | null; phone: string | null }>;
+  },
+  radar: ReturnType<typeof buildSalesRadar>,
+  action: string
+) {
+  if (String(company.nextAction || '').trim()) return String(company.nextAction);
+  if (action === 'stale_reactivate') {
+    return '发送唤醒邮件或 WhatsApp,带最新产品/案例/交付能力,确认项目是否继续推进。';
+  }
+  if (radar.metrics.awaitingReply) return radar.recommendedAction;
+  const contact = company.contacts.find((item) => item.email || item.phone);
+  if (contact?.email) return `给 ${contact.email} 发送跟进邮件,确认需求、预算、交期和下一步资料。`;
+  if (contact?.phone) return `通过电话/WhatsApp 联系 ${contact.phone},确认需求、预算、交期和下一步资料。`;
+  return radar.recommendedAction;
+}
+
+function dueHoursFor(
+  company: { priorityScore: number | null },
+  radar: ReturnType<typeof buildSalesRadar>,
+  action: string
+) {
+  if (radar.metrics.awaitingReply || radar.level === 'hot' || radar.level === 'risk') return 24;
+  if (action === 'stale_reactivate') return 72;
+  if ((company.priorityScore || 0) >= 60) return 48;
+  return 96;
+}
+
+function taskTitle(companyName: string, action: string, radarTitle: string) {
+  if (action === 'stale_reactivate') return `激活沉睡客户: ${companyName}`;
+  return `补齐下一步动作: ${companyName} (${radarTitle})`;
+}
+
+function taskDescription(
+  company: {
+    name: string;
+    type: string;
+    source: string;
+    priorityScore: number | null;
+    owner: { name: string | null; email: string } | null;
+    contacts: Array<{ email: string | null; phone: string | null }>;
+  },
+  radar: ReturnType<typeof buildSalesRadar>,
+  nextAction: string
+) {
+  return [
+    `客户: ${company.name}`,
+    `类型/来源: ${company.type} / ${company.source}`,
+    `负责人: ${company.owner?.name || company.owner?.email || '当前执行人'}`,
+    `优先级分: ${company.priorityScore || 0}`,
+    `联系人: ${company.contacts.map((item) => item.email || item.phone).filter(Boolean).join(', ') || '-'}`,
+    `雷达: ${radar.levelLabel} · ${radar.score} · ${radar.title}`,
+    `建议动作: ${nextAction}`,
+    '',
+    '原因:',
+    ...radar.reasons.map((reason) => `- ${reason}`),
+  ].join('\n');
+}
