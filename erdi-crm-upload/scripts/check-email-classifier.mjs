@@ -116,6 +116,24 @@ const cases = [
     },
   },
   {
+    name: 'daily digest is not logistics',
+    expected: 'MARKETING_NEWSLETTER',
+    input: {
+      from: '"Medium Daily Digest" <noreply@medium.com>',
+      subject: 'The Beautiful Abstract Structures Known as Finite Groups | Keith McNulty',
+      textBody: 'Medium Daily Digest. Delivery to your inbox.',
+    },
+  },
+  {
+    name: 'mail delivery failure is platform alert',
+    expected: 'PLATFORM_ALERT',
+    input: {
+      from: '"Mail Delivery Subsystem" <mailer-daemon@googlemail.com>',
+      subject: 'Delivery Status Notification (Failure)',
+      textBody: 'Your message was undeliverable.',
+    },
+  },
+  {
     name: 'refund down payment',
     expected: 'PAYMENT_FINANCE',
     input: {

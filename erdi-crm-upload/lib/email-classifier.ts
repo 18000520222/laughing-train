@@ -156,6 +156,14 @@ export function classifyEmail(input: { from?: string | null; subject?: string | 
     return result('MARKETING_NEWSLETTER', 'sender-loyalty-marketing', 20, false, false, ['营销新闻']);
   }
 
+  if (hasDigestNewsletterSignal(text)) {
+    return result('MARKETING_NEWSLETTER', 'digest-newsletter', 20, false, false, ['营销新闻']);
+  }
+
+  if (hasMailDeliveryFailureSignal(text)) {
+    return result('PLATFORM_ALERT', 'mail-delivery-failure', 35, false, false, ['平台通知']);
+  }
+
   if (hasTravelBookingSignal(text) && !hasProductSignal(text)) {
     return result('PLATFORM_ALERT', 'travel-booking-notice', 35, false, false, ['平台通知']);
   }
@@ -274,6 +282,14 @@ function hasSeoSpamSignal(text: string) {
 
 function hasMarketingSignal(text: string) {
   return ['unsubscribe', 'newsletter', 'webinar', 'register now', 'free trial', 'promotion', 'limited time', 'click here', 'points', 'rewards', 'member benefits'].some((k) => text.includes(k));
+}
+
+function hasDigestNewsletterSignal(text: string) {
+  return ['daily digest', 'weekly digest', 'medium daily digest'].some((k) => text.includes(k));
+}
+
+function hasMailDeliveryFailureSignal(text: string) {
+  return ['mail delivery subsystem', 'mailer-daemon', 'delivery status notification (failure)', 'undeliverable'].some((k) => text.includes(k));
 }
 
 function hasTravelBookingSignal(text: string) {
