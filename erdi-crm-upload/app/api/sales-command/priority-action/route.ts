@@ -13,12 +13,26 @@ export async function POST(req: Request) {
   if (!auth) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
   const form = await req.formData();
-  const itemId = String(form.get('itemId') || '');
-  const [kind, targetId] = splitItemId(itemId);
-  if (!kind || !targetId) return redirectBack(req, 'invalid', 0, 0, 1);
+  const itemIds = parsePriorityItemIds(form);
+  if (itemIds.length === 0) return redirectBack(req, 'invalid', 0, 0, 1);
 
-  const result = await handlePriorityItem({ kind, targetId, itemId, currentUserId: auth.user.id, role: auth.role });
-  return redirectBack(req, result.status, result.created, result.notified, result.skipped);
+  let created = 0;
+  let notified = 0;
+  let skipped = 0;
+  let lastStatus = 'invalid';
+  for (const itemId of itemIds) {
+    const [kind, targetId] = splitItemId(itemId);
+    if (!kind || !targetId) {
+      skipped++;
+      continue;
+    }
+    const result = await handlePriorityItem({ kind, targetId, itemId, currentUserId: auth.user.id, role: auth.role });
+    created += result.created;
+    notified += result.notified;
+    skipped += result.skipped;
+    lastStatus = result.status;
+  }
+  return redirectBack(req, itemIds.length > 1 ? 'bulk' : lastStatus, created, notified, skipped);
 }
 
 async function requireSalesUser() {
@@ -200,6 +214,22 @@ function splitItemId(value: string) {
   const index = value.indexOf(':');
   if (index === -1) return ['', ''] as const;
   return [value.slice(0, index), value.slice(index + 1)] as const;
+}
+
+function parsePriorityItemIds(form: FormData) {
+  const values = [
+    String(form.get('itemId') || ''),
+    String(form.get('itemIds') || ''),
+    ...form.getAll('itemIds').map((value) => String(value || '')),
+  ];
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => value.split(','))
+        .map((value) => value.trim())
+        .filter(Boolean)
+    )
+  ).slice(0, 20);
 }
 
 function redirectBack(req: Request, status: string, created: number, notified: number, skipped: number) {

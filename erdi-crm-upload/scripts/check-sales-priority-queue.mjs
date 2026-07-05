@@ -117,9 +117,14 @@ if (!pageSource.includes('buildSalesPriorityQueue')) failures.push('sales comman
 if (!pageSource.includes('buildAutomationFunnelInsights')) failures.push('automation risk feed not wired into sales command');
 if (!pageSource.includes('priorityQueue')) failures.push('priority queue variable missing from sales command');
 if (!pageSource.includes('/api/sales-command/priority-action')) failures.push('daily priority action form missing');
+if (!pageSource.includes('批量处理前5') || !pageSource.includes('批量处理高危')) failures.push('daily priority bulk action buttons missing');
+if (!pageSource.includes('name="itemIds"')) failures.push('daily priority bulk itemIds input missing');
 if (!pageSource.includes('priorityActionLabel')) failures.push('priority action labels missing');
 if (!pageSource.includes('PriorityActionResultBanner')) failures.push('priority action result banner missing');
+if (!pageSource.includes('作战清单批量动作已执行')) failures.push('daily priority bulk result label missing');
 if (!actionRouteSource.includes('export async function POST')) failures.push('priority action POST route missing');
+if (!actionRouteSource.includes('parsePriorityItemIds')) failures.push('priority action batch parser missing');
+if (!actionRouteSource.includes("form.get('itemIds')") && !actionRouteSource.includes("form.getAll('itemIds')")) failures.push('priority action itemIds support missing');
 if (!actionRouteSource.includes('source: SOURCE') || !actionRouteSource.includes("const SOURCE = 'DAILY_PRIORITY'")) failures.push('daily priority task source missing');
 if (!actionRouteSource.includes('createMessageTask') || !actionRouteSource.includes('createOpportunityTask') || !actionRouteSource.includes('notifyAutomationRisk')) failures.push('priority action handlers missing');
 if (!actionRouteSource.includes('priority:${itemId}')) failures.push('priority idempotency sourceRef missing');

@@ -1514,6 +1514,8 @@ function DailyPriorityPanel({
   queue: ReturnType<typeof buildSalesPriorityQueue>;
   result: { status?: string; created?: string; notified?: string; skipped?: string };
 }) {
+  const topItemIds = queue.items.slice(0, 5).map((item) => item.id);
+  const urgentItemIds = queue.items.filter((item) => item.score >= 90).map((item) => item.id);
   return (
     <section id="daily-priority" className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -1526,6 +1528,26 @@ function DailyPriorityPanel({
           <span className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-700">影响 ${Math.round(queue.revenueAtRisk).toLocaleString()}</span>
           <span className="rounded-lg bg-slate-100 px-3 py-2 text-slate-700">候选 {queue.totalCandidates}</span>
         </div>
+      </div>
+      <div className="mb-4 flex flex-wrap gap-2">
+        <form action="/api/sales-command/priority-action" method="post">
+          <input type="hidden" name="itemIds" value={topItemIds.join(',')} />
+          <button
+            disabled={topItemIds.length === 0}
+            className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-black text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
+          >
+            批量处理前5
+          </button>
+        </form>
+        <form action="/api/sales-command/priority-action" method="post">
+          <input type="hidden" name="itemIds" value={urgentItemIds.join(',')} />
+          <button
+            disabled={urgentItemIds.length === 0}
+            className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:border-gray-100 disabled:bg-gray-100 disabled:text-gray-400"
+          >
+            批量处理高危
+          </button>
+        </form>
       </div>
       <div className="mb-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{queue.recommendation}</div>
       <div className="mb-4 flex flex-wrap gap-2">
@@ -1611,6 +1633,7 @@ function PriorityActionResultBanner({
     task: '作战清单任务已生成',
     notify: '作战清单提醒已发送',
     exists: '作战清单任务已存在,已提醒负责人',
+    bulk: '作战清单批量动作已执行',
     missing: '事项已不存在或已被清理',
     forbidden: '当前账号无权处理该事项',
     invalid: '事项参数无效',
