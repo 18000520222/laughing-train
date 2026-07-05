@@ -247,7 +247,7 @@ function preserveEmailActionState(
   },
   classification: ReturnType<typeof classifyEmail>
 ) {
-  const processedTags = (msg.classificationTags || []).filter((tag) => tag === '已转任务' || tag === '已清理');
+  const processedTags = (msg.classificationTags || []).filter((tag) => tag === '已转任务' || tag === '已清理' || tag === '安全已归档');
   if (processedTags.length === 0) return classification;
   return {
     ...classification,
