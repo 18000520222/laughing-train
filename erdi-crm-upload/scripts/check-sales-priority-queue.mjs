@@ -24,7 +24,7 @@ const sandbox = {
   require,
 };
 vm.runInNewContext(compiled.outputText, sandbox, { filename: sourcePath });
-const { buildSalesOwnerPriorityReport, buildSalesPriorityQueue } = sandbox.module.exports;
+const { buildSalesMorningBriefing, buildSalesOwnerPriorityReport, buildSalesPriorityQueue } = sandbox.module.exports;
 
 const now = new Date('2026-07-04T12:00:00Z');
 const queue = buildSalesPriorityQueue({
@@ -105,6 +105,7 @@ const queue = buildSalesPriorityQueue({
   healthTasks: [],
 });
 const ownerReport = buildSalesOwnerPriorityReport(queue.items);
+const morningBriefing = buildSalesMorningBriefing(queue.items, ownerReport.rows);
 
 const failures = [];
 if (!Array.isArray(queue.items) || queue.items.length < 5) failures.push('priority queue should include cross-module items');
@@ -119,7 +120,15 @@ if (!ownerReport.rows.some((row) => row.ownerName === 'Sales C' && row.impactUSD
 if (!ownerReport.rows.every((row) => Array.isArray(row.itemIds) && row.itemIds.length === row.itemCount)) failures.push('owner report itemIds missing');
 if (!ownerReport.rows.some((row) => row.urgentItemIds.length > 0)) failures.push('owner report urgent itemIds missing');
 if (!ownerReport.recommendation.includes('负责人')) failures.push('owner report recommendation missing');
+if (!morningBriefing.headline.includes('今日')) failures.push('morning briefing headline missing');
+if (morningBriefing.watchOwners.length < 3) failures.push('morning briefing should include top watch owners');
+if (morningBriefing.mustDoItems.length !== 3) failures.push('morning briefing should include 3 must-do items');
+if (morningBriefing.topItemIds.length !== 3 || morningBriefing.urgentItemIds.length < 2) failures.push('morning briefing bulk ids missing');
+if (!morningBriefing.playbook.some((line) => line.includes('晨会') || line.includes('客户消息') || line.includes('商机'))) failures.push('morning briefing playbook missing');
 if (!pageSource.includes('老板每日作战清单')) failures.push('daily priority panel UI missing');
+if (!pageSource.includes('老板晨会摘要')) failures.push('morning briefing UI missing');
+if (!pageSource.includes('处理晨会前三项') || !pageSource.includes('一键处理全部高危')) failures.push('morning briefing bulk buttons missing');
+if (!pageSource.includes('buildSalesMorningBriefing')) failures.push('sales command does not build morning briefing');
 if (!pageSource.includes('负责人每日战报')) failures.push('owner priority panel UI missing');
 if (!pageSource.includes('处理此负责人') || !pageSource.includes('只处理高危')) failures.push('owner priority bulk buttons missing');
 if (!pageSource.includes('buildSalesPriorityQueue')) failures.push('sales command does not build priority queue');

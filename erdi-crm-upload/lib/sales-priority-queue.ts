@@ -31,6 +31,38 @@ export type SalesOwnerPriorityRow = {
   focusMix: Array<{ label: string; count: number }>;
 };
 
+export type SalesMorningBriefing = {
+  headline: string;
+  ownerSummary: string;
+  actionSummary: string;
+  urgentCount: number;
+  ownerCount: number;
+  revenueAtRisk: number;
+  topItemIds: string[];
+  urgentItemIds: string[];
+  watchOwners: Array<{
+    ownerName: string;
+    urgentCount: number;
+    impactUSD: number;
+    topTitle: string;
+    topReason: string;
+    nextAction: string;
+    itemIds: string[];
+    urgentItemIds: string[];
+  }>;
+  mustDoItems: Array<{
+    id: string;
+    label: string;
+    title: string;
+    ownerName: string;
+    score: number;
+    impactUSD: number;
+    action: string;
+    href: string;
+  }>;
+  playbook: string[];
+};
+
 type ChannelSample = {
   id: string;
   companyId: string;
@@ -194,6 +226,52 @@ export function buildSalesOwnerPriorityReport(items: SalesPriorityItem[]) {
     totalImpactUSD: rows.reduce((sum, row) => sum + row.impactUSD, 0),
     maxImpactUSD: Math.max(1, ...rows.map((row) => row.impactUSD)),
     recommendation: ownerReportRecommendation(rows),
+  };
+}
+
+export function buildSalesMorningBriefing(items: SalesPriorityItem[], ownerRows: SalesOwnerPriorityRow[]): SalesMorningBriefing {
+  const sortedItems = [...items].sort((a, b) => b.score - a.score || b.impactUSD - a.impactUSD);
+  const urgentItems = sortedItems.filter((item) => item.score >= 90);
+  const watchOwners = ownerRows
+    .filter((row) => row.itemCount > 0)
+    .slice(0, 3)
+    .map((row) => ({
+      ownerName: row.ownerName,
+      urgentCount: row.urgentCount,
+      impactUSD: row.impactUSD,
+      topTitle: row.topTitle,
+      topReason: row.topReason,
+      nextAction: row.nextAction,
+      itemIds: row.itemIds,
+      urgentItemIds: row.urgentItemIds,
+    }));
+  const mustDoItems = sortedItems.slice(0, 3).map((item) => ({
+    id: item.id,
+    label: item.kindLabel,
+    title: item.title,
+    ownerName: item.ownerName,
+    score: item.score,
+    impactUSD: item.impactUSD,
+    action: item.action,
+    href: item.href,
+  }));
+  const revenueAtRisk = sortedItems.reduce((sum, item) => sum + item.impactUSD, 0);
+  const urgentCount = urgentItems.length;
+  const topOwner = watchOwners[0] || null;
+  const topItem = sortedItems[0] || null;
+
+  return {
+    headline: morningHeadline({ urgentCount, revenueAtRisk, topOwner, topItem }),
+    ownerSummary: morningOwnerSummary(watchOwners),
+    actionSummary: morningActionSummary(mustDoItems),
+    urgentCount,
+    ownerCount: ownerRows.length,
+    revenueAtRisk,
+    topItemIds: mustDoItems.map((item) => item.id),
+    urgentItemIds: urgentItems.map((item) => item.id),
+    watchOwners,
+    mustDoItems,
+    playbook: morningPlaybook(sortedItems, watchOwners),
   };
 }
 
@@ -363,6 +441,45 @@ function ownerReportRecommendation(rows: SalesOwnerPriorityRow[]) {
   const top = rows[0];
   if (top?.impactUSD > 0) return `今日负责人风险主要集中在“${top.ownerName}”,关联约 $${Math.round(top.impactUSD).toLocaleString()} 机会影响。`;
   return `今日 ${rows.length} 个负责人有待处理事项。按负责人逐项确认下一步和截止时间。`;
+}
+
+function morningHeadline(input: {
+  urgentCount: number;
+  revenueAtRisk: number;
+  topOwner: SalesMorningBriefing['watchOwners'][number] | null;
+  topItem: SalesPriorityItem | null;
+}) {
+  if (!input.topItem) return '今日暂无高优先级风险。晨会重点检查新增询盘、未分配客户和自动化运行。';
+  if (input.urgentCount > 0) {
+    return `今日先盯 ${input.topOwner?.ownerName || input.topItem.ownerName}: ${input.urgentCount} 个高危事项,影响约 $${Math.round(input.revenueAtRisk).toLocaleString()}。`;
+  }
+  if (input.revenueAtRisk > 0) {
+    return `今日重点跟进 ${input.topOwner?.ownerName || input.topItem.ownerName},机会/收入影响约 $${Math.round(input.revenueAtRisk).toLocaleString()}。`;
+  }
+  return `今日有 ${input.topItem.kindLabel} 等重点动作。先确认负责人、截止时间和下一步结果。`;
+}
+
+function morningOwnerSummary(owners: SalesMorningBriefing['watchOwners']) {
+  if (owners.length === 0) return '暂无负责人需要晨会点名。';
+  return owners
+    .map((owner, index) => `${index + 1}. ${owner.ownerName}: ${owner.urgentCount} 高危,$${Math.round(owner.impactUSD).toLocaleString()}影响`)
+    .join(' / ');
+}
+
+function morningActionSummary(items: SalesMorningBriefing['mustDoItems']) {
+  if (items.length === 0) return '暂无必须动作。';
+  return items.map((item, index) => `${index + 1}. ${item.label}-${item.title}`).join(' / ');
+}
+
+function morningPlaybook(items: SalesPriorityItem[], owners: SalesMorningBriefing['watchOwners']) {
+  if (items.length === 0) return ['检查昨夜入站消息和新增询盘。', '确认自动化流程是否正常运行。', '让负责人补齐今天新增客户的下一步动作。'];
+  const playbook = new Set<string>();
+  if (items.some((item) => item.kind === 'MESSAGE_SLA')) playbook.add('先清逾期客户消息,回复后立刻转任务或商机。');
+  if (items.some((item) => item.kind === 'OPPORTUNITY_STALL')) playbook.add('把停滞商机拉成救援任务,明确报价/样品/付款/规格堵点。');
+  if (items.some((item) => item.kind === 'SALES_TASK' || item.kind === 'EMAIL_ACTION' || item.kind === 'HEALTH_TASK')) playbook.add('催负责人完成逾期任务,要求写跟进结果和下一步时间。');
+  if (items.some((item) => item.kind === 'AUTOMATION_RISK')) playbook.add('运营先复核自动化失败流程,避免客户消息卡住。');
+  if (owners.length > 0) playbook.add(`晨会点名 ${owners.map((owner) => owner.ownerName).join('、')},逐项确认今天交付结果。`);
+  return Array.from(playbook).slice(0, 5);
 }
 
 function priorityRecommendation(input: { items: SalesPriorityItem[]; urgentCount: number; revenueAtRisk: number; topItem: SalesPriorityItem | null }) {
