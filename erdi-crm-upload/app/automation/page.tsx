@@ -326,6 +326,14 @@ export default async function AutomationPage(props: any) {
     skipped: firstParam(sp.skipped),
     failed: firstParam(sp.failed),
   };
+  const riskRepairResult = {
+    riskRepair: firstParam(sp.riskRepair),
+    updated: firstParam(sp.repairUpdated),
+    createdRun: firstParam(sp.repairCreatedRun),
+    replayed: firstParam(sp.repairReplayed),
+    notified: firstParam(sp.repairNotified),
+    skipped: firstParam(sp.repairSkipped),
+  };
 
   const where: any = {};
   if (q) {
@@ -408,6 +416,7 @@ export default async function AutomationPage(props: any) {
         {packResult.pack && <BlueprintPackResultBanner result={packResult} />}
         {replayResult.replay && <ReplayResultBanner result={replayResult} />}
         {bulkReplayResult.bulkReplay && <BulkReplayResultBanner result={bulkReplayResult} />}
+        {riskRepairResult.riskRepair && <RiskRepairResultBanner result={riskRepairResult} />}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {blueprint.groups.map((group) => (
             <BlueprintGroupCard key={group.key} group={group} />
@@ -434,7 +443,7 @@ export default async function AutomationPage(props: any) {
         </div>
       </section>
 
-      <section className="mb-6 rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+      <section id="automation-risk-repair" className="mb-6 scroll-mt-24 rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="font-bold text-gray-900">自动化治理驾驶舱</h2>
@@ -535,6 +544,7 @@ export default async function AutomationPage(props: any) {
                 <th className="p-3">运行</th>
                 <th className="p-3">命中/执行</th>
                 <th className="p-3">风险</th>
+                <th className="p-3">修复</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
@@ -553,6 +563,9 @@ export default async function AutomationPage(props: any) {
                   <td className="p-3">
                     <div className="text-xs font-black text-rose-600">{row.reason}</div>
                     <div className="mt-0.5 text-[11px] font-bold text-gray-400">{row.lastRunAtLabel}</div>
+                  </td>
+                  <td className="p-3">
+                    <RiskRepairButton row={row} />
                   </td>
                 </tr>
               ))}
@@ -888,7 +901,7 @@ function buildAutomationGovernance(flows: any[]) {
       const flowMatchRate = runs.length ? flowMatchedRuns / runs.length : null;
       let reason = '';
       let weight = 0;
-      if (flow.status === 'ACTIVE' && !flow.lastRunAt && flow.triggerCount === 0) {
+      if (runs.length === 0 && flow.status === 'ACTIVE' && !flow.lastRunAt && flow.triggerCount === 0) {
         reason = '已开启但从未触发';
         weight = 80;
       } else if (flowFailedRuns > 0) {
@@ -1041,6 +1054,46 @@ function BulkReplayResultBanner({
       <span className="ml-2 text-emerald-700">跳过 {result.skipped || '0'}</span>
       <span className="ml-2 text-rose-700">异常 {result.failed || '0'}</span>
     </div>
+  );
+}
+
+function RiskRepairResultBanner({
+  result,
+}: {
+  result: { riskRepair?: string; updated?: string; createdRun?: string; replayed?: string; notified?: string; skipped?: string };
+}) {
+  const failed = result.riskRepair === 'invalid' || result.riskRepair === 'missing';
+  const label: Record<string, string> = {
+    activated: '自动化风险流程已开启',
+    tested: '自动化风险流程已生成测试运行',
+    replayed: '自动化失败运行已重放处理',
+    tuned: '自动化风险流程已写入调参建议',
+    notified: '自动化风险已提醒管理员复核',
+    stable: '自动化流程当前状态稳定',
+    invalid: '自动化风险修复参数无效',
+    missing: '自动化流程不存在',
+  };
+  return (
+    <div className={`mb-4 rounded-lg border px-4 py-3 text-xs font-bold ${failed ? 'border-rose-100 bg-rose-50 text-rose-800' : 'border-emerald-100 bg-emerald-50 text-emerald-800'}`}>
+      {label[result.riskRepair || ''] || '自动化风险修复已执行'}
+      <span className="ml-2">更新 {result.updated || '0'}</span>
+      <span className="ml-2">测试运行 {result.createdRun || '0'}</span>
+      <span className="ml-2">重放 {result.replayed || '0'}</span>
+      <span className="ml-2">通知 {result.notified || '0'}</span>
+      {result.skipped ? <span className="ml-2 text-rose-700">跳过 {result.skipped}</span> : null}
+    </div>
+  );
+}
+
+function RiskRepairButton({ row }: { row: any }) {
+  return (
+    <form action="/api/automation/risks/repair" method="post" title={row.repairHint}>
+      <input type="hidden" name="flowId" value={row.id} />
+      <button className="inline-flex min-w-[88px] items-center justify-center rounded-md border border-indigo-100 bg-indigo-50 px-2.5 py-1.5 text-[11px] font-black text-indigo-700 hover:bg-indigo-100">
+        {row.repairLabel || '一键修复'}
+      </button>
+      <div className="mt-1 max-w-[160px] text-[10px] font-bold leading-snug text-gray-400">{row.repairHint}</div>
+    </form>
   );
 }
 

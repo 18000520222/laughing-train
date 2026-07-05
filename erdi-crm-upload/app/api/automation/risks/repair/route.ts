@@ -1,0 +1,60 @@
+import { cookies } from 'next/headers';
+import { NextResponse } from 'next/server';
+import { repairAutomationRiskFlow } from '@/lib/automation-risk-repair';
+import { prisma } from '@/lib/prisma';
+
+export const dynamic = 'force-dynamic';
+
+const ALLOWED_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SALES']);
+
+export async function POST(req: Request) {
+  const auth = await requireSalesUser();
+  if (!auth) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+
+  const form = await req.formData();
+  const flowId = String(form.get('flowId') || '').trim();
+  if (!flowId) return redirectBack(req, { status: 'invalid', flowId: '', updated: 0, createdRun: 0, replayed: 0, notified: 0, skipped: 1 });
+
+  const result = await repairAutomationRiskFlow({ flowId, userId: auth.user.id });
+  return redirectBack(req, {
+    status: result.status,
+    flowId,
+    updated: result.updated,
+    createdRun: result.createdRun,
+    replayed: result.replayed,
+    notified: result.notified,
+    skipped: result.skipped,
+  });
+}
+
+async function requireSalesUser() {
+  const cookieStore = cookies();
+  const role = (cookieStore.get('auth_role')?.value || '').toUpperCase();
+  const email = cookieStore.get('auth_email')?.value || '';
+  const userId = cookieStore.get('auth_userId')?.value || '';
+  if (!ALLOWED_ROLES.has(role)) return null;
+
+  const user = userId
+    ? await prisma.user.findUnique({ where: { id: userId } })
+    : email
+    ? await prisma.user.findUnique({ where: { email } })
+    : null;
+  if (!user || !user.isActive) return null;
+  return { user, role };
+}
+
+function redirectBack(
+  req: Request,
+  result: { status: string; flowId: string; updated: number; createdRun: number; replayed: number; notified: number; skipped: number }
+) {
+  const url = new URL('/automation', req.url);
+  url.searchParams.set('riskRepair', result.status);
+  if (result.flowId) url.searchParams.set('flow', result.flowId);
+  url.searchParams.set('repairUpdated', String(result.updated));
+  url.searchParams.set('repairCreatedRun', String(result.createdRun));
+  url.searchParams.set('repairReplayed', String(result.replayed));
+  url.searchParams.set('repairNotified', String(result.notified));
+  if (result.skipped > 0) url.searchParams.set('repairSkipped', String(result.skipped));
+  url.hash = 'automation-risk-repair';
+  return NextResponse.redirect(url, { status: 303 });
+}

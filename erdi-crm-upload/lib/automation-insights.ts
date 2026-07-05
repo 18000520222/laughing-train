@@ -1,14 +1,18 @@
 import { CHANNEL_LABEL, RUN_STATUS_LABEL } from '@/lib/automation';
 
-type FlowForInsights = {
+export type FlowForInsights = {
   id: string;
   flowCode: string;
   name: string;
   category: string;
   channel: string;
   status: string;
+  triggerType: string;
+  triggerConfig?: unknown;
   conditionType: string | null;
+  conditionConfig?: unknown;
   actionType: string;
+  actionConfig?: unknown;
   triggerCount: number;
   uniqueContactCount: number;
   lastRunAt: Date | null;
@@ -55,6 +59,9 @@ export type AutomationRiskFlowRow = {
   failureRate: number | null;
   lastRunAtLabel: string;
   reason: string;
+  repairAction: 'ACTIVATE' | 'TEST' | 'REPLAY' | 'TUNE_CONDITION' | 'REVIEW';
+  repairLabel: string;
+  repairHint: string;
   weight: number;
 };
 
@@ -68,9 +75,9 @@ export function buildAutomationFunnelInsights(flows: FlowForInsights[]) {
   const byAction = buildRows(flows, (flow) => flow.actionType, actionLabel);
   const byCondition = buildRows(flows, (flow) => flow.conditionType || 'NO_CONDITION', conditionLabel);
   const riskFlows = flows
-    .map(flowRisk)
+    .map(assessAutomationFlowRisk)
     .filter(Boolean)
-    .sort((a, b) => b!.weight - a!.weight || b!.failedRuns - a!.failedRuns || a!.matchRate! - b!.matchRate!)
+    .sort((a, b) => b!.weight - a!.weight || b!.failedRuns - a!.failedRuns || (a!.matchRate || 0) - (b!.matchRate || 0))
     .slice(0, 10) as AutomationRiskFlowRow[];
 
   return {
@@ -135,7 +142,7 @@ function buildRows(
     .sort((a, b) => b.runs - a.runs || b.healthScore - a.healthScore || b.activeFlows - a.activeFlows);
 }
 
-function flowRisk(flow: FlowForInsights): AutomationRiskFlowRow | null {
+export function assessAutomationFlowRisk(flow: FlowForInsights): AutomationRiskFlowRow | null {
   const runs = flow.runs.length;
   const matchedRuns = flow.runs.filter((run) => run.matched).length;
   const actionRuns = flow.runs.filter((run) => run.status === 'ACTION_SENT').length;
@@ -147,7 +154,7 @@ function flowRisk(flow: FlowForInsights): AutomationRiskFlowRow | null {
   let reason = '';
   let weight = 0;
 
-  if (flow.status === 'ACTIVE' && !flow.lastRunAt && flow.triggerCount === 0) {
+  if (runs === 0 && flow.status === 'ACTIVE' && !flow.lastRunAt && flow.triggerCount === 0) {
     reason = '已开启但没有触发记录';
     weight = 95;
   } else if (failedRuns > 0) {
@@ -171,6 +178,7 @@ function flowRisk(flow: FlowForInsights): AutomationRiskFlowRow | null {
   }
 
   if (!reason) return null;
+  const repair = automationRiskRepairAdvice({ reason, status: flow.status, failedRuns, actionType: flow.actionType });
   return {
     id: flow.id,
     flowCode: flow.flowCode,
@@ -188,7 +196,46 @@ function flowRisk(flow: FlowForInsights): AutomationRiskFlowRow | null {
     failureRate,
     lastRunAtLabel: flow.lastRunAt ? flow.lastRunAt.toLocaleDateString('zh-CN') : '从未运行',
     reason,
+    repairAction: repair.action,
+    repairLabel: repair.label,
+    repairHint: repair.hint,
     weight,
+  };
+}
+
+export function automationRiskRepairAdvice(input: { reason: string; status: string; failedRuns: number; actionType: string }) {
+  if (input.status === 'DRAFT' || input.status === 'PAUSED') {
+    return {
+      action: 'ACTIVATE' as const,
+      label: input.status === 'DRAFT' ? '启用草稿' : '恢复开启',
+      hint: '先把流程恢复到 ACTIVE,再用测试运行确认触发器、条件和动作配置。',
+    };
+  }
+  if (input.failedRuns > 0 || input.reason.includes('失败')) {
+    return {
+      action: 'REPLAY' as const,
+      label: '重放失败',
+      hint: '优先重放有原始入站消息的失败运行;不可重放的会保留原因给管理员复核。',
+    };
+  }
+  if (input.reason.includes('从未触发') || input.reason.includes('没有触发')) {
+    return {
+      action: 'TEST' as const,
+      label: '生成测试运行',
+      hint: '创建一条手动测试运行,验证流程至少能被执行链路识别。',
+    };
+  }
+  if (input.reason.includes('命中率') || input.reason.includes('跳过') || input.reason.includes('执行率')) {
+    return {
+      action: 'TUNE_CONDITION' as const,
+      label: '写入调参建议',
+      hint: '把本次体检建议写入条件备注,方便运营按关键词、语言、意图、时段继续调参。',
+    };
+  }
+  return {
+    action: 'REVIEW' as const,
+    label: '提醒复核',
+    hint: '发送管理员复核提醒,保留流程链接和风险原因。',
   };
 }
 
