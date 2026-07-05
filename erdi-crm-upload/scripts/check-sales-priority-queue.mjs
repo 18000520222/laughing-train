@@ -12,6 +12,7 @@ const actionRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/sale
 const morningRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/sales-command/morning-briefing/route.ts'), 'utf8');
 const completionEvidenceRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/sales-command/completion-evidence/route.ts'), 'utf8');
 const completionEvidenceCronSource = fs.readFileSync(path.join(process.cwd(), 'app/api/cron/completion-evidence/route.ts'), 'utf8');
+const completionEvidenceEscalationCronSource = fs.readFileSync(path.join(process.cwd(), 'app/api/cron/completion-evidence-escalations/route.ts'), 'utf8');
 const morningCronSource = fs.readFileSync(path.join(process.cwd(), 'app/api/cron/morning-briefing/route.ts'), 'utf8');
 const morningWatchSource = fs.readFileSync(path.join(process.cwd(), 'lib/sales-morning-briefing-watch.ts'), 'utf8');
 const morningClosureSource = fs.readFileSync(path.join(process.cwd(), 'lib/sales-morning-briefing-closure.ts'), 'utf8');
@@ -321,6 +322,9 @@ if (!completionEvidenceRouteSource.includes('createCompletionEvidenceRepairTasks
 if (!completionEvidenceCronSource.includes('export async function GET')) failures.push('completion evidence cron GET route missing');
 if (!completionEvidenceCronSource.includes('runCompletionEvidenceRepairWatch')) failures.push('completion evidence cron should use shared watch helper');
 if (!completionEvidenceCronSource.includes('COMPLETION_EVIDENCE_KEY')) failures.push('completion evidence cron key missing');
+if (!completionEvidenceEscalationCronSource.includes('export async function GET')) failures.push('completion evidence escalation cron GET route missing');
+if (!completionEvidenceEscalationCronSource.includes('escalateStaleCompletionEvidenceRepairs')) failures.push('completion evidence escalation cron should use shared helper');
+if (!completionEvidenceEscalationCronSource.includes('COMPLETION_EVIDENCE_ESCALATION_KEY')) failures.push('completion evidence escalation key missing');
 if (!morningWatchSource.includes('buildSalesMorningBriefingFromDatabase')) failures.push('morning briefing database builder missing');
 if (!morningWatchSource.includes('sendMorningBriefingNotifications')) failures.push('morning briefing shared notification sender missing');
 if (!morningWatchSource.includes('resolveBriefingTarget')) failures.push('morning briefing target resolver missing');
@@ -347,10 +351,15 @@ if (!completionEvidenceSource.includes('商机推进')) failures.push('completio
 if (!completionEvidenceSource.includes('allRows: sortedRows')) failures.push('completion evidence full audit rows missing');
 if (!completionEvidenceRepairSource.includes("COMPLETION_EVIDENCE_REPAIR_SOURCE = 'COMPLETION_EVIDENCE_AUDIT'")) failures.push('completion evidence shared source missing');
 if (!completionEvidenceRepairSource.includes('runCompletionEvidenceRepairWatch')) failures.push('completion evidence watch helper missing');
+if (!completionEvidenceRepairSource.includes('escalateStaleCompletionEvidenceRepairs')) failures.push('completion evidence escalation helper missing');
 if (!completionEvidenceRepairSource.includes('completionEvidenceSourceRef(task.id)')) failures.push('completion evidence idempotency helper missing');
 if (!completionEvidenceRepairSource.includes('任务完成证据待补')) failures.push('completion evidence shared owner notification missing');
+if (!completionEvidenceRepairSource.includes('补证据任务逾期升级')) failures.push('completion evidence overdue escalation notification missing');
+if (!completionEvidenceRepairSource.includes("evidence.statusLabel === '有业务结果'")) failures.push('completion evidence escalation should skip resolved proof');
+if (!completionEvidenceRepairSource.includes('cooldownStart')) failures.push('completion evidence escalation dedupe window missing');
 if (!completionEvidenceRepairSource.includes('report.allRows')) failures.push('completion evidence watch should audit all rows');
 if (!vercelConfig.crons?.some((cron) => cron.path === '/api/cron/completion-evidence' && cron.schedule === '15 10 * * *')) failures.push('completion evidence Vercel cron missing');
+if (!vercelConfig.crons?.some((cron) => cron.path === '/api/cron/completion-evidence-escalations' && cron.schedule === '10 11 * * *')) failures.push('completion evidence escalation Vercel cron missing');
 
 if (failures.length > 0) {
   for (const failure of failures) console.error(failure);

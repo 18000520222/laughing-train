@@ -146,8 +146,164 @@ export async function runCompletionEvidenceRepairWatch({
   };
 }
 
+export async function escalateStaleCompletionEvidenceRepairs({
+  now = new Date(),
+  thresholdHours = 12,
+  limit = 50,
+}: {
+  now?: Date;
+  thresholdHours?: number;
+  limit?: number;
+} = {}) {
+  const threshold = new Date(now.getTime() - Math.max(1, thresholdHours) * 3600000);
+  const tasks = await prisma.salesTask.findMany({
+    where: {
+      status: 'TODO',
+      source: COMPLETION_EVIDENCE_REPAIR_SOURCE,
+      dueAt: { lt: threshold },
+    },
+    include: { owner: true, company: true },
+    orderBy: [{ dueAt: 'asc' }, { createdAt: 'asc' }],
+    take: Math.min(Math.max(limit, 1), 200),
+  });
+
+  const result = {
+    scanned: tasks.length,
+    escalated: 0,
+    skippedResolved: 0,
+    skippedInvalidSourceRef: 0,
+    skippedDedupe: 0,
+    ownerNotified: 0,
+    adminNotifications: 0,
+    adminCount: 0,
+    thresholdHours: Math.max(1, thresholdHours),
+  };
+  if (tasks.length === 0) return result;
+
+  const originalTaskIds = tasks.map((task) => originalTaskIdFromRepair(task.sourceRef)).filter(Boolean) as string[];
+  if (originalTaskIds.length === 0) {
+    result.skippedInvalidSourceRef = tasks.length;
+    return result;
+  }
+
+  const [originalTasks, admins] = await Promise.all([
+    prisma.salesTask.findMany({
+      where: { id: { in: originalTaskIds }, status: 'DONE', completedAt: { not: null } },
+      include: { owner: true, company: true, opportunity: true },
+      take: originalTaskIds.length,
+    }),
+    prisma.user.findMany({
+      where: { isActive: true, role: { in: ['SUPER_ADMIN', 'ADMIN'] as any } },
+      select: { id: true },
+    }),
+  ]);
+  result.adminCount = admins.length;
+  const originalById = new Map(originalTasks.map((task) => [task.id, task]));
+  const companyIds = Array.from(new Set(originalTasks.map((task) => task.companyId)));
+
+  const evidenceWindowStart = originalTasks.reduce<Date | null>((min, task) => {
+    if (!task.completedAt) return min;
+    const candidate = new Date(task.completedAt.getTime() - 5 * 60000);
+    return !min || candidate < min ? candidate : min;
+  }, null);
+  const [followUps, messages, opportunities] =
+    evidenceWindowStart && companyIds.length > 0
+      ? await Promise.all([
+          prisma.followUp.findMany({
+            where: { companyId: { in: companyIds }, createdAt: { gte: evidenceWindowStart } },
+            include: { user: true },
+            orderBy: { createdAt: 'desc' },
+            take: 1000,
+          }),
+          prisma.inboxMessage.findMany({
+            where: {
+              companyId: { in: companyIds },
+              direction: 'OUT',
+              OR: [{ createdAt: { gte: evidenceWindowStart } }, { sentAt: { gte: evidenceWindowStart } }],
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 1000,
+          }),
+          prisma.opportunity.findMany({
+            where: { companyId: { in: companyIds }, stageChangedAt: { gte: evidenceWindowStart } },
+            orderBy: { stageChangedAt: 'desc' },
+            take: 800,
+          }),
+        ])
+      : [[], [], []];
+  const report = buildSalesCompletionEvidenceReport({ tasks: originalTasks, followUps, messages, opportunities });
+  const evidenceByTaskId = new Map(report.allRows.map((row) => [row.taskId, row]));
+  const cooldownStart = new Date(now.getTime() - 24 * 3600000);
+
+  for (const task of tasks) {
+    const originalTaskId = originalTaskIdFromRepair(task.sourceRef);
+    const originalTask = originalTaskId ? originalById.get(originalTaskId) : null;
+    const evidence = originalTaskId ? evidenceByTaskId.get(originalTaskId) : null;
+    if (!originalTask || !evidence) {
+      result.skippedInvalidSourceRef++;
+      continue;
+    }
+    if (evidence.statusLabel === '有业务结果') {
+      result.skippedResolved++;
+      continue;
+    }
+
+    const recentEscalation = await prisma.notification.findFirst({
+      where: {
+        title: '补证据任务逾期升级',
+        body: { contains: task.id },
+        createdAt: { gte: cooldownStart },
+      },
+      select: { id: true },
+    });
+    if (recentEscalation) {
+      result.skippedDedupe++;
+      continue;
+    }
+
+    const body = [
+      `${task.company.name}: ${originalTask.title}`,
+      `补证据任务 ${task.id} 已逾期 ${result.thresholdHours} 小时以上。`,
+      `当前证据状态: ${evidence.statusLabel}; ${evidence.nextAuditAction}`,
+      `负责人: ${task.owner.name || task.owner.email}`,
+    ].join(' ');
+    const notifications = [
+      {
+        userId: task.ownerId,
+        type: 'SYSTEM' as any,
+        title: '补证据任务逾期升级',
+        body,
+        link: `/customers/${task.companyId}`,
+      },
+      ...admins.map((admin) => ({
+        userId: admin.id,
+        type: 'SYSTEM' as any,
+        title: '补证据任务逾期升级',
+        body,
+        link: `/customers/${task.companyId}`,
+      })),
+    ];
+    await prisma.notification.createMany({ data: notifications });
+    await prisma.salesTask.update({
+      where: { id: task.id },
+      data: { escalatedAt: now },
+    });
+    result.ownerNotified++;
+    result.adminNotifications += admins.length;
+    result.escalated++;
+  }
+
+  return result;
+}
+
 export function completionEvidenceSourceRef(taskId: string) {
   return `completion-evidence:${taskId}`;
+}
+
+function originalTaskIdFromRepair(sourceRef: string | null) {
+  const prefix = 'completion-evidence:';
+  if (!sourceRef?.startsWith(prefix)) return null;
+  return sourceRef.slice(prefix.length) || null;
 }
 
 function buildRepairDescription(task: {
