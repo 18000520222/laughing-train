@@ -457,6 +457,7 @@ export default async function SalesCommandPage({
   const emailAudit = await buildEmailClassificationAudit({ sampleLimit: 8 });
   const emailSecurity = await buildEmailSecurityAudit({ sampleLimit: 8 });
   const channelQuality = await buildChannelQualityReport({ since: ninetyDaysAgo });
+  const healthAutomationEffect = await buildCustomerHealthAutomationEffectReport({ since: thirtyDaysAgo, until: new Date() });
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
@@ -624,6 +625,52 @@ export default async function SalesCommandPage({
                 </div>
               ))}
               {actionAttribution.topOutcomes.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无近期推进结果。</div>}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">客户健康自动化效果</h2>
+            <p className="mt-1 text-xs text-gray-400">复盘客户健康修复任务是否被处理,以及任务生成后是否推动商机阶段或赢单。</p>
+          </div>
+          <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">近 30 天</span>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <AttributionMetric label="健康任务" value={healthAutomationEffect.totalTasks} detail={`${healthAutomationEffect.automationTasks} 自动化 · ${healthAutomationEffect.bulkTasks} 批量`} tone={healthAutomationEffect.totalTasks > 0 ? 'blue' : 'gray'} />
+          <AttributionMetric label="已完成" value={healthAutomationEffect.doneTasks} detail={`完成率 ${formatLocalPercent(healthAutomationEffect.completionRate)}`} tone={healthAutomationEffect.doneTasks > 0 ? 'emerald' : 'gray'} />
+          <AttributionMetric label="当前待办" value={healthAutomationEffect.openTasks} detail={`${healthAutomationEffect.overdueTasks} 个逾期`} tone={healthAutomationEffect.overdueTasks > 0 ? 'rose' : healthAutomationEffect.openTasks > 0 ? 'amber' : 'emerald'} />
+          <AttributionMetric label="触达客户" value={healthAutomationEffect.companyCount} detail={`${healthAutomationEffect.ownerCount} 个负责人`} tone={healthAutomationEffect.companyCount > 0 ? 'violet' : 'gray'} />
+          <AttributionMetric label="后续推进" value={healthAutomationEffect.downstreamOutcomes} detail={`有效率 ${formatLocalPercent(healthAutomationEffect.downstreamRate)}`} tone={healthAutomationEffect.downstreamOutcomes > 0 ? 'blue' : 'gray'} />
+          <AttributionMetric label="赢单收入" value={`$${Math.round(healthAutomationEffect.wonRevenue).toLocaleString()}`} detail={`${healthAutomationEffect.wonDeals} 个赢单`} tone={healthAutomationEffect.wonRevenue > 0 ? 'emerald' : 'gray'} />
+        </div>
+        <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{healthAutomationEffect.recommendation}</div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">按来源</h3>
+            <div className="mt-3 space-y-3">
+              {healthAutomationEffect.bySource.map((row) => (
+                <AttributionBar key={row.source} label={row.sourceLabel} value={row.totalTasks} max={healthAutomationEffect.maxSourceTasks} detail={`${row.doneTasks} 完成 · ${row.downstreamOutcomes} 推进 · $${Math.round(row.wonRevenue).toLocaleString()}`} />
+              ))}
+              {healthAutomationEffect.bySource.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无客户健康自动化任务。</div>}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="text-xs font-black text-gray-500">关键样本</h3>
+            <div className="mt-3 space-y-2">
+              {healthAutomationEffect.topTasks.map((item) => (
+                <div key={item.id} className="rounded-lg bg-gray-50 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Link href={`/customers/${item.companyId}`} className="min-w-0 truncate text-xs font-black text-indigo-700 hover:underline">{item.companyName}</Link>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-black ${item.status === 'DONE' ? 'bg-emerald-50 text-emerald-700' : item.isOverdue ? 'bg-rose-50 text-rose-700' : 'bg-white text-gray-600'}`}>{item.statusLabel}</span>
+                  </div>
+                  <div className="mt-1 truncate text-[11px] font-bold text-gray-500">{item.sourceLabel} · {item.ownerName} · {item.createdAtLabel}</div>
+                  <div className="mt-1 text-[11px] font-bold text-gray-400">后续推进 {item.downstreamOutcomes} · 赢单 ${Math.round(item.wonRevenue).toLocaleString()}</div>
+                </div>
+              ))}
+              {healthAutomationEffect.topTasks.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无可复盘样本。</div>}
             </div>
           </div>
         </div>
@@ -1826,8 +1873,8 @@ async function buildSalesActionAttributionReport({ since, until }: { since: Date
       companyId: item.companyId,
       ownerId: item.ownerId,
       ownerName: item.owner.name || item.owner.email,
-      type: 'DONE_TASK',
-      label: '完成任务',
+      type: taskAttributionType(item.source),
+      label: taskAttributionLabel(item.source),
       at: item.completedAt || item.updatedAt,
       text: item.title,
     })),
@@ -1912,6 +1959,217 @@ async function buildSalesActionAttributionReport({ since, until }: { since: Date
     maxOwnerRevenue: Math.max(1, ...ownerRows.map((row) => row.revenueCredit)),
     recommendation: actionAttributionRecommendation({ attributedOutcomes, outcomes: outcomes.length, attributedRevenue, revenue, bestType }),
   };
+}
+
+type CustomerHealthEffectSourceRow = {
+  source: string;
+  sourceLabel: string;
+  totalTasks: number;
+  doneTasks: number;
+  openTasks: number;
+  overdueTasks: number;
+  downstreamOutcomes: number;
+  wonDeals: number;
+  wonRevenue: number;
+};
+
+type CustomerHealthEffectTaskRow = {
+  id: string;
+  companyId: string;
+  companyName: string;
+  ownerName: string;
+  sourceLabel: string;
+  status: string;
+  statusLabel: string;
+  isOverdue: boolean;
+  createdAtLabel: string;
+  downstreamOutcomes: number;
+  wonRevenue: number;
+};
+
+async function buildCustomerHealthAutomationEffectReport({ since, until }: { since: Date; until: Date }) {
+  const sources = ['CUSTOMER_HEALTH_AUTOMATION', 'CUSTOMER_HEALTH_BULK', 'CUSTOMER_HEALTH'];
+  const tasks = await prisma.salesTask.findMany({
+    where: {
+      source: { in: sources },
+      createdAt: { gte: since, lt: until },
+    },
+    include: {
+      owner: true,
+      company: {
+        include: {
+          opportunities: {
+            where: { stageChangedAt: { gte: since, lt: until } },
+            select: { id: true, title: true, stage: true, amountUSD: true, stageChangedAt: true, updatedAt: true },
+          },
+        },
+      },
+    },
+    orderBy: [{ createdAt: 'desc' }, { dueAt: 'asc' }],
+    take: 500,
+  });
+  if (tasks.length === 0) return emptyCustomerHealthAutomationEffect();
+
+  const now = new Date();
+  const bySource = new Map<string, CustomerHealthEffectSourceRow>();
+  const companyIds = new Set<string>();
+  const ownerIds = new Set<string>();
+  let doneTasks = 0;
+  let openTasks = 0;
+  let overdueTasks = 0;
+  let downstreamOutcomes = 0;
+  let wonDeals = 0;
+  let wonRevenue = 0;
+
+  const topTasks: CustomerHealthEffectTaskRow[] = [];
+
+  for (const task of tasks) {
+    companyIds.add(task.companyId);
+    ownerIds.add(task.ownerId);
+    const source = task.source;
+    const current = bySource.get(source) || {
+      source,
+      sourceLabel: healthTaskSourceLabel(source),
+      totalTasks: 0,
+      doneTasks: 0,
+      openTasks: 0,
+      overdueTasks: 0,
+      downstreamOutcomes: 0,
+      wonDeals: 0,
+      wonRevenue: 0,
+    };
+
+    const opportunityRows = task.company.opportunities.filter((opp) => {
+      const stageAt = opp.stageChangedAt || opp.updatedAt;
+      return stageAt >= task.createdAt && stageAt <= until;
+    });
+    const taskOutcomes = opportunityRows.length;
+    const taskWonDeals = opportunityRows.filter((opp) => opp.stage === 'CLOSED_WON').length;
+    const taskWonRevenue = opportunityRows.filter((opp) => opp.stage === 'CLOSED_WON').reduce((sum, opp) => sum + (opp.amountUSD || 0), 0);
+    const isDone = task.status === 'DONE';
+    const isOpen = task.status === 'TODO';
+    const isOverdue = isOpen && !!task.dueAt && task.dueAt < now;
+
+    current.totalTasks += 1;
+    current.doneTasks += isDone ? 1 : 0;
+    current.openTasks += isOpen ? 1 : 0;
+    current.overdueTasks += isOverdue ? 1 : 0;
+    current.downstreamOutcomes += taskOutcomes;
+    current.wonDeals += taskWonDeals;
+    current.wonRevenue += taskWonRevenue;
+    bySource.set(source, current);
+
+    doneTasks += isDone ? 1 : 0;
+    openTasks += isOpen ? 1 : 0;
+    overdueTasks += isOverdue ? 1 : 0;
+    downstreamOutcomes += taskOutcomes;
+    wonDeals += taskWonDeals;
+    wonRevenue += taskWonRevenue;
+
+    topTasks.push({
+      id: task.id,
+      companyId: task.companyId,
+      companyName: task.company.name,
+      ownerName: task.owner.name || task.owner.email,
+      sourceLabel: healthTaskSourceLabel(source),
+      status: task.status,
+      statusLabel: task.status === 'DONE' ? '已完成' : task.status === 'TODO' ? (isOverdue ? '已逾期' : '待处理') : '已取消',
+      isOverdue,
+      createdAtLabel: task.createdAt.toLocaleDateString('zh-CN'),
+      downstreamOutcomes: taskOutcomes,
+      wonRevenue: taskWonRevenue,
+    });
+  }
+
+  const bySourceRows = Array.from(bySource.values()).sort((a, b) => b.wonRevenue - a.wonRevenue || b.downstreamOutcomes - a.downstreamOutcomes || b.totalTasks - a.totalTasks);
+  const sortedTopTasks = topTasks
+    .sort((a, b) => b.wonRevenue - a.wonRevenue || b.downstreamOutcomes - a.downstreamOutcomes || Number(b.isOverdue) - Number(a.isOverdue))
+    .slice(0, 8);
+  const totalTasks = tasks.length;
+
+  return {
+    totalTasks,
+    automationTasks: bySource.get('CUSTOMER_HEALTH_AUTOMATION')?.totalTasks || 0,
+    bulkTasks: bySource.get('CUSTOMER_HEALTH_BULK')?.totalTasks || 0,
+    manualTasks: bySource.get('CUSTOMER_HEALTH')?.totalTasks || 0,
+    doneTasks,
+    openTasks,
+    overdueTasks,
+    companyCount: companyIds.size,
+    ownerCount: ownerIds.size,
+    downstreamOutcomes,
+    wonDeals,
+    wonRevenue,
+    completionRate: totalTasks > 0 ? doneTasks / totalTasks : null,
+    downstreamRate: totalTasks > 0 ? downstreamOutcomes / totalTasks : null,
+    bySource: bySourceRows,
+    topTasks: sortedTopTasks,
+    maxSourceTasks: Math.max(1, ...bySourceRows.map((row) => row.totalTasks)),
+    recommendation: customerHealthAutomationRecommendation({ totalTasks, doneTasks, openTasks, overdueTasks, downstreamOutcomes, wonRevenue }),
+  };
+}
+
+function emptyCustomerHealthAutomationEffect() {
+  return {
+    totalTasks: 0,
+    automationTasks: 0,
+    bulkTasks: 0,
+    manualTasks: 0,
+    doneTasks: 0,
+    openTasks: 0,
+    overdueTasks: 0,
+    companyCount: 0,
+    ownerCount: 0,
+    downstreamOutcomes: 0,
+    wonDeals: 0,
+    wonRevenue: 0,
+    completionRate: null,
+    downstreamRate: null,
+    bySource: [] as CustomerHealthEffectSourceRow[],
+    topTasks: [] as CustomerHealthEffectTaskRow[],
+    maxSourceTasks: 1,
+    recommendation: '近 30 天暂无客户健康修复任务。后续自动化/批量/客户详情生成任务后,这里会复盘完成率和后续商机推进。',
+  };
+}
+
+function customerHealthAutomationRecommendation(input: { totalTasks: number; doneTasks: number; openTasks: number; overdueTasks: number; downstreamOutcomes: number; wonRevenue: number }) {
+  if (input.totalTasks === 0) return '近 30 天暂无客户健康修复任务。先让低健康客户进入自动化或批量修复队列。';
+  if (input.overdueTasks > 0) return `有 ${input.overdueTasks} 个客户健康修复任务已逾期。优先处理逾期项,否则自动化只是制造待办库存。`;
+  if (input.doneTasks === 0) return `已生成 ${input.totalTasks} 个健康修复任务,但还没有完成记录。先要求销售关闭任务并写跟进结果。`;
+  if (input.downstreamOutcomes > 0 && input.wonRevenue > 0) return `健康修复任务已带来 ${input.downstreamOutcomes} 次后续推进和 $${Math.round(input.wonRevenue).toLocaleString()} 赢单收入。建议复盘有效短板和话术。`;
+  if (input.downstreamOutcomes > 0) return `健康修复任务已带来 ${input.downstreamOutcomes} 次后续商机推进,但暂未形成赢单收入。继续盯报价到成交的转化。`;
+  return `健康修复任务完成率 ${formatLocalPercent(input.totalTasks ? input.doneTasks / input.totalTasks : null)},但暂未看到后续商机推进。需要检查任务内容是否足够具体。`;
+}
+
+function healthTaskSourceLabel(source: string) {
+  const labels: Record<string, string> = {
+    CUSTOMER_HEALTH_AUTOMATION: '健康自动化',
+    CUSTOMER_HEALTH_BULK: '健康批量',
+    CUSTOMER_HEALTH: '客户详情体检',
+  };
+  return labels[source] || source;
+}
+
+function taskAttributionType(source: string | null) {
+  if (source === 'CUSTOMER_HEALTH_AUTOMATION') return 'HEALTH_AUTOMATION_TASK';
+  if (source === 'CUSTOMER_HEALTH_BULK') return 'HEALTH_BULK_TASK';
+  if (source === 'CUSTOMER_HEALTH') return 'HEALTH_DETAIL_TASK';
+  if (source === 'AUTOMATION_NO_REPLY_TIMEOUT') return 'AUTOMATION_DRIP_TASK';
+  if (source === 'EMAIL_ACTION_BULK') return 'EMAIL_ACTION_TASK';
+  if (source === 'SALES_RADAR') return 'SALES_RADAR_TASK';
+  return 'DONE_TASK';
+}
+
+function taskAttributionLabel(source: string | null) {
+  const labels: Record<string, string> = {
+    CUSTOMER_HEALTH_AUTOMATION: '健康自动化任务',
+    CUSTOMER_HEALTH_BULK: '健康批量任务',
+    CUSTOMER_HEALTH: '客户体检任务',
+    AUTOMATION_NO_REPLY_TIMEOUT: '自动开发信任务',
+    EMAIL_ACTION_BULK: '邮件动作任务',
+    SALES_RADAR: '销售雷达任务',
+  };
+  return labels[source || ''] || '完成任务';
 }
 
 function emptySalesActionAttribution() {
