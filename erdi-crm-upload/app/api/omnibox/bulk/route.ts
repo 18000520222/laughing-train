@@ -195,6 +195,7 @@ function channelLabel(channel: string) {
     SHOPEE: '虾皮',
     FACEBOOK: 'Facebook',
     LINKEDIN: 'LinkedIn',
+    SALESMARTLY: 'SaleSmartly',
   };
   return labels[channel] || channel;
 }

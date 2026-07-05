@@ -271,7 +271,7 @@ async function notify(msg: NormalizedMessage, preview: string, link: string) {
 
 function channelLabel(c: ChannelType): string {
   return (
-    { WHATSAPP: 'WhatsApp', ALIBABA: '阿里国际站', AMAZON: '亚马逊', SHOPEE: '虾皮', FACEBOOK: 'Facebook', LINKEDIN: 'LinkedIn', EMAIL: '邮件' } as Record<
+    { WHATSAPP: 'WhatsApp', ALIBABA: '阿里国际站', AMAZON: '亚马逊', SHOPEE: '虾皮', FACEBOOK: 'Facebook', LINKEDIN: 'LinkedIn', EMAIL: '邮件', SALESMARTLY: 'SaleSmartly' } as Record<
       ChannelType,
       string
     >
@@ -279,7 +279,7 @@ function channelLabel(c: ChannelType): string {
 }
 
 function notificationType(c: ChannelType): string {
-  if (c === 'FACEBOOK' || c === 'LINKEDIN') return 'SOCIAL';
+  if (c === 'FACEBOOK' || c === 'LINKEDIN' || c === 'SALESMARTLY') return 'SOCIAL';
   if (c === 'EMAIL') return 'EMAIL';
   if (c === 'AMAZON' || c === 'ALIBABA' || c === 'SHOPEE') return 'SYSTEM';
   return 'WHATSAPP';

@@ -74,6 +74,15 @@ const checks = [
     message: 'automation canvas node health UI missing',
   },
   {
+    ok:
+      pageSource.includes('function NodeActionDeck') &&
+      pageSource.includes('sourceNode') &&
+      pageSource.includes('canvasRepairLabel') &&
+      pageSource.includes('action={testFlow}') &&
+      pageSource.includes('method="post" title={diagnostic.advice}'),
+    message: 'automation canvas node action controls missing',
+  },
+  {
     ok: repairSource.includes('repairAutomationRiskFlow') && repairSource.includes('bulkReplayFailedAutomationRuns') && repairSource.includes('operatorNote'),
     message: 'automation risk repair helper missing',
   },

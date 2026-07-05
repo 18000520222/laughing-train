@@ -8,12 +8,14 @@ import { whatsappAdapter } from '@/lib/channels/whatsapp';
 import { alibabaAdapter } from '@/lib/channels/alibaba';
 import { amazonAdapter } from '@/lib/channels/amazon';
 import { shopeeAdapter } from '@/lib/channels/shopee';
+import { salesmartlyAdapter } from '@/lib/channels/salesmartly';
 
 const REGISTRY: Partial<Record<ChannelType, ChannelAdapter>> = {
   WHATSAPP: whatsappAdapter,
   ALIBABA: alibabaAdapter,
   AMAZON: amazonAdapter,
   SHOPEE: shopeeAdapter,
+  SALESMARTLY: salesmartlyAdapter,
 };
 
 /** 取某渠道的适配器(未注册返回 undefined) */

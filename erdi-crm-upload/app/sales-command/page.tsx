@@ -2591,6 +2591,7 @@ function sourceLabel(source: string) {
     FACEBOOK: 'Facebook',
     SHOPEE: 'Shopee',
     AMAZON: 'Amazon',
+    SALESMARTLY: 'SaleSmartly',
     MANUAL: '手工录入',
     WEBSITE: '官网',
     UNKNOWN: '未知来源',

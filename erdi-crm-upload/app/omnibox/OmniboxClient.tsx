@@ -33,6 +33,7 @@ const CHANNEL_LABEL: Record<string, string> = {
   SHOPEE: '虾皮',
   FACEBOOK: 'Facebook',
   LINKEDIN: 'LinkedIn',
+  SALESMARTLY: 'SaleSmartly',
 };
 const CHANNEL_COLOR: Record<string, string> = {
   EMAIL: 'bg-indigo-100 text-indigo-700',

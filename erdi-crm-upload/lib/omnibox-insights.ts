@@ -216,6 +216,7 @@ const CHANNEL_LABEL: Record<string, string> = {
   SHOPEE: '虾皮',
   FACEBOOK: 'Facebook',
   LINKEDIN: 'LinkedIn',
+  SALESMARTLY: 'SaleSmartly',
 };
 
 const INTENT_LABEL: Record<string, string> = {

@@ -64,6 +64,7 @@ export const CHANNEL_LABEL: Record<string, string> = {
   SHOPEE: 'Shopee',
   FACEBOOK: 'Facebook',
   LINKEDIN: 'LinkedIn',
+  SALESMARTLY: 'SaleSmartly',
 };
 
 export const STATUS_LABEL: Record<string, string> = {

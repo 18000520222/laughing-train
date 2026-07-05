@@ -320,6 +320,7 @@ export function channelLabel(channel: string) {
     SHOPEE: 'Shopee',
     FACEBOOK: 'Facebook',
     LINKEDIN: 'LinkedIn',
+    SALESMARTLY: 'SaleSmartly',
   };
   return labels[channel] || channel;
 }

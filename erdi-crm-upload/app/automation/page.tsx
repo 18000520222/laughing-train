@@ -1362,12 +1362,13 @@ function FlowCanvas({ flow, diagnostics }: { flow: any; diagnostics: any[] }) {
   const conditionDiagnostic = diagnostics.find((item) => item.node === 'condition');
   const actionDiagnostic = diagnostics.find((item) => item.node === 'action');
   return (
-    <div className="min-w-[780px] h-[390px] relative rounded-xl bg-white border border-slate-200">
+    <div className="min-w-[780px] h-[430px] relative rounded-xl bg-white border border-slate-200">
       <div className={`absolute left-8 top-16 w-56 rounded-lg border p-4 shadow-sm ${canvasNodeStyle('trigger', triggerDiagnostic?.status)}`}>
         <div className="text-xs font-bold opacity-70 mb-2">触发器</div>
         <div className="truncate font-bold" title={flow.triggerType}>{flow.triggerType}</div>
         <div className="mt-2 text-xs opacity-70">客户事件发生后启动流程</div>
         <NodeHealth diagnostic={triggerDiagnostic} />
+        <NodeActionDeck flow={flow} node="trigger" diagnostic={triggerDiagnostic} />
       </div>
       {hasCondition && (
         <div className={`absolute left-[310px] top-16 w-56 rounded-lg border p-4 shadow-sm ${canvasNodeStyle('condition', conditionDiagnostic?.status)}`}>
@@ -1375,6 +1376,7 @@ function FlowCanvas({ flow, diagnostics }: { flow: any; diagnostics: any[] }) {
           <div className="truncate font-bold" title={flow.conditionType}>{flow.conditionType}</div>
           <div className="mt-2 text-xs opacity-70">匹配后进入绿色分支,否则进入兜底路径</div>
           <NodeHealth diagnostic={conditionDiagnostic} />
+          <NodeActionDeck flow={flow} node="condition" diagnostic={conditionDiagnostic} />
         </div>
       )}
       <div className={`absolute ${hasCondition ? 'left-[590px]' : 'left-[310px]'} top-16 w-56 rounded-lg border p-4 shadow-sm ${canvasNodeStyle('action', actionDiagnostic?.status)}`}>
@@ -1382,6 +1384,7 @@ function FlowCanvas({ flow, diagnostics }: { flow: any; diagnostics: any[] }) {
         <div className="truncate font-bold" title={flow.actionType}>{flow.actionType}</div>
         <div className="mt-2 text-xs opacity-70">发送消息、生成草稿、打标签、分配负责人或提醒跟进</div>
         <NodeHealth diagnostic={actionDiagnostic} />
+        <NodeActionDeck flow={flow} node="action" diagnostic={actionDiagnostic} />
       </div>
       <Connector left={264} top={104} width={hasCondition ? 46 : 46} label="下一步" />
       {hasCondition ? (
@@ -1397,6 +1400,35 @@ function FlowCanvas({ flow, diagnostics }: { flow: any; diagnostics: any[] }) {
         <span className="px-2 py-1 rounded bg-slate-100 text-xs text-slate-500">缩放</span>
         <span className="px-2 py-1 rounded bg-slate-100 text-xs text-slate-500">定位</span>
       </div>
+    </div>
+  );
+}
+
+function NodeActionDeck({ flow, node, diagnostic }: { flow: any; node: 'trigger' | 'condition' | 'action'; diagnostic?: any }) {
+  const needsRepair = diagnostic && diagnostic.status !== 'ok';
+  const canTest = node === 'trigger' || diagnostic?.status === 'blocked';
+  if (!needsRepair && !canTest) return null;
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {canTest && (
+        <form action={testFlow}>
+          <input type="hidden" name="id" value={flow.id} />
+          <button className="inline-flex h-7 items-center gap-1 rounded-md bg-white/85 px-2 text-[10px] font-black shadow-sm ring-1 ring-black/5 hover:bg-white">
+            <Zap className="h-3 w-3" />
+            测试
+          </button>
+        </form>
+      )}
+      {needsRepair && (
+        <form action="/api/automation/risks/repair" method="post" title={diagnostic.advice}>
+          <input type="hidden" name="flowId" value={flow.id} />
+          <input type="hidden" name="sourceNode" value={node} />
+          <button className="inline-flex h-7 items-center gap-1 rounded-md bg-white/85 px-2 text-[10px] font-black shadow-sm ring-1 ring-black/5 hover:bg-white">
+            <RefreshCcw className="h-3 w-3" />
+            {canvasRepairLabel(node, diagnostic.status)}
+          </button>
+        </form>
+      )}
     </div>
   );
 }
@@ -1432,6 +1464,13 @@ function nodeStatusLabel(status: string) {
     idle: '待运行',
   };
   return labels[status] || '待运行';
+}
+
+function canvasRepairLabel(node: 'trigger' | 'condition' | 'action', status: string) {
+  if (node === 'trigger') return status === 'idle' ? '开启' : '修入口';
+  if (node === 'condition') return '调条件';
+  if (node === 'action') return status === 'blocked' ? '重放' : '修动作';
+  return '修复';
 }
 
 function Connector({ left, top, width, label, tone = 'gray' }: { left: number; top: number; width: number; label: string; tone?: 'gray' | 'green' }) {

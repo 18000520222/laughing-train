@@ -8,6 +8,7 @@ import { whatsappAdapter } from '@/lib/channels/whatsapp';
 import { alibabaAdapter } from '@/lib/channels/alibaba';
 import { amazonAdapter } from '@/lib/channels/amazon';
 import { shopeeAdapter } from '@/lib/channels/shopee';
+import { salesmartlyAdapter } from '@/lib/channels/salesmartly';
 import type { ChannelAdapter } from '@/lib/channels/types';
 
 // 渠道 → 适配器注册表(全渠道统一回复入口)
@@ -16,6 +17,7 @@ const ADAPTERS: Partial<Record<string, ChannelAdapter>> = {
   ALIBABA: alibabaAdapter,
   AMAZON: amazonAdapter,
   SHOPEE: shopeeAdapter,
+  SALESMARTLY: salesmartlyAdapter,
 };
 
 export async function POST(req: Request) {

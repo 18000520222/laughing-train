@@ -23,6 +23,8 @@ const SECRET_FIELDS = new Set([
   'shopeePartnerKey',
   'shopeeAccessToken',
   'shopeeRefreshToken',
+  'salesmartlyWebhookKey',
+  'salesmartlyApiKey',
 ]);
 
 export default async function ChannelSettingsPage({
@@ -126,6 +128,10 @@ export default async function ChannelSettingsPage({
       shopeeShopId: g('shopeeShopId'),
       shopeeAccessToken: g('shopeeAccessToken'),
       shopeeRefreshToken: g('shopeeRefreshToken'),
+      // SaleSmartly
+      salesmartlyWebhookKey: g('salesmartlyWebhookKey'),
+      salesmartlyReplyUrl: g('salesmartlyReplyUrl'),
+      salesmartlyApiKey: g('salesmartlyApiKey'),
     };
     const data = Object.fromEntries(Object.entries(rawData).filter(([, v]) => v !== undefined));
     // 敏感字段留空时保持原值；普通字段留空时允许清空。
@@ -151,6 +157,7 @@ export default async function ChannelSettingsPage({
   const abOk = !!(st.alibabaAppKey && st.alibabaAppSecret && st.alibabaAccessToken);
   const amzOk = !!(st.amazonRefreshToken && st.amazonLwaClientId && st.amazonLwaClientSecret && st.amazonAwsAccessKeyId && st.amazonAwsSecretAccessKey);
   const spOk = !!(st.shopeePartnerId && st.shopeePartnerKey && st.shopeeShopId);
+  const ssOk = !!st.salesmartlyWebhookKey;
 
   const baseUrl = 'https://erdicrm.com';
   const channelHealthRows = buildChannelHealthRows({
@@ -161,7 +168,7 @@ export default async function ChannelSettingsPage({
     inboxPending,
     trackingEventCount,
     latestTrackingAt: latestTrackingEvent?.occurredAt || latestTrackingEvent?.createdAt || null,
-    configured: { waOk, fbOk, liOk, aftershipOk, abOk, amzOk, spOk },
+    configured: { waOk, fbOk, liOk, aftershipOk, abOk, amzOk, spOk, ssOk },
   });
   const channelHealthSummary = summarizeChannelHealth(channelHealthRows);
 
@@ -264,6 +271,19 @@ export default async function ChannelSettingsPage({
             <Field name="whatsappToken" label="Meta Access Token" defaultValue={st.whatsappToken} type="password" />
             <Field name="whatsappPhoneId" label="Phone Number ID" defaultValue={st.whatsappPhoneId} />
             <Field name="whatsappVerifyToken" label="Verify Token（Webhook 校验）" defaultValue={st.whatsappVerifyToken} placeholder="erdi-verify-2026" />
+          </div>
+        </section>
+
+        <section className="bg-white rounded-xl border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-lg font-bold text-gray-800">💠 SaleSmartly</h2>
+            {status(ssOk)}
+          </div>
+          <p className="text-xs text-gray-400 mb-4">Webhook 回调地址：<code>{baseUrl}/api/salesmartly/webhook</code>。SaleSmartly 后台配置 webhook key；如需从 CRM 一键回复，再填 SaleSmartly 回复地址和 API Key。</p>
+          <div className="grid grid-cols-2 gap-4">
+            <Field name="salesmartlyWebhookKey" label="Webhook Key" defaultValue={st.salesmartlyWebhookKey} type="password" />
+            <Field name="salesmartlyReplyUrl" label="Message Reply URL" defaultValue={st.salesmartlyReplyUrl} placeholder="https://..." />
+            <Field name="salesmartlyApiKey" label="API Key / Reply Token" defaultValue={st.salesmartlyApiKey} type="password" />
           </div>
         </section>
 
@@ -434,7 +454,7 @@ function buildChannelHealthRows(input: {
   inboxPending: InboxPendingHealth[];
   trackingEventCount: number;
   latestTrackingAt: Date | null;
-  configured: { waOk: boolean; fbOk: boolean; liOk: boolean; aftershipOk: boolean; abOk: boolean; amzOk: boolean; spOk: boolean };
+  configured: { waOk: boolean; fbOk: boolean; liOk: boolean; aftershipOk: boolean; abOk: boolean; amzOk: boolean; spOk: boolean; ssOk: boolean };
 }) {
   const totalMap = new Map<InboxChannel, InboxTotalHealth>();
   const pendingMap = new Map<InboxChannel, number>();
@@ -463,6 +483,7 @@ function buildChannelHealthRows(input: {
   const shopee = byChannel('SHOPEE');
   const facebookInbox = byChannel('FACEBOOK');
   const linkedinInbox = byChannel('LINKEDIN');
+  const salesmartly = byChannel('SALESMARTLY');
 
   return [
     makeChannelRow({
@@ -498,6 +519,23 @@ function buildChannelHealthRows(input: {
       pendingAction: 'WhatsApp 待回复通常更急,先从统一收件箱清掉。',
       href: '/omnibox',
       linkLabel: '打开统一收件箱',
+    }),
+    makeChannelRow({
+      key: 'salesmartly',
+      name: 'SaleSmartly 聚合聊天',
+      mode: 'Webhook 入站 + CRM AI 草稿 + 可选回发',
+      configured: input.configured.ssOk,
+      tokenExpired: false,
+      tokenLabel: input.st.salesmartlyWebhookKey ? (input.st.salesmartlyReplyUrl ? 'Webhook + 回复地址已配置' : 'Webhook 已配置') : '未配置 Webhook Key',
+      dataCount: salesmartly.total,
+      pendingCount: salesmartly.pending,
+      lastSeenAt: salesmartly.lastSeenAt,
+      setupAction: '在 SaleSmartly 后台配置 webhook key,并把回调 URL 指向 /api/salesmartly/webhook。',
+      emptyAction: '从 SaleSmartly 发一条测试会话,确认消息进入统一收件箱并自动建客户。',
+      staleAction: 'SaleSmartly 超过 7 天无新消息,检查 webhook key、回调 URL 和 Max/Enterprise 权限。',
+      pendingAction: 'SaleSmartly 待回复消息进入统一收件箱,优先处理高意向询盘。',
+      href: '/omnibox?channel=SALESMARTLY',
+      linkLabel: '看 SaleSmartly 消息',
     }),
     makeChannelRow({
       key: 'alibaba',

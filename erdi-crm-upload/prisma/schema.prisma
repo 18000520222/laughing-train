@@ -107,6 +107,11 @@ model SystemSettings {
   // AfterShip
   aftershipApiKey String?
 
+  // SaleSmartly unified chat platform
+  salesmartlyWebhookKey String?
+  salesmartlyReplyUrl   String?
+  salesmartlyApiKey     String?
+
   // LibreTranslate (可选自建实例)
   libretranslateUrl String? @default("https://libretranslate.com")
 
@@ -721,6 +726,7 @@ enum InboxChannel {
   FACEBOOK
   LINKEDIN
   EMAIL
+  SALESMARTLY
 }
 
 enum InboxStatus {
@@ -777,6 +783,7 @@ enum AutomationChannel {
   SHOPEE
   FACEBOOK
   LINKEDIN
+  SALESMARTLY
 }
 
 enum AutomationStatus {
