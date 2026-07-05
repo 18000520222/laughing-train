@@ -4,6 +4,7 @@ type InboxWithCompany = Awaited<ReturnType<typeof loadInbox>>;
 type Flow = NonNullable<Awaited<ReturnType<typeof loadFlow>>>;
 
 const SALES_ROLES = ['SUPER_ADMIN', 'ADMIN', 'SALES'] as const;
+const FAILED_REPLAY_SCAN_LIMIT = 200;
 
 async function loadInbox(inboxId: string) {
   return prisma.inboxMessage.findUnique({
@@ -41,13 +42,29 @@ export async function runAutomationsForInbox(inboxId: string) {
   return { evaluated: flows.length, matched: matchedCount };
 }
 
-export async function replayAutomationRun(runId: string, { userId }: { userId?: string } = {}) {
+export async function replayAutomationRun(
+  runId: string,
+  { userId, source = 'manual_replay', skipIfAlreadyReplayed = false }: { userId?: string; source?: string; skipIfAlreadyReplayed?: boolean } = {}
+) {
   const previous = await prisma.automationRun.findUnique({
     where: { id: runId },
     select: { id: true, flowId: true, inboxMessageId: true, status: true },
   });
   if (!previous) return { ok: false, reason: '运行记录不存在' };
   if (!previous.inboxMessageId) return { ok: false, reason: '该运行没有原始收件箱消息,不可重放' };
+
+  if (skipIfAlreadyReplayed) {
+    const existingReplay = await findExistingReplay(previous.id);
+    if (existingReplay) {
+      return {
+        ok: false,
+        reason: '该运行已重放',
+        flowId: previous.flowId,
+        replayOfRunId: previous.id,
+        createdRunId: existingReplay.id,
+      };
+    }
+  }
 
   const [flow, inbox] = await Promise.all([loadFlow(previous.flowId), loadInbox(previous.inboxMessageId)]);
   if (!flow) return { ok: false, reason: '流程不存在' };
@@ -56,7 +73,7 @@ export async function replayAutomationRun(runId: string, { userId }: { userId?: 
 
   const replay = await runAutomationFlowForInbox(flow, inbox, {
     ignoreExisting: true,
-    source: 'manual_replay',
+    source,
     replayOfRunId: previous.id,
     userId,
   });
@@ -70,6 +87,145 @@ export async function replayAutomationRun(runId: string, { userId }: { userId?: 
     status: replay.status,
     skippedExisting: replay.skippedExisting,
   };
+}
+
+export async function listFailedAutomationReplayQueue({ limit = 10, flowId }: { limit?: number; flowId?: string } = {}) {
+  const max = clampInt(limit, 1, 50);
+  const runs = await prisma.automationRun.findMany({
+    where: {
+      status: 'FAILED' as any,
+      ...(flowId ? { flowId } : {}),
+    },
+    orderBy: { createdAt: 'desc' },
+    take: Math.min(FAILED_REPLAY_SCAN_LIMIT, Math.max(max * 5, max + 20)),
+    include: { flow: { select: { id: true, name: true, flowCode: true, triggerType: true } } },
+  });
+
+  const items = [];
+  const skippedReasons: Record<string, number> = {};
+  let scanned = 0;
+
+  for (const run of runs) {
+    scanned++;
+    const blocked = await replayBlockReason(run);
+    if (blocked) {
+      skippedReasons[blocked] = (skippedReasons[blocked] || 0) + 1;
+      continue;
+    }
+    items.push({
+      id: run.id,
+      flowId: run.flowId,
+      flowName: run.flow.name,
+      flowCode: run.flow.flowCode,
+      channel: run.channel,
+      summary: run.summary,
+      contactKey: run.contactKey,
+      createdAt: run.createdAt,
+    });
+    if (items.length >= max) break;
+  }
+
+  return {
+    scanned,
+    replayableCount: items.length,
+    skippedCount: Object.values(skippedReasons).reduce((sum, count) => sum + count, 0),
+    skippedReasons,
+    items,
+  };
+}
+
+export async function bulkReplayFailedAutomationRuns({
+  limit = 20,
+  userId,
+  flowId,
+  dryRun = false,
+}: {
+  limit?: number;
+  userId?: string;
+  flowId?: string;
+  dryRun?: boolean;
+} = {}) {
+  const max = clampInt(limit, 1, 50);
+  const runs = await prisma.automationRun.findMany({
+    where: {
+      status: 'FAILED' as any,
+      ...(flowId ? { flowId } : {}),
+    },
+    orderBy: { createdAt: 'desc' },
+    take: Math.min(FAILED_REPLAY_SCAN_LIMIT, Math.max(max * 5, max + 20)),
+    include: { flow: { select: { id: true, name: true, flowCode: true, triggerType: true } } },
+  });
+
+  const result = {
+    ok: true,
+    dryRun,
+    limit: max,
+    scanned: 0,
+    replayable: 0,
+    replayed: 0,
+    skipped: 0,
+    failed: 0,
+    createdRunIds: [] as string[],
+    results: [] as Array<{ runId: string; flowId: string; status: string; reason?: string; createdRunId?: string }>,
+  };
+
+  for (const run of runs) {
+    if (result.replayable >= max) break;
+    result.scanned++;
+
+    const blocked = await replayBlockReason(run);
+    if (blocked) {
+      result.skipped++;
+      result.results.push({ runId: run.id, flowId: run.flowId, status: 'SKIPPED', reason: blocked });
+      continue;
+    }
+
+    result.replayable++;
+    if (dryRun) {
+      result.results.push({ runId: run.id, flowId: run.flowId, status: 'READY' });
+      continue;
+    }
+
+    try {
+      const replay = await replayAutomationRun(run.id, { userId, source: 'bulk_replay', skipIfAlreadyReplayed: true });
+      if (replay.ok) {
+        result.replayed++;
+        if (replay.createdRunId) result.createdRunIds.push(replay.createdRunId);
+        result.results.push({ runId: run.id, flowId: run.flowId, status: String(replay.status || 'REPLAYED'), createdRunId: replay.createdRunId });
+      } else {
+        result.skipped++;
+        result.results.push({ runId: run.id, flowId: run.flowId, status: 'SKIPPED', reason: replay.reason });
+      }
+    } catch (error) {
+      result.failed++;
+      result.results.push({
+        runId: run.id,
+        flowId: run.flowId,
+        status: 'FAILED',
+        reason: error instanceof Error ? error.message : '批量重放失败',
+      });
+    }
+  }
+
+  return result;
+}
+
+async function replayBlockReason(run: { id: string; inboxMessageId: string | null; flow?: { triggerType: string } | null }) {
+  if (!run.inboxMessageId) return '没有原始收件箱消息';
+  if (!run.flow) return '流程不存在';
+  if (run.flow.triggerType === 'NO_REPLY_TIMEOUT') return '超时未回复流程由定时任务处理';
+  const existingReplay = await findExistingReplay(run.id);
+  if (existingReplay) return '已重放';
+  return null;
+}
+
+async function findExistingReplay(runId: string) {
+  return prisma.automationRun.findFirst({
+    where: {
+      output: { path: ['replayOfRunId'], equals: runId } as any,
+    },
+    select: { id: true },
+  });
 }
 
 async function runAutomationFlowForInbox(
@@ -549,4 +705,9 @@ function jsonObject(value: unknown) {
 
 function stringArray(value: unknown) {
   return Array.isArray(value) ? value.map(String) : [];
+}
+
+function clampInt(value: number, min: number, max: number) {
+  const parsed = Number.isFinite(value) ? Math.floor(value) : min;
+  return Math.max(min, Math.min(max, parsed));
 }

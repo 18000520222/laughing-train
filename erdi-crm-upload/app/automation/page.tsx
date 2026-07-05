@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
   Activity,
+  AlertTriangle,
   BarChart3,
   Bot,
   CheckCircle2,
@@ -23,7 +24,7 @@ import {
 } from 'lucide-react';
 import { prisma } from '@/lib/prisma';
 import { createAutomationBlueprintPack } from '@/lib/automation-blueprint';
-import { replayAutomationRun } from '@/lib/automation-runner';
+import { bulkReplayFailedAutomationRuns, listFailedAutomationReplayQueue, replayAutomationRun } from '@/lib/automation-runner';
 import {
   AUTOMATION_BLUEPRINT_GROUPS,
   AUTOMATION_CORE_TEMPLATE_KEYS,
@@ -280,6 +281,23 @@ async function replayRun(formData: FormData) {
   redirect(`${url.pathname}${url.search}`);
 }
 
+async function bulkReplayFailedRuns(formData: FormData) {
+  'use server';
+  const role = getRole();
+  if (!canAccess(role)) return;
+
+  const limit = Number(formData.get('limit') || 10);
+  const cookieUserId = cookies().get('auth_userId')?.value || undefined;
+  const result = await bulkReplayFailedAutomationRuns({ limit, userId: cookieUserId });
+  const url = new URL('/automation', 'http://local');
+  url.searchParams.set('bulkReplay', 'ok');
+  url.searchParams.set('replayed', String(result.replayed));
+  url.searchParams.set('replayable', String(result.replayable));
+  url.searchParams.set('skipped', String(result.skipped));
+  url.searchParams.set('failed', String(result.failed));
+  redirect(`${url.pathname}${url.search}`);
+}
+
 export default async function AutomationPage(props: any) {
   const role = getRole();
   if (!canAccess(role)) redirect('/dashboard?error=unauthorized');
@@ -300,6 +318,13 @@ export default async function AutomationPage(props: any) {
     createdRun: firstParam(sp.createdRun),
     reason: firstParam(sp.reason),
   };
+  const bulkReplayResult = {
+    bulkReplay: firstParam(sp.bulkReplay),
+    replayed: firstParam(sp.replayed),
+    replayable: firstParam(sp.replayable),
+    skipped: firstParam(sp.skipped),
+    failed: firstParam(sp.failed),
+  };
 
   const where: any = {};
   if (q) {
@@ -313,7 +338,7 @@ export default async function AutomationPage(props: any) {
   if (status) where.status = status;
   if (channel) where.channel = channel;
 
-  const [total, flows, recentRuns] = await Promise.all([
+  const [total, flows, recentRuns, failedReplayQueue] = await Promise.all([
     prisma.automationFlow.count({ where }),
     prisma.automationFlow.findMany({
       where,
@@ -326,6 +351,7 @@ export default async function AutomationPage(props: any) {
       take: 8,
       include: { flow: { select: { id: true, name: true, flowCode: true } }, user: { select: { name: true, email: true } } },
     }),
+    listFailedAutomationReplayQueue({ limit: 10 }),
   ]);
 
   const governanceFlows = await prisma.automationFlow.findMany({
@@ -379,6 +405,7 @@ export default async function AutomationPage(props: any) {
         </div>
         {packResult.pack && <BlueprintPackResultBanner result={packResult} />}
         {replayResult.replay && <ReplayResultBanner result={replayResult} />}
+        {bulkReplayResult.bulkReplay && <BulkReplayResultBanner result={bulkReplayResult} />}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {blueprint.groups.map((group) => (
             <BlueprintGroupCard key={group.key} group={group} />
@@ -474,6 +501,8 @@ export default async function AutomationPage(props: any) {
           {governance.riskRows.length === 0 && <div className="p-8 text-center text-sm font-bold text-gray-400">当前没有明显自动化治理风险。</div>}
         </div>
       </section>
+
+      <FailedReplayWorkbench queue={failedReplayQueue} />
 
       <div className="grid grid-cols-1 2xl:grid-cols-[minmax(560px,0.95fr)_minmax(640px,1.05fr)] gap-6">
         <section className="space-y-6">
@@ -939,6 +968,22 @@ function ReplayResultBanner({
   );
 }
 
+function BulkReplayResultBanner({
+  result,
+}: {
+  result: { replayed?: string; replayable?: string; skipped?: string; failed?: string };
+}) {
+  return (
+    <div className="mb-4 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
+      失败运行批量恢复已执行
+      <span className="ml-2">已重放 {result.replayed || '0'}</span>
+      <span className="ml-2">可恢复 {result.replayable || '0'}</span>
+      <span className="ml-2 text-emerald-700">跳过 {result.skipped || '0'}</span>
+      <span className="ml-2 text-rose-700">异常 {result.failed || '0'}</span>
+    </div>
+  );
+}
+
 function BlueprintGroupCard({ group }: { group: any }) {
   const complete = group.coverageRate >= 1;
   const activeComplete = group.activeRate >= 1;
@@ -982,6 +1027,74 @@ function firstParam(value: string | string[] | undefined) {
 function formatAutomationPercent(value: number | null) {
   if (value === null) return '-';
   return `${Math.round(value * 100)}%`;
+}
+
+function FailedReplayWorkbench({ queue }: { queue: any }) {
+  const hasItems = queue.items.length > 0;
+  return (
+    <section className="mb-6 rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <h2 className="flex items-center gap-2 font-bold text-gray-900">
+            <AlertTriangle className="h-4 w-4 text-rose-500" />
+            失败运行恢复台
+          </h2>
+          <p className="mt-1 text-xs text-gray-500">参考 Zapier Replay、Make Run Replay 和 HubSpot 工作流历史,只恢复有原始入站消息、非超时定时任务且未重放过的失败运行。</p>
+        </div>
+        <form action={bulkReplayFailedRuns} className="flex flex-wrap items-center gap-2">
+          <input type="hidden" name="limit" value="10" />
+          <button
+            disabled={!hasItems}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 text-xs font-black text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            重放最近失败
+          </button>
+        </form>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <GovernanceMetric label="已扫描" value={queue.scanned} detail="最近失败运行" tone="slate" />
+        <GovernanceMetric label="可恢复" value={queue.replayableCount} detail="满足重放条件" tone={queue.replayableCount > 0 ? 'rose' : 'emerald'} />
+        <GovernanceMetric label="已跳过" value={queue.skippedCount} detail="缺原消息/已重放/定时任务" tone={queue.skippedCount > 0 ? 'amber' : 'emerald'} />
+      </div>
+      <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-gray-50 text-xs font-black text-gray-500">
+            <tr>
+              <th className="p-3">失败流程</th>
+              <th className="p-3">摘要</th>
+              <th className="p-3">渠道</th>
+              <th className="p-3">时间</th>
+              <th className="p-3">操作</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {queue.items.map((item: any) => (
+              <tr key={item.id} className="hover:bg-gray-50">
+                <td className="p-3">
+                  <Link href={`/automation?flow=${item.flowId}`} className="font-black text-gray-900 hover:text-indigo-700">{item.flowName}</Link>
+                  <div className="mt-0.5 text-[11px] font-mono text-gray-400">{item.flowCode}</div>
+                </td>
+                <td className="max-w-[420px] p-3 text-xs font-bold text-gray-600">{item.summary || '失败运行'}</td>
+                <td className="p-3 text-xs font-bold text-gray-500">{CHANNEL_LABEL[item.channel] || item.channel}</td>
+                <td className="p-3 text-xs font-bold text-gray-500">{new Date(item.createdAt).toLocaleString('zh-CN')}</td>
+                <td className="p-3">
+                  <form action={replayRun}>
+                    <input type="hidden" name="runId" value={item.id} />
+                    <button className="inline-flex items-center gap-1 rounded-md border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-[11px] font-black text-indigo-700 hover:bg-indigo-100">
+                      <RefreshCcw className="h-3 w-3" />
+                      单条重放
+                    </button>
+                  </form>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!hasItems && <div className="p-8 text-center text-sm font-bold text-gray-400">当前没有可恢复的失败运行。</div>}
+      </div>
+    </section>
+  );
 }
 
 function GovernanceMetric({ label, value, detail, tone }: { label: string; value: number | string; detail: string; tone: string }) {
