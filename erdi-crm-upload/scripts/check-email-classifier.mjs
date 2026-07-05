@@ -107,6 +107,15 @@ const cases = [
     },
   },
   {
+    name: 'carrier operation guide is not quote',
+    expected: 'PLATFORM_ALERT',
+    input: {
+      from: 'iocs@dhl.com',
+      subject: '【DHL】远程取件发件人操作指南',
+      textBody: 'DHL sender operation guide and how to arrange pickup.',
+    },
+  },
+  {
     name: 'refund down payment',
     expected: 'PAYMENT_FINANCE',
     input: {
