@@ -648,6 +648,7 @@ model WhatsAppMessage {
 
 enum SocialPlatform {
   FACEBOOK
+  INSTAGRAM
   LINKEDIN
 }
 
@@ -734,6 +735,7 @@ enum InboxChannel {
   AMAZON
   SHOPEE
   FACEBOOK
+  INSTAGRAM
   LINKEDIN
   EMAIL
   SALESMARTLY
@@ -792,6 +794,7 @@ enum AutomationChannel {
   AMAZON
   SHOPEE
   FACEBOOK
+  INSTAGRAM
   LINKEDIN
   SALESMARTLY
 }

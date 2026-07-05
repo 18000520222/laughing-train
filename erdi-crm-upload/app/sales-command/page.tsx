@@ -2589,6 +2589,7 @@ function sourceLabel(source: string) {
     WHATSAPP: 'WhatsApp',
     LINKEDIN: 'LinkedIn',
     FACEBOOK: 'Facebook',
+    INSTAGRAM: 'Instagram',
     SHOPEE: 'Shopee',
     AMAZON: 'Amazon',
     SALESMARTLY: 'SaleSmartly',

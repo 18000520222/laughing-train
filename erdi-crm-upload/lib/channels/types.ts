@@ -3,7 +3,7 @@
 // 每个渠道(WhatsApp / 阿里国际站 / 亚马逊 / Shopee)实现 ChannelAdapter,
 // 新增渠道只需写一个适配器 + 在 registry 注册,中台逻辑(翻译/AI回复/收件箱)全复用。
 
-export type ChannelType = 'WHATSAPP' | 'ALIBABA' | 'AMAZON' | 'SHOPEE' | 'FACEBOOK' | 'LINKEDIN' | 'EMAIL' | 'SALESMARTLY';
+export type ChannelType = 'WHATSAPP' | 'ALIBABA' | 'AMAZON' | 'SHOPEE' | 'FACEBOOK' | 'INSTAGRAM' | 'LINKEDIN' | 'EMAIL' | 'SALESMARTLY';
 
 export type Direction = 'IN' | 'OUT';
 

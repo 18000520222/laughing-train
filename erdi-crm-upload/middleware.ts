@@ -11,6 +11,7 @@ const PUBLIC_PREFIXES = [
   '/favicon',
   '/api/auth/',        // OAuth start/callback
   '/api/webhook',      // 通用 webhook(自带签名校验)
+  '/api/webhooks/',    // Meta unified webhook 等复数形式
   '/api/shopline',     // SHOPLINE webhook
   '/api/whatsapp/webhook',
   '/api/facebook/webhook',

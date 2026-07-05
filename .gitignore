@@ -9,3 +9,5 @@ erdi-crm-upload/scripts/
 !erdi-crm-upload/package.json
 !erdi-crm-upload/tsconfig.json
 !erdi-crm-upload/vercel.json
+.vercel
+.env*

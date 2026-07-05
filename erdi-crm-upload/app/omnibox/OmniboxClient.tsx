@@ -32,6 +32,7 @@ const CHANNEL_LABEL: Record<string, string> = {
   AMAZON: '亚马逊',
   SHOPEE: '虾皮',
   FACEBOOK: 'Facebook',
+  INSTAGRAM: 'Instagram',
   LINKEDIN: 'LinkedIn',
   SALESMARTLY: 'SaleSmartly',
 };
@@ -42,6 +43,7 @@ const CHANNEL_COLOR: Record<string, string> = {
   AMAZON: 'bg-yellow-100 text-yellow-700',
   SHOPEE: 'bg-red-100 text-red-700',
   FACEBOOK: 'bg-blue-100 text-blue-700',
+  INSTAGRAM: 'bg-pink-100 text-pink-700',
   LINKEDIN: 'bg-sky-100 text-sky-700',
 };
 const INTENT_LABEL: Record<string, string> = {
@@ -115,7 +117,7 @@ export default function OmniboxClient({
     }
   }
 
-  const channels = ['', 'EMAIL', 'WHATSAPP', 'ALIBABA', 'AMAZON', 'SHOPEE', 'FACEBOOK', 'LINKEDIN'];
+  const channels = ['', 'EMAIL', 'WHATSAPP', 'ALIBABA', 'AMAZON', 'SHOPEE', 'FACEBOOK', 'INSTAGRAM', 'LINKEDIN'];
   const statuses = ['', 'NEW', 'AI_DRAFTED', 'REPLIED'];
 
   return (

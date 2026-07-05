@@ -499,6 +499,7 @@ function buildChannelHealthRows(input: {
   };
 
   const facebook = socialSummary(input.socialAccounts, 'FACEBOOK');
+  const instagram = socialSummary(input.socialAccounts, 'INSTAGRAM');
   const linkedin = socialSummary(input.socialAccounts, 'LINKEDIN');
   const emailLatest = maxDate(...input.emailAccounts.map((account) => account.messages[0]?.date || null));
   const activeEmailAccounts = input.emailAccounts.filter((account) => account.isActive);
@@ -512,6 +513,7 @@ function buildChannelHealthRows(input: {
   const amazon = byChannel('AMAZON');
   const shopee = byChannel('SHOPEE');
   const facebookInbox = byChannel('FACEBOOK');
+  const instagramInbox = byChannel('INSTAGRAM');
   const linkedinInbox = byChannel('LINKEDIN');
   const salesmartly = byChannel('SALESMARTLY');
 
@@ -634,6 +636,23 @@ function buildChannelHealthRows(input: {
       pendingAction: 'Facebook Messenger 待回复,进入统一收件箱处理。',
       href: '/api/auth/facebook/start',
       linkLabel: '发起 Facebook 授权',
+    }),
+    makeChannelRow({
+      key: 'instagram',
+      name: 'Instagram Messaging',
+      mode: `${instagram.accountCount} 个账号 · Meta Webhook`,
+      configured: input.configured.fbOk || instagram.accountCount > 0,
+      tokenExpired: instagram.expired,
+      tokenLabel: instagram.accountCount > 0 ? `${instagram.accountCount} 个账号已授权` : input.configured.fbOk ? 'Meta App 凭据已配置' : '未配置 Meta App',
+      dataCount: instagram.dataCount + instagramInbox.total,
+      pendingCount: instagramInbox.pending,
+      lastSeenAt: maxDate(instagram.lastSeenAt, instagramInbox.lastSeenAt),
+      setupAction: '配置 Meta App 后在 Webhooks 里订阅 Instagram messages 字段。',
+      emptyAction: '用 Instagram 专业账号发送测试私信,确认进入统一收件箱。',
+      staleAction: 'Instagram 超过 7 天无新消息,检查 Instagram Messaging 权限、账号绑定和 webhook 订阅。',
+      pendingAction: 'Instagram 私信待回复,进入统一收件箱处理。',
+      href: '/settings/channels',
+      linkLabel: '查看 Meta Webhook',
     }),
     makeChannelRow({
       key: 'linkedin',

@@ -252,6 +252,7 @@ const CHANNEL_LABEL: Record<string, string> = {
   AMAZON: '亚马逊',
   SHOPEE: '虾皮',
   FACEBOOK: 'Facebook',
+  INSTAGRAM: 'Instagram',
   LINKEDIN: 'LinkedIn',
   SALESMARTLY: 'SaleSmartly',
 };

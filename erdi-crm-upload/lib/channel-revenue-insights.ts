@@ -319,6 +319,7 @@ export function channelLabel(channel: string) {
     AMAZON: 'Amazon',
     SHOPEE: 'Shopee',
     FACEBOOK: 'Facebook',
+    INSTAGRAM: 'Instagram',
     LINKEDIN: 'LinkedIn',
     SALESMARTLY: 'SaleSmartly',
   };

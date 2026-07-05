@@ -63,6 +63,7 @@ export const CHANNEL_LABEL: Record<string, string> = {
   AMAZON: 'Amazon',
   SHOPEE: 'Shopee',
   FACEBOOK: 'Facebook',
+  INSTAGRAM: 'Instagram',
   LINKEDIN: 'LinkedIn',
   SALESMARTLY: 'SaleSmartly',
 };
