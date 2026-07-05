@@ -16,6 +16,19 @@ export type SalesPriorityItem = {
   tone: PriorityTone;
 };
 
+export type SalesOwnerPriorityRow = {
+  ownerName: string;
+  itemCount: number;
+  urgentCount: number;
+  maxScore: number;
+  impactUSD: number;
+  topKindLabel: string;
+  topTitle: string;
+  topReason: string;
+  nextAction: string;
+  focusMix: Array<{ label: string; count: number }>;
+};
+
 type ChannelSample = {
   id: string;
   companyId: string;
@@ -141,6 +154,42 @@ export function buildSalesPriorityQueue({
     byKind,
     maxScore: Math.max(1, ...items.map((item) => item.score)),
     recommendation: priorityRecommendation({ items, urgentCount, revenueAtRisk, topItem }),
+  };
+}
+
+export function buildSalesOwnerPriorityReport(items: SalesPriorityItem[]) {
+  const buckets = new Map<string, SalesPriorityItem[]>();
+  for (const item of items) {
+    const ownerName = item.ownerName || '未分配';
+    buckets.set(ownerName, [...(buckets.get(ownerName) || []), item]);
+  }
+
+  const rows = Array.from(buckets.entries())
+    .map(([ownerName, ownerItems]) => {
+      const sorted = [...ownerItems].sort((a, b) => b.score - a.score || b.impactUSD - a.impactUSD);
+      const top = sorted[0];
+      return {
+        ownerName,
+        itemCount: ownerItems.length,
+        urgentCount: ownerItems.filter((item) => item.score >= 90).length,
+        maxScore: top?.score || 0,
+        impactUSD: ownerItems.reduce((sum, item) => sum + item.impactUSD, 0),
+        topKindLabel: top?.kindLabel || '-',
+        topTitle: top?.title || '-',
+        topReason: top?.reason || '-',
+        nextAction: ownerNextAction(sorted),
+        focusMix: ownerFocusMix(ownerItems),
+      };
+    })
+    .sort((a, b) => b.urgentCount - a.urgentCount || b.impactUSD - a.impactUSD || b.maxScore - a.maxScore || b.itemCount - a.itemCount);
+
+  return {
+    rows,
+    ownerCount: rows.length,
+    urgentOwnerCount: rows.filter((row) => row.urgentCount > 0).length,
+    totalImpactUSD: rows.reduce((sum, row) => sum + row.impactUSD, 0),
+    maxImpactUSD: Math.max(1, ...rows.map((row) => row.impactUSD)),
+    recommendation: ownerReportRecommendation(rows),
   };
 }
 
@@ -284,6 +333,32 @@ function groupByKind(items: SalesPriorityItem[]) {
   return Array.from(counts.entries())
     .map(([kind, count]) => ({ kind, label: labels.get(kind) || kind, count }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-CN'));
+}
+
+function ownerFocusMix(items: SalesPriorityItem[]) {
+  const counts = new Map<string, number>();
+  for (const item of items) counts.set(item.kindLabel, (counts.get(item.kindLabel) || 0) + 1);
+  return Array.from(counts.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-CN'))
+    .slice(0, 4);
+}
+
+function ownerNextAction(items: SalesPriorityItem[]) {
+  const urgent = items.find((item) => item.score >= 90);
+  if (urgent) return `${urgent.kindLabel}: ${urgent.action}`;
+  const revenue = items.find((item) => item.impactUSD >= 10000);
+  if (revenue) return `${revenue.kindLabel}: ${revenue.action}`;
+  return items[0]?.action || '暂无动作';
+}
+
+function ownerReportRecommendation(rows: SalesOwnerPriorityRow[]) {
+  if (rows.length === 0) return '暂无负责人风险分布。先让消息、任务、商机和自动化风险进入作战清单。';
+  const urgentOwners = rows.filter((row) => row.urgentCount > 0);
+  if (urgentOwners.length > 0) return `今日 ${urgentOwners.length} 个负责人有高危事项。晨会先盯“${urgentOwners[0].ownerName}”,再按影响金额分配支援。`;
+  const top = rows[0];
+  if (top?.impactUSD > 0) return `今日负责人风险主要集中在“${top.ownerName}”,关联约 $${Math.round(top.impactUSD).toLocaleString()} 机会影响。`;
+  return `今日 ${rows.length} 个负责人有待处理事项。按负责人逐项确认下一步和截止时间。`;
 }
 
 function priorityRecommendation(input: { items: SalesPriorityItem[]; urgentCount: number; revenueAtRisk: number; topItem: SalesPriorityItem | null }) {

@@ -24,7 +24,7 @@ const sandbox = {
   require,
 };
 vm.runInNewContext(compiled.outputText, sandbox, { filename: sourcePath });
-const { buildSalesPriorityQueue } = sandbox.module.exports;
+const { buildSalesOwnerPriorityReport, buildSalesPriorityQueue } = sandbox.module.exports;
 
 const now = new Date('2026-07-04T12:00:00Z');
 const queue = buildSalesPriorityQueue({
@@ -104,6 +104,7 @@ const queue = buildSalesPriorityQueue({
   ],
   healthTasks: [],
 });
+const ownerReport = buildSalesOwnerPriorityReport(queue.items);
 
 const failures = [];
 if (!Array.isArray(queue.items) || queue.items.length < 5) failures.push('priority queue should include cross-module items');
@@ -112,8 +113,14 @@ if (queue.revenueAtRisk < 90000) failures.push(`revenue at risk too low: ${queue
 if (!queue.items.some((item) => item.kind === 'AUTOMATION_RISK')) failures.push('automation risk missing from queue');
 if (!queue.items.some((item) => item.kind === 'MESSAGE_SLA' && item.action.includes('先回复客户'))) failures.push('overdue message action missing');
 if (!queue.items.some((item) => item.kind === 'OPPORTUNITY_STALL' && item.href === '/opportunity/opp1')) failures.push('stalled opportunity link missing');
+if (!Array.isArray(ownerReport.rows) || ownerReport.rows.length < 5) failures.push('owner priority report should group owners');
+if (ownerReport.urgentOwnerCount < 2) failures.push(`urgent owner count too low: ${ownerReport.urgentOwnerCount}`);
+if (!ownerReport.rows.some((row) => row.ownerName === 'Sales C' && row.impactUSD >= 52000)) failures.push('owner report should retain stalled opportunity impact');
+if (!ownerReport.recommendation.includes('负责人')) failures.push('owner report recommendation missing');
 if (!pageSource.includes('老板每日作战清单')) failures.push('daily priority panel UI missing');
+if (!pageSource.includes('负责人每日战报')) failures.push('owner priority panel UI missing');
 if (!pageSource.includes('buildSalesPriorityQueue')) failures.push('sales command does not build priority queue');
+if (!pageSource.includes('buildSalesOwnerPriorityReport')) failures.push('sales command does not build owner priority report');
 if (!pageSource.includes('buildAutomationFunnelInsights')) failures.push('automation risk feed not wired into sales command');
 if (!pageSource.includes('priorityQueue')) failures.push('priority queue variable missing from sales command');
 if (!pageSource.includes('/api/sales-command/priority-action')) failures.push('daily priority action form missing');
