@@ -62,7 +62,17 @@ export type AutomationRiskFlowRow = {
   repairAction: 'ACTIVATE' | 'TEST' | 'REPLAY' | 'TUNE_CONDITION' | 'REVIEW';
   repairLabel: string;
   repairHint: string;
+  nodeDiagnostics: AutomationNodeDiagnostic[];
   weight: number;
+};
+
+export type AutomationNodeDiagnostic = {
+  node: 'trigger' | 'condition' | 'action';
+  label: string;
+  status: 'ok' | 'risk' | 'blocked' | 'idle';
+  metric: string;
+  detail: string;
+  advice: string;
 };
 
 export function buildAutomationFunnelInsights(flows: FlowForInsights[]) {
@@ -179,6 +189,16 @@ export function assessAutomationFlowRisk(flow: FlowForInsights): AutomationRiskF
 
   if (!reason) return null;
   const repair = automationRiskRepairAdvice({ reason, status: flow.status, failedRuns, actionType: flow.actionType });
+  const nodeDiagnostics = buildAutomationNodeDiagnostics({
+    flow,
+    runs,
+    matchedRuns,
+    actionRuns,
+    failedRuns,
+    skippedRuns,
+    matchRate,
+    actionRate,
+  });
   return {
     id: flow.id,
     flowCode: flow.flowCode,
@@ -199,8 +219,84 @@ export function assessAutomationFlowRisk(flow: FlowForInsights): AutomationRiskF
     repairAction: repair.action,
     repairLabel: repair.label,
     repairHint: repair.hint,
+    nodeDiagnostics,
     weight,
   };
+}
+
+export function buildAutomationNodeDiagnostics(input: {
+  flow: FlowForInsights;
+  runs: number;
+  matchedRuns: number;
+  actionRuns: number;
+  failedRuns: number;
+  skippedRuns: number;
+  matchRate: number | null;
+  actionRate: number | null;
+}): AutomationNodeDiagnostic[] {
+  const { flow, runs, matchedRuns, actionRuns, failedRuns, skippedRuns, matchRate, actionRate } = input;
+  const triggerStatus: AutomationNodeDiagnostic['status'] =
+    flow.status === 'DRAFT' || flow.status === 'PAUSED'
+      ? 'idle'
+      : runs === 0 && !flow.lastRunAt && flow.triggerCount === 0
+      ? 'blocked'
+      : 'ok';
+  const conditionRisk = runs >= 5 && ((matchRate !== null && matchRate < 0.35) || skippedRuns / runs >= 0.7);
+  const actionRisk = failedRuns > 0 || (runs >= 5 && actionRate !== null && actionRate < 0.2 && actionRequiresExecution(flow.actionType));
+
+  return [
+    {
+      node: 'trigger',
+      label: '触发器',
+      status: triggerStatus,
+      metric: runs > 0 ? `${runs} 次运行` : flow.triggerCount > 0 ? `${flow.triggerCount} 次触发` : '无运行样本',
+      detail:
+        triggerStatus === 'idle'
+          ? `${statusLabel(flow.status)} 状态,尚未参与真实触发。`
+          : triggerStatus === 'blocked'
+          ? '流程已开启,但近期没有任何运行样本。'
+          : '触发入口已有运行样本。',
+      advice:
+        triggerStatus === 'blocked'
+          ? '检查渠道入口、webhook/收件箱同步和触发类型是否匹配。'
+          : triggerStatus === 'idle'
+          ? '先测试并开启流程,再观察真实入站消息。'
+          : '继续观察渠道覆盖和样本量。',
+    },
+    {
+      node: 'condition',
+      label: '条件',
+      status: conditionRisk ? 'risk' : runs === 0 ? 'idle' : 'ok',
+      metric: runs ? `命中 ${formatRate(matchRate)} · 跳过 ${skippedRuns}` : '未产生判断',
+      detail:
+        conditionRisk
+          ? '条件节点导致命中偏低或跳过过多。'
+          : flow.conditionType
+          ? `${conditionLabel(flow.conditionType)} 条件表现可继续观察。`
+          : '流程没有额外条件分支。',
+      advice: conditionRisk ? '复核关键词、语言、意图、客户健康、时段和渠道条件,优先放宽过严规则。' : '保留当前条件,等待更多样本。',
+    },
+    {
+      node: 'action',
+      label: '动作',
+      status: actionRisk ? (failedRuns > 0 ? 'blocked' : 'risk') : matchedRuns === 0 ? 'idle' : 'ok',
+      metric: runs ? `执行 ${formatRate(actionRate)} · 失败 ${failedRuns}` : '未执行',
+      detail:
+        failedRuns > 0
+          ? '动作节点存在失败运行。'
+          : actionRisk
+          ? '流程能运行,但动作执行率偏低。'
+          : matchedRuns === 0
+          ? '尚未进入动作节点。'
+          : `${actionLabel(flow.actionType)} 动作有命中样本。`,
+      advice:
+        failedRuns > 0
+          ? '优先重放失败运行,并检查授权、动作配置、AI/消息字段。'
+          : actionRisk
+          ? '确认该动作是否应转任务、通知、打标签或生成草稿,避免只匹配不执行。'
+          : '继续追踪动作后的任务、回复和收入归因。',
+    },
+  ];
 }
 
 export function automationRiskRepairAdvice(input: { reason: string; status: string; failedRuns: number; actionType: string }) {
@@ -297,6 +393,20 @@ function conditionLabel(conditionType: string) {
     LEAD_NOT_REPLIED: '超时未回复',
   };
   return labels[conditionType] || conditionType;
+}
+
+function statusLabel(status: string) {
+  const labels: Record<string, string> = {
+    ACTIVE: '已开启',
+    PAUSED: '已暂停',
+    DRAFT: '草稿',
+  };
+  return labels[status] || status;
+}
+
+function formatRate(value: number | null) {
+  if (value === null) return '-';
+  return `${Math.round(value * 100)}%`;
 }
 
 export { actionLabel as automationActionLabel, conditionLabel as automationConditionLabel };

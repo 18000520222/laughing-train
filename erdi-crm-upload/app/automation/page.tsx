@@ -563,6 +563,7 @@ export default async function AutomationPage(props: any) {
                   <td className="p-3">
                     <div className="text-xs font-black text-rose-600">{row.reason}</div>
                     <div className="mt-0.5 text-[11px] font-bold text-gray-400">{row.lastRunAtLabel}</div>
+                    <NodeDiagnostics diagnostics={row.nodeDiagnostics} />
                   </td>
                   <td className="p-3">
                     <RiskRepairButton row={row} />
@@ -1095,6 +1096,33 @@ function RiskRepairButton({ row }: { row: any }) {
       <div className="mt-1 max-w-[160px] text-[10px] font-bold leading-snug text-gray-400">{row.repairHint}</div>
     </form>
   );
+}
+
+function NodeDiagnostics({ diagnostics }: { diagnostics: any[] }) {
+  if (!diagnostics?.length) return null;
+  return (
+    <div className="mt-2 grid gap-1">
+      {diagnostics.map((item) => (
+        <div key={item.node} title={item.advice} className={`rounded-md border px-2 py-1.5 text-[10px] font-bold ${nodeDiagnosticClass(item.status)}`}>
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-black">{item.label}</span>
+            <span className="shrink-0 opacity-70">{item.metric}</span>
+          </div>
+          <div className="mt-0.5 line-clamp-1 opacity-75">{item.detail}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function nodeDiagnosticClass(status: string) {
+  const colors: Record<string, string> = {
+    ok: 'border-emerald-100 bg-emerald-50 text-emerald-800',
+    risk: 'border-amber-100 bg-amber-50 text-amber-800',
+    blocked: 'border-rose-100 bg-rose-50 text-rose-800',
+    idle: 'border-slate-100 bg-slate-50 text-slate-700',
+  };
+  return colors[status] || colors.idle;
 }
 
 function BlueprintGroupCard({ group }: { group: any }) {

@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import vm from 'node:vm';
+import ts from 'typescript';
 
 const insightsSource = fs.readFileSync(path.join(process.cwd(), 'lib/automation-insights.ts'), 'utf8');
 const pageSource = fs.readFileSync(path.join(process.cwd(), 'app/automation/page.tsx'), 'utf8');
@@ -22,6 +24,10 @@ const checks = [
   {
     ok: insightsSource.includes('assessAutomationFlowRisk') && insightsSource.includes('repairAction') && insightsSource.includes('automationRiskRepairAdvice'),
     message: 'automation risk repair advice missing',
+  },
+  {
+    ok: insightsSource.includes('buildAutomationNodeDiagnostics') && insightsSource.includes('nodeDiagnostics') && insightsSource.includes("node: 'trigger'") && insightsSource.includes("node: 'condition'") && insightsSource.includes("node: 'action'"),
+    message: 'automation node diagnostics missing',
   },
   {
     ok: insightsSource.includes("run.status === 'ACTION_SENT'") && insightsSource.includes("run.status === 'FAILED'") && insightsSource.includes("run.status === 'SKIPPED'"),
@@ -52,6 +58,10 @@ const checks = [
     message: 'automation risk repair UI missing',
   },
   {
+    ok: pageSource.includes('NodeDiagnostics') && pageSource.includes('nodeDiagnosticClass') && pageSource.includes('row.nodeDiagnostics'),
+    message: 'automation node diagnostics UI missing',
+  },
+  {
     ok: repairSource.includes('repairAutomationRiskFlow') && repairSource.includes('bulkReplayFailedAutomationRuns') && repairSource.includes('operatorNote'),
     message: 'automation risk repair helper missing',
   },
@@ -62,9 +72,71 @@ const checks = [
 ];
 
 const failures = checks.filter((check) => !check.ok);
+const runtimeFailures = runRuntimeChecks();
+failures.push(...runtimeFailures.map((message) => ({ message, ok: false })));
 if (failures.length > 0) {
   for (const failure of failures) console.error(failure.message);
   process.exitCode = 1;
 } else {
   console.log('automation funnel insights smoke passed: channel/action/condition funnel and risk queue wired');
+}
+
+function runRuntimeChecks() {
+  const runtimeSource = `${insightsSource.replace(
+    /import[^\n]+automation';\n/,
+    "const CHANNEL_LABEL = { EMAIL: '邮件', ALL: '全渠道' }; const RUN_STATUS_LABEL = {};\n"
+  )}\nexports.__result = { assessAutomationFlowRisk };`;
+  const compiled = ts.transpileModule(runtimeSource, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText;
+  const sandbox = { exports: {}, console };
+  vm.runInNewContext(compiled, sandbox, { filename: 'automation-insights.js' });
+  const { assessAutomationFlowRisk } = sandbox.exports.__result;
+  const base = {
+    id: 'flow',
+    flowCode: 'FLOW',
+    name: 'Flow',
+    category: 'Test',
+    channel: 'EMAIL',
+    status: 'ACTIVE',
+    triggerType: 'CUSTOMER_MESSAGE',
+    conditionType: 'KEYWORD_MATCH',
+    actionType: 'ASSIGN_OWNER',
+    triggerCount: 0,
+    uniqueContactCount: 0,
+    lastRunAt: null,
+  };
+  const cold = assessAutomationFlowRisk({ ...base, runs: [] });
+  const skipped = assessAutomationFlowRisk({
+    ...base,
+    id: 'skipped',
+    triggerCount: 5,
+    lastRunAt: new Date(),
+    runs: Array.from({ length: 5 }, (_, index) => sampleRun(`s${index}`, 'SKIPPED', false)),
+  });
+  const failed = assessAutomationFlowRisk({
+    ...base,
+    id: 'failed',
+    triggerCount: 1,
+    lastRunAt: new Date(),
+    runs: [sampleRun('f1', 'FAILED', true)],
+  });
+  const lowAction = assessAutomationFlowRisk({
+    ...base,
+    id: 'low-action',
+    triggerCount: 5,
+    lastRunAt: new Date(),
+    runs: Array.from({ length: 5 }, (_, index) => sampleRun(`a${index}`, 'MATCHED', true)),
+  });
+
+  const runtimeFailures = [];
+  if (!cold?.nodeDiagnostics.some((node) => node.node === 'trigger' && node.status === 'blocked')) runtimeFailures.push('cold flow should diagnose trigger blocked');
+  if (!skipped?.nodeDiagnostics.some((node) => node.node === 'condition' && node.status === 'risk')) runtimeFailures.push('high skipped flow should diagnose condition risk');
+  if (!failed?.nodeDiagnostics.some((node) => node.node === 'action' && node.status === 'blocked')) runtimeFailures.push('failed flow should diagnose action blocked');
+  if (!lowAction?.nodeDiagnostics.some((node) => node.node === 'action' && node.status === 'risk')) runtimeFailures.push('low execution flow should diagnose action risk');
+  return runtimeFailures;
+}
+
+function sampleRun(id, status, matched) {
+  return { id, channel: 'EMAIL', status, matched, createdAt: new Date(), summary: null };
 }
