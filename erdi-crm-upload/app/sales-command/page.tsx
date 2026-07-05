@@ -3123,22 +3123,43 @@ function GmailReadinessPanel({ readiness, plans }: { readiness: any; plans: any[
           <h3 className="text-sm font-black">{readiness.title}</h3>
           <p className="mt-1 text-xs font-bold opacity-75">{readiness.detail}</p>
         </div>
-        <div className="rounded-lg bg-white/70 px-3 py-2 text-xs font-black">Gmail 标签计划 {plans.length}</div>
+        <div className="flex flex-wrap gap-2 text-xs font-black">
+          <div className="rounded-lg bg-white/70 px-3 py-2">Gmail 标签计划 {plans.length}</div>
+          <div className="rounded-lg bg-white/70 px-3 py-2">覆盖邮件 {plans.reduce((sum, plan) => sum + (plan.messageCount || 0), 0)}</div>
+          <div className="rounded-lg bg-white/70 px-3 py-2">需动作 {plans.reduce((sum, plan) => sum + (plan.actionRequiredCount || 0), 0)}</div>
+        </div>
       </div>
       <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-        {plans.slice(0, 9).map((plan) => (
+        {plans.slice(0, 10).map((plan) => (
           <div key={plan.key} className="rounded-lg bg-white/75 px-3 py-2">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0 truncate text-xs font-black">{plan.labelName}</div>
-              <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-600">{plan.slaHours ? `${plan.slaHours}h` : '清理'}</span>
+              <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-600">{plan.slaHours ? `${plan.slaHours}h` : '归档'}</span>
             </div>
             <div className="mt-1 text-[11px] font-bold opacity-70">{plan.categoryLabel} · {plan.crmAction}</div>
+            <div className="mt-2 flex flex-wrap gap-1 text-[10px] font-black opacity-75">
+              <span className="rounded bg-white px-1.5 py-0.5">样本 {plan.messageCount || 0}</span>
+              <span className="rounded bg-white px-1.5 py-0.5">动作 {plan.actionRequiredCount || 0}</span>
+              <span className="rounded bg-white px-1.5 py-0.5">线索 {plan.leadCount || 0}</span>
+              <span className="rounded bg-white px-1.5 py-0.5">{gmailExecutionModeLabel(plan.executionMode)}</span>
+            </div>
+            <div className="mt-1 line-clamp-2 text-[11px] font-bold opacity-70">{plan.executionHint || plan.description}</div>
             <div className="mt-1 truncate text-[11px] font-medium opacity-60">{plan.gmailQuery}</div>
           </div>
         ))}
       </div>
     </div>
   );
+}
+
+function gmailExecutionModeLabel(mode: string) {
+  const labels: Record<string, string> = {
+    task: '转任务',
+    review: '复核',
+    archive: '打标归档',
+    watch: '观察',
+  };
+  return labels[mode] || '观察';
 }
 
 function EmailAuditItem({ msg }: { msg: any }) {

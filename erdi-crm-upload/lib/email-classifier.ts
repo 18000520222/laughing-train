@@ -113,7 +113,24 @@ const CATEGORY_RULES: Array<{
     actionRequired: true,
     isLead: false,
     score: 65,
-    keywords: ['security code', 'verification code', 'verify your', 'login', '安全码', '验证码', '重要安全提醒'],
+    keywords: [
+      'security code',
+      'verification code',
+      'verify your',
+      'login',
+      'misconfigured domains',
+      'domains need configuration',
+      'domain configuration',
+      'authorization expired',
+      'authorization has expired',
+      'token expired',
+      '授权已经失效',
+      '授权失效',
+      '更新有效时间',
+      '安全码',
+      '验证码',
+      '重要安全提醒',
+    ],
   },
   {
     category: 'PLATFORM_ALERT',
@@ -178,6 +195,11 @@ export function classifyEmail(input: { from?: string | null; subject?: string | 
 
   if (hasMarketingSignal(text) && !hasDirectBusinessIntent(text)) {
     return result('MARKETING_NEWSLETTER', 'marketing-without-business-intent', 20, false, false, ['营销新闻']);
+  }
+
+  const authOpsHit = criticalAuthOpsSignal(text);
+  if (authOpsHit) {
+    return result('AUTH_SECURITY', `auth-ops:${authOpsHit}`, 88, true, false, ['安全验证码', '运维授权']);
   }
 
   const settlementHit = settlementSignal(text);
@@ -335,6 +357,20 @@ function hasDirectBusinessIntent(text: string) {
 
 function settlementSignal(text: string) {
   return ['refund', 'down payment', 'bank transfer', 'remittance', 'payment received', 'payment confirmation'].find((k) => text.includes(k)) || null;
+}
+
+function criticalAuthOpsSignal(text: string) {
+  return [
+    'misconfigured domains',
+    'domains need configuration',
+    'domain configuration',
+    'authorization expired',
+    'authorization has expired',
+    'token expired',
+    '授权已经失效',
+    '授权失效',
+    '更新有效时间',
+  ].find((k) => text.includes(k)) || null;
 }
 
 function categoryPriority(category: EmailCategory) {

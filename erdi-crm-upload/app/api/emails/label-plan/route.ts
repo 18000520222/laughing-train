@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { buildGmailLabelReadiness, labelPlanWithLabels } from '@/lib/email-label-plan';
+import { buildGmailLabelPlanAudit, buildGmailLabelPlanStats, buildGmailLabelReadiness } from '@/lib/email-label-plan';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,10 +22,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  const [activeAccountCount, totalMessages] = await Promise.all([
+  const [activeAccountCount, totalMessages, categoryRows, lowConfidenceRows] = await Promise.all([
     prisma.emailAccount.count({ where: { isActive: true } }),
     prisma.emailMessage.count(),
+    prisma.emailMessage.groupBy({
+      by: ['category', 'actionRequired', 'isLead'],
+      _count: { _all: true },
+      _min: { date: true },
+      _max: { date: true },
+    }),
+    prisma.emailMessage.groupBy({
+      by: ['category'],
+      where: { classificationScore: { lt: 50 } },
+      _count: { _all: true },
+    }),
   ]);
+  const plans = buildGmailLabelPlanAudit({ stats: buildGmailLabelPlanStats(categoryRows, lowConfidenceRows) });
 
   return NextResponse.json({
     ok: true,
@@ -33,6 +45,13 @@ export async function GET(req: NextRequest) {
     activeAccountCount,
     totalMessages,
     readiness: buildGmailLabelReadiness({ activeAccountCount, totalMessages }),
-    plans: labelPlanWithLabels(),
+    summary: {
+      taskLabels: plans.filter((row) => row.executionMode === 'task').length,
+      reviewLabels: plans.filter((row) => row.executionMode === 'review').length,
+      archiveLabels: plans.filter((row) => row.executionMode === 'archive').length,
+      messagesCovered: plans.reduce((sum, row) => sum + row.messageCount, 0),
+      actionRequired: plans.reduce((sum, row) => sum + row.actionRequiredCount, 0),
+    },
+    plans,
   });
 }

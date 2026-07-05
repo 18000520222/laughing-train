@@ -23,6 +23,26 @@ const sandbox = {
 };
 vm.runInNewContext(compiled.outputText, sandbox, { filename: sourcePath });
 const { classifyEmail } = sandbox.module.exports;
+const labelPlanPath = path.join(process.cwd(), 'lib/email-label-plan.ts');
+const labelPlanSource = fs.readFileSync(labelPlanPath, 'utf8');
+const labelPlanCompiled = ts.transpileModule(labelPlanSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2020,
+    esModuleInterop: true,
+  },
+});
+const labelPlanExported = {};
+const labelPlanSandbox = {
+  exports: labelPlanExported,
+  module: { exports: labelPlanExported },
+  require: (specifier) => {
+    if (specifier === '@/lib/email-classifier') return sandbox.module.exports;
+    return require(specifier);
+  },
+};
+vm.runInNewContext(labelPlanCompiled.outputText, labelPlanSandbox, { filename: labelPlanPath });
+const { buildGmailLabelPlanAudit } = labelPlanSandbox.module.exports;
 
 const cases = [
   {
@@ -77,6 +97,24 @@ const cases = [
       from: 'security-noreply@google.com',
       subject: 'Your verification code',
       textBody: 'Use this security code to login.',
+    },
+  },
+  {
+    name: 'vercel domain configuration is ops action',
+    expected: 'AUTH_SECURITY',
+    input: {
+      from: 'notifications@vercel.com',
+      subject: "3 domains need configuration on team '18000520222 projects'",
+      textBody: 'Your team has 3 misconfigured domains across 1 project. Update or remove these domain configurations.',
+    },
+  },
+  {
+    name: 'platform authorization expired is ops action',
+    expected: 'AUTH_SECURITY',
+    input: {
+      from: 'no-reply@mail1.pingpongx.com.cn',
+      subject: '您的店铺授权已经失效，请尽快更新有效期',
+      textBody: '您有1家亚马逊店铺授权已经失效，将会影响下一次入账，需要尽快更新有效时间。',
     },
   },
   {
@@ -178,6 +216,26 @@ for (const item of cases) {
     failed++;
     console.error(`${item.name}: expected ${item.expected}, got ${result.category} (${result.categoryReason})`);
   }
+}
+
+const labelAudit = buildGmailLabelPlanAudit({
+  stats: [
+    { category: 'INQUIRY', count: 16, actionRequired: 16, leads: 16, lowConfidence: 0, oldestDate: new Date('2026-07-01'), latestDate: new Date('2026-07-04') },
+    { category: 'MARKETING_NEWSLETTER', count: 10, actionRequired: 0, leads: 0, lowConfidence: 0, oldestDate: new Date('2026-06-30'), latestDate: new Date('2026-07-02') },
+    { category: 'AUTH_SECURITY', count: 2, actionRequired: 2, leads: 0, lowConfidence: 0, oldestDate: new Date('2026-06-30'), latestDate: new Date('2026-07-02') },
+  ],
+});
+if (!labelAudit.some((row) => row.labelName === 'CRM/01-客户询盘' && row.executionMode === 'task' && row.messageCount === 16)) {
+  failed++;
+  console.error('gmail label plan inquiry task metrics missing');
+}
+if (!labelAudit.some((row) => row.labelName === 'CRM/90-营销订阅低优先' && row.executionMode === 'archive')) {
+  failed++;
+  console.error('gmail label plan archive mode missing');
+}
+if (!labelAudit.some((row) => row.labelName === 'CRM/08-授权安全运维' && row.priorityScore > 0)) {
+  failed++;
+  console.error('gmail label plan auth security priority missing');
 }
 
 if (failed > 0) {

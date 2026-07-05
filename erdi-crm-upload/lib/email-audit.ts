@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { classifyEmail, emailCategoryLabel } from '@/lib/email-classifier';
-import { buildGmailLabelReadiness, labelPlanWithLabels } from '@/lib/email-label-plan';
+import { buildGmailLabelPlanAudit, buildGmailLabelPlanStats, buildGmailLabelReadiness } from '@/lib/email-label-plan';
 
 const LOW_CONFIDENCE_SCORE = 50;
 const REVIEW_CATEGORIES = ['UNCLASSIFIED', 'OTHER'];
@@ -33,6 +33,8 @@ export async function buildEmailClassificationAudit({ sampleLimit = 10 }: { samp
     noiseQueue,
     accountRows,
     leadDomainRows,
+    labelPlanCategoryRows,
+    labelPlanLowConfidenceRows,
   ] = await Promise.all([
     prisma.emailMessage.count(),
     prisma.emailMessage.count({ where: { category: 'UNCLASSIFIED' } }),
@@ -92,6 +94,17 @@ export async function buildEmailClassificationAudit({ sampleLimit = 10 }: { samp
       take: 300,
       select: { from: true },
     }),
+    prisma.emailMessage.groupBy({
+      by: ['category', 'actionRequired', 'isLead'],
+      _count: { _all: true },
+      _min: { date: true },
+      _max: { date: true },
+    }),
+    prisma.emailMessage.groupBy({
+      by: ['category'],
+      where: { classificationScore: { lt: LOW_CONFIDENCE_SCORE } },
+      _count: { _all: true },
+    }),
   ]);
 
   const categories = categoryRows.map((row) => ({
@@ -102,6 +115,7 @@ export async function buildEmailClassificationAudit({ sampleLimit = 10 }: { samp
   }));
   const leadDomains = topDomains(leadDomainRows.map((row) => row.from));
   const activeAccountCount = accountRows.filter((account) => account.isActive).length;
+  const gmailLabelPlan = buildGmailLabelPlanAudit({ stats: buildGmailLabelPlanStats(labelPlanCategoryRows, labelPlanLowConfidenceRows) });
 
   return {
     total,
@@ -129,7 +143,14 @@ export async function buildEmailClassificationAudit({ sampleLimit = 10 }: { samp
     })),
     leadDomains,
     gmailReadiness: buildGmailLabelReadiness({ activeAccountCount, totalMessages: total }),
-    gmailLabelPlan: labelPlanWithLabels(),
+    gmailLabelPlan,
+    gmailLabelPlanSummary: {
+      taskLabels: gmailLabelPlan.filter((row) => row.executionMode === 'task').length,
+      reviewLabels: gmailLabelPlan.filter((row) => row.executionMode === 'review').length,
+      archiveLabels: gmailLabelPlan.filter((row) => row.executionMode === 'archive').length,
+      messagesCovered: gmailLabelPlan.reduce((sum, row) => sum + row.messageCount, 0),
+      actionRequired: gmailLabelPlan.reduce((sum, row) => sum + row.actionRequiredCount, 0),
+    },
     recommendation: emailAuditRecommendation({ total, unclassified, lowConfidence, actionRequired, staleUnclassified }),
   };
 }
