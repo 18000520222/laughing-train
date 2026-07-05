@@ -13,6 +13,8 @@ const morningRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/sal
 const morningCronSource = fs.readFileSync(path.join(process.cwd(), 'app/api/cron/morning-briefing/route.ts'), 'utf8');
 const morningWatchSource = fs.readFileSync(path.join(process.cwd(), 'lib/sales-morning-briefing-watch.ts'), 'utf8');
 const morningClosureSource = fs.readFileSync(path.join(process.cwd(), 'lib/sales-morning-briefing-closure.ts'), 'utf8');
+const actionClosurePath = path.join(process.cwd(), 'lib/sales-action-closure.ts');
+const actionClosureSource = fs.readFileSync(actionClosurePath, 'utf8');
 const compiled = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.CommonJS,
@@ -29,6 +31,21 @@ const sandbox = {
 };
 vm.runInNewContext(compiled.outputText, sandbox, { filename: sourcePath });
 const { buildSalesMorningBriefing, buildSalesOwnerPriorityReport, buildSalesPriorityQueue } = sandbox.module.exports;
+const actionClosureCompiled = ts.transpileModule(actionClosureSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2020,
+    esModuleInterop: true,
+  },
+});
+const actionClosureExported = {};
+const actionClosureSandbox = {
+  exports: actionClosureExported,
+  module: { exports: actionClosureExported },
+  require,
+};
+vm.runInNewContext(actionClosureCompiled.outputText, actionClosureSandbox, { filename: actionClosurePath });
+const { buildSalesActionClosureReport } = actionClosureSandbox.module.exports;
 
 const now = new Date('2026-07-04T12:00:00Z');
 const queue = buildSalesPriorityQueue({
@@ -110,6 +127,38 @@ const queue = buildSalesPriorityQueue({
 });
 const ownerReport = buildSalesOwnerPriorityReport(queue.items);
 const morningBriefing = buildSalesMorningBriefing(queue.items, ownerReport.rows);
+const actionClosure = buildSalesActionClosureReport({
+  now,
+  items: queue.items,
+  tasks: [
+    {
+      id: 'daily-msg-task',
+      title: 'Reply to Priority Buyer',
+      status: 'TODO',
+      dueAt: new Date('2026-07-03T12:00:00Z'),
+      completedAt: null,
+      createdAt: new Date('2026-07-03T08:00:00Z'),
+      source: 'DAILY_PRIORITY',
+      sourceRef: 'priority:MESSAGE_SLA:msg1',
+      owner: { name: 'Sales A', email: 'a@example.com' },
+      company: { id: 'c1', name: 'Priority Buyer' },
+      opportunity: null,
+    },
+    {
+      id: 'task1',
+      title: 'Send PI today',
+      status: 'DONE',
+      dueAt: new Date('2026-07-03T10:00:00Z'),
+      completedAt: new Date('2026-07-04T09:00:00Z'),
+      createdAt: new Date('2026-07-03T07:00:00Z'),
+      source: 'MANUAL',
+      sourceRef: null,
+      owner: { name: 'Sales B', email: 'b@example.com' },
+      company: { id: 'c2', name: 'Task Buyer' },
+      opportunity: { id: 'o1', title: 'Rangefinder bulk order', amountUSD: 42000 },
+    },
+  ],
+});
 
 const failures = [];
 if (!Array.isArray(queue.items) || queue.items.length < 5) failures.push('priority queue should include cross-module items');
@@ -129,11 +178,18 @@ if (morningBriefing.watchOwners.length < 3) failures.push('morning briefing shou
 if (morningBriefing.mustDoItems.length !== 3) failures.push('morning briefing should include 3 must-do items');
 if (morningBriefing.topItemIds.length !== 3 || morningBriefing.urgentItemIds.length < 2) failures.push('morning briefing bulk ids missing');
 if (!morningBriefing.playbook.some((line) => line.includes('晨会') || line.includes('客户消息') || line.includes('商机'))) failures.push('morning briefing playbook missing');
+if (actionClosure.overdueTasks < 1) failures.push('action closure should detect overdue linked task');
+if (actionClosure.doneTasks < 1) failures.push('action closure should detect done linked task');
+if (actionClosure.missingTasks < 1) failures.push('action closure should detect priority items not converted to tasks');
+if (!actionClosure.rows.some((row) => row.statusLabel === '逾期未完成')) failures.push('action closure overdue row missing');
 if (!pageSource.includes('老板每日作战清单')) failures.push('daily priority panel UI missing');
 if (!pageSource.includes('老板晨会摘要')) failures.push('morning briefing UI missing');
 if (!pageSource.includes('晨会通知处理闭环')) failures.push('morning briefing closure UI missing');
 if (!pageSource.includes('buildMorningBriefingClosureReport')) failures.push('morning briefing closure report not wired');
 if (!pageSource.includes('超过24h未读')) failures.push('morning briefing stale unread label missing');
+if (!pageSource.includes('作战清单执行闭环')) failures.push('action closure UI missing');
+if (!pageSource.includes('buildSalesActionClosureReport')) failures.push('action closure report not wired');
+if (!pageSource.includes("sourceRef: { in: priorityActionSourceRefs }")) failures.push('action closure does not query priority sourceRefs');
 if (!pageSource.includes('处理晨会前三项') || !pageSource.includes('一键处理全部高危')) failures.push('morning briefing bulk buttons missing');
 if (!pageSource.includes('通知前三项负责人') || !pageSource.includes('通知全部高危负责人')) failures.push('morning briefing notify buttons missing');
 if (!pageSource.includes('MorningNotifyResultBanner')) failures.push('morning briefing notify result banner missing');
@@ -175,6 +231,10 @@ if (!morningClosureSource.includes('staleUnread')) failures.push('morning briefi
 if (!morningClosureSource.includes('repeatedLineCount')) failures.push('morning briefing repeated line metric missing');
 if (!morningClosureSource.includes('超过 24 小时未读')) failures.push('morning briefing closure recommendation missing');
 if (!morningClosureSource.includes('停滞商机')) failures.push('morning briefing top risk line priority missing');
+if (!actionClosureSource.includes('buildSalesActionClosureReport')) failures.push('action closure builder missing');
+if (!actionClosureSource.includes('未转任务')) failures.push('action closure missing task status missing');
+if (!actionClosureSource.includes('逾期未完成')) failures.push('action closure overdue status missing');
+if (!actionClosureSource.includes('priority:${item.id}')) failures.push('action closure priority sourceRef lookup missing');
 
 if (failures.length > 0) {
   for (const failure of failures) console.error(failure);

@@ -12,6 +12,7 @@ import { buildChannelMessageRevenueReport } from '@/lib/channel-revenue-insights
 import { buildAutomationFunnelInsights } from '@/lib/automation-insights';
 import { buildSalesMorningBriefing, buildSalesOwnerPriorityReport, buildSalesPriorityQueue } from '@/lib/sales-priority-queue';
 import { buildMorningBriefingClosureReport } from '@/lib/sales-morning-briefing-closure';
+import { buildSalesActionClosureReport } from '@/lib/sales-action-closure';
 
 export const dynamic = 'force-dynamic';
 
@@ -534,6 +535,24 @@ export default async function SalesCommandPage({
   const ownerPriorityReport = buildSalesOwnerPriorityReport(priorityQueue.items);
   const morningBriefing = buildSalesMorningBriefing(priorityQueue.items, ownerPriorityReport.rows);
   const morningClosure = buildMorningBriefingClosureReport(morningNotifications, new Date());
+  const priorityActionSourceRefs = priorityQueue.items.map((item) => `priority:${item.id}`);
+  const trackedTaskItemIds = priorityQueue.items
+    .filter((item) => item.kind === 'SALES_TASK' || item.kind === 'EMAIL_ACTION' || item.kind === 'HEALTH_TASK')
+    .map((item) => item.id.slice(item.id.indexOf(':') + 1))
+    .filter(Boolean);
+  const actionClosureTasks = await prisma.salesTask.findMany({
+    where: {
+      OR: [
+        { source: 'DAILY_PRIORITY', sourceRef: { in: priorityActionSourceRefs } },
+        { id: { in: trackedTaskItemIds } },
+        { source: 'DAILY_PRIORITY', sourceRef: { startsWith: 'priority:' }, createdAt: { gte: sevenDaysAgo } },
+      ],
+    },
+    orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
+    take: 120,
+    include: { owner: true, company: true, opportunity: true },
+  });
+  const actionClosure = buildSalesActionClosureReport({ items: priorityQueue.items, tasks: actionClosureTasks, now: new Date() });
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
@@ -571,6 +590,7 @@ export default async function SalesCommandPage({
 
       <MorningBriefingPanel briefing={morningBriefing} result={morningNotifyResult} />
       <MorningClosurePanel report={morningClosure} />
+      <ActionClosurePanel report={actionClosure} />
       <DailyPriorityPanel queue={priorityQueue} result={priorityActionResult} />
       <OwnerPriorityPanel report={ownerPriorityReport} />
 
@@ -1678,6 +1698,57 @@ function MorningClosurePanel({ report }: { report: ReturnType<typeof buildMornin
           </div>
         ))}
         {report.ownerRows.length === 0 && <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm font-bold text-slate-500">近 7 天暂无晨会摘要通知记录。</div>}
+      </div>
+    </section>
+  );
+}
+
+function ActionClosurePanel({ report }: { report: ReturnType<typeof buildSalesActionClosureReport> }) {
+  const conversion = report.conversionRate === null ? '-' : `${Math.round(report.conversionRate * 100)}%`;
+  const completion = report.completionRate === null ? '-' : `${Math.round(report.completionRate * 100)}%`;
+  return (
+    <section id="action-closure" className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-bold text-gray-900">作战清单执行闭环</h2>
+          <p className="mt-1 text-xs text-gray-400">把晨会事项从提醒推进到任务、截止时间、完成结果,避免只读不做。</p>
+        </div>
+        <Link href="/tasks?view=week" className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-black text-white hover:bg-gray-800">查看任务队列</Link>
+      </div>
+      <div className="mb-4 grid grid-cols-2 gap-2 text-xs font-black md:grid-cols-6">
+        <div className="rounded-lg bg-slate-100 px-3 py-2 text-slate-700"><div className="text-lg">{report.totalItems}</div><div>清单事项</div></div>
+        <div className="rounded-lg bg-blue-50 px-3 py-2 text-blue-700"><div className="text-lg">{conversion}</div><div>转任务率</div></div>
+        <div className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-700"><div className="text-lg">{completion}</div><div>完成率</div></div>
+        <div className="rounded-lg bg-rose-50 px-3 py-2 text-rose-700"><div className="text-lg">{report.overdueTasks}</div><div>逾期未完成</div></div>
+        <div className="rounded-lg bg-amber-50 px-3 py-2 text-amber-700"><div className="text-lg">{report.missingTasks}</div><div>未转任务</div></div>
+        <div className="rounded-lg bg-violet-50 px-3 py-2 text-violet-700"><div className="text-lg">{report.recentPriorityTasks}</div><div>7天追踪任务</div></div>
+      </div>
+      <div className="mb-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{report.recommendation}</div>
+      <div className="grid gap-3 xl:grid-cols-3">
+        {report.rows.map((row) => (
+          <div key={row.itemId} className={`rounded-xl border p-4 ${row.tone === 'rose' ? 'border-rose-100 bg-rose-50 text-rose-900' : row.tone === 'amber' ? 'border-amber-100 bg-amber-50 text-amber-900' : row.tone === 'emerald' ? 'border-emerald-100 bg-emerald-50 text-emerald-900' : 'border-blue-100 bg-blue-50 text-blue-900'}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-black">{row.title}</div>
+                <div className="mt-1 truncate text-[11px] font-bold opacity-70">{row.kindLabel} · {row.ownerName}</div>
+              </div>
+              <div className="shrink-0 rounded-lg bg-white/75 px-2 py-1 text-[11px] font-black">{row.statusLabel}</div>
+            </div>
+            <div className="mt-3 rounded-lg bg-white/75 px-3 py-2 text-[11px] font-bold">
+              <div className="opacity-50">执行任务</div>
+              <div className="mt-0.5 truncate">{row.taskTitle}</div>
+              <div className="mt-0.5 opacity-70">
+                {row.dueAt ? `截止 ${new Date(row.dueAt).toLocaleString('zh-CN')}` : '暂无截止时间'}
+                {row.completedAt ? ` · 完成 ${new Date(row.completedAt).toLocaleString('zh-CN')}` : ''}
+              </div>
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-3 text-[11px] font-black">
+              <span className="rounded-lg bg-white/75 px-2 py-1">影响 ${Math.round(row.impactUSD).toLocaleString()}</span>
+              <Link href={row.href} className="rounded-lg bg-white px-2 py-1 hover:bg-gray-50">打开客户</Link>
+            </div>
+          </div>
+        ))}
+        {report.rows.length === 0 && <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm font-bold text-slate-500">暂无需要追踪的作战清单事项。</div>}
       </div>
     </section>
   );
