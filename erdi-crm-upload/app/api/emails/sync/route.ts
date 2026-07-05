@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { classifyEmail } from '@/lib/email-classifier';
+import { buildEmailImapAuth } from '@/lib/google-gmail-oauth';
 
 
 
@@ -25,21 +26,13 @@ export async function POST() {
     let totalFetched = 0;
 
     for (const acc of accounts) {
-      if (!acc.password || acc.password.trim() === '') {
-        console.warn(`[Mail Sync] 账号 ${acc.email} 未配置密码，跳过抓取`);
-        continue;
-      }
-
-      // 如果有真实密码，执行 IMAP 抓取
       try {
+        const auth = await buildEmailImapAuth(acc);
         const client = new ImapFlow({
           host: acc.imapHost,
           port: acc.imapPort,
           secure: acc.isSecure,
-          auth: {
-            user: acc.email,
-            pass: acc.password
-          },
+          auth,
           logger: false
         });
 

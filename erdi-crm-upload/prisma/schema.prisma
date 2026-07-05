@@ -112,6 +112,10 @@ model SystemSettings {
   salesmartlyReplyUrl   String?
   salesmartlyApiKey     String?
 
+  // Google / Gmail OAuth
+  googleClientId     String?
+  googleClientSecret String?
+
   // LibreTranslate (可选自建实例)
   libretranslateUrl String? @default("https://libretranslate.com")
 
@@ -326,11 +330,17 @@ model PurchaseOrder {
 model EmailAccount {
   id       String  @id @default(cuid())
   email    String  @unique
-  password String
+  password String  @default("")
   imapHost String  @default("imap.gmail.com")
   imapPort Int     @default(993)
   isSecure Boolean @default(true)
   isActive Boolean @default(true)
+
+  authType            String    @default("APP_PASSWORD")
+  oauthProvider       String?
+  oauthRefreshToken   String?   @db.Text
+  oauthAccessToken    String?   @db.Text
+  oauthTokenExpiresAt DateTime?
 
   messages EmailMessage[]
 

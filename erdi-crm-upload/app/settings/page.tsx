@@ -115,10 +115,21 @@ export default async function SettingsPage() {
     const r = cookies().get('auth_role')?.value;
     if (r !== 'SUPER_ADMIN' && r !== 'ADMIN') return;
     const id = formData.get('id') as string;
-    const pwd = formData.get('password') as string;
+    const pwd = String(formData.get('password') || '').trim();
     const host = formData.get('imapHost') as string;
     if (id && pwd && host) {
-      await prisma.emailAccount.update({ where: { id }, data: { password: pwd, imapHost: host } });
+      await prisma.emailAccount.update({
+        where: { id },
+        data: {
+          password: pwd,
+          imapHost: host,
+          authType: 'APP_PASSWORD',
+          oauthProvider: null,
+          oauthRefreshToken: null,
+          oauthAccessToken: null,
+          oauthTokenExpiresAt: null,
+        },
+      });
     }
     redirect('/settings');
   }
@@ -323,8 +334,8 @@ export default async function SettingsPage() {
                 <input type="hidden" name="id" value={acc.id} />
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-bold text-gray-800 text-lg">{acc.email}</h3>
-                  <span className={`text-xs px-2 py-1 rounded ${acc.password ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                    {acc.password ? '✅ 已配置' : '❌ 未配置'}
+                  <span className={`text-xs px-2 py-1 rounded ${acc.password || acc.oauthRefreshToken ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    {acc.oauthRefreshToken ? '✅ Google OAuth' : acc.password ? '✅ IMAP 已配置' : '❌ 未配置'}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">

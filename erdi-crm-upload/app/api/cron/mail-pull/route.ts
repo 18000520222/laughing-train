@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { ingestInbound } from '@/lib/inbox';
 import type { NormalizedMessage } from '@/lib/channels/types';
 import { classifyEmail } from '@/lib/email-classifier';
+import { buildEmailImapAuth } from '@/lib/google-gmail-oauth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -119,18 +120,15 @@ export async function GET(req: Request) {
   const report: any[] = [];
 
   for (const acc of accounts) {
-    if (!acc.password?.trim()) {
-      report.push({ account: acc.email, skipped: 'no-password' });
-      continue;
-    }
     const stat = { account: acc.email, fetched: 0, ingested: 0, duplicate: 0, noise: 0, noiseReasons: {} as Record<string, number>, errors: [] as string[] };
 
     try {
+      const auth = await buildEmailImapAuth(acc);
       const client = new ImapFlow({
         host: acc.imapHost,
         port: acc.imapPort,
         secure: acc.isSecure,
-        auth: { user: acc.email, pass: acc.password },
+        auth,
         logger: false,
       });
       await client.connect();

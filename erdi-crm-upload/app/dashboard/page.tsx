@@ -78,7 +78,12 @@ export default async function Dashboard() {
     prisma.automationRun.count({ where: { status: 'FAILED', createdAt: { gte: weekAgo } } }).catch(() => 0),
     prisma.automationFlow.count({ where: { status: 'DRAFT' } }).catch(() => 0),
     Promise.all([
-      prisma.emailAccount.count({ where: { isActive: true, password: { not: '' } } }).catch(() => 0),
+      prisma.emailAccount.count({
+        where: {
+          isActive: true,
+          OR: [{ password: { not: '' } }, { oauthRefreshToken: { not: null } }],
+        },
+      }).catch(() => 0),
       prisma.socialAccount.count().catch(() => 0),
     ]),
     prisma.emailMessage.count({ where: { actionRequired: true } }).catch(() => 0),

@@ -25,6 +25,7 @@ const SECRET_FIELDS = new Set([
   'shopeeRefreshToken',
   'salesmartlyWebhookKey',
   'salesmartlyApiKey',
+  'googleClientSecret',
 ]);
 
 export default async function ChannelSettingsPage({
@@ -48,6 +49,9 @@ export default async function ChannelSettingsPage({
       select: {
         email: true,
         password: true,
+        authType: true,
+        oauthRefreshToken: true,
+        oauthTokenExpiresAt: true,
         imapHost: true,
         isActive: true,
         updatedAt: true,
@@ -132,6 +136,9 @@ export default async function ChannelSettingsPage({
       salesmartlyWebhookKey: g('salesmartlyWebhookKey'),
       salesmartlyReplyUrl: g('salesmartlyReplyUrl'),
       salesmartlyApiKey: g('salesmartlyApiKey'),
+      // Google / Gmail OAuth
+      googleClientId: g('googleClientId'),
+      googleClientSecret: g('googleClientSecret'),
     };
     const data = Object.fromEntries(Object.entries(rawData).filter(([, v]) => v !== undefined));
     // 敏感字段留空时保持原值；普通字段留空时允许清空。
@@ -158,6 +165,7 @@ export default async function ChannelSettingsPage({
   const amzOk = !!(st.amazonRefreshToken && st.amazonLwaClientId && st.amazonLwaClientSecret && st.amazonAwsAccessKeyId && st.amazonAwsSecretAccessKey);
   const spOk = !!(st.shopeePartnerId && st.shopeePartnerKey && st.shopeeShopId);
   const ssOk = !!st.salesmartlyWebhookKey;
+  const googleOk = !!(st.googleClientId && st.googleClientSecret);
 
   const baseUrl = 'https://erdicrm.com';
   const channelHealthRows = buildChannelHealthRows({
@@ -168,7 +176,7 @@ export default async function ChannelSettingsPage({
     inboxPending,
     trackingEventCount,
     latestTrackingAt: latestTrackingEvent?.occurredAt || latestTrackingEvent?.createdAt || null,
-    configured: { waOk, fbOk, liOk, aftershipOk, abOk, amzOk, spOk, ssOk },
+    configured: { waOk, fbOk, liOk, aftershipOk, abOk, amzOk, spOk, ssOk, googleOk },
   });
   const channelHealthSummary = summarizeChannelHealth(channelHealthRows);
 
@@ -257,6 +265,23 @@ export default async function ChannelSettingsPage({
       </section>
 
       <form action={save} className="space-y-8">
+        <section className="bg-white rounded-xl border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-lg font-bold text-gray-800">📧 Gmail / Google OAuth</h2>
+            <div className="flex items-center gap-2">
+              {status(googleOk)}
+              <a href="/api/auth/google/start" className="text-xs px-3 py-1 rounded-full bg-red-600 text-white font-semibold hover:bg-red-700">🔑 一键授权</a>
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 mb-4">
+            Google OAuth Redirect URI：<code>{baseUrl}/api/auth/google/callback</code>。先填 Client ID/Secret 并保存，再点一键授权，CRM 会把 Gmail OAuth token 写入邮箱账号并用于 IMAP 同步。
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <Field name="googleClientId" label="Google OAuth Client ID" defaultValue={st.googleClientId} />
+            <Field name="googleClientSecret" label="Google OAuth Client Secret" defaultValue={st.googleClientSecret} type="password" />
+          </div>
+        </section>
+
         {/* WhatsApp */}
         <section className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-1">
@@ -418,6 +443,9 @@ type ChannelHealthRow = {
 type EmailAccountHealth = {
   email: string;
   password: string;
+  authType: string;
+  oauthRefreshToken: string | null;
+  oauthTokenExpiresAt: Date | null;
   imapHost: string;
   isActive: boolean;
   updatedAt: Date;
@@ -454,7 +482,7 @@ function buildChannelHealthRows(input: {
   inboxPending: InboxPendingHealth[];
   trackingEventCount: number;
   latestTrackingAt: Date | null;
-  configured: { waOk: boolean; fbOk: boolean; liOk: boolean; aftershipOk: boolean; abOk: boolean; amzOk: boolean; spOk: boolean; ssOk: boolean };
+  configured: { waOk: boolean; fbOk: boolean; liOk: boolean; aftershipOk: boolean; abOk: boolean; amzOk: boolean; spOk: boolean; ssOk: boolean; googleOk: boolean };
 }) {
   const totalMap = new Map<InboxChannel, InboxTotalHealth>();
   const pendingMap = new Map<InboxChannel, number>();
@@ -474,7 +502,9 @@ function buildChannelHealthRows(input: {
   const linkedin = socialSummary(input.socialAccounts, 'LINKEDIN');
   const emailLatest = maxDate(...input.emailAccounts.map((account) => account.messages[0]?.date || null));
   const activeEmailAccounts = input.emailAccounts.filter((account) => account.isActive);
-  const emailConfigured = activeEmailAccounts.some((account) => Boolean(account.password));
+  const oauthEmailCount = activeEmailAccounts.filter((account) => Boolean(account.oauthRefreshToken)).length;
+  const appPasswordEmailCount = activeEmailAccounts.filter((account) => Boolean(account.password)).length;
+  const emailConfigured = oauthEmailCount > 0 || appPasswordEmailCount > 0;
   const emailDataCount = input.emailAccounts.reduce((sum, account) => sum + account._count.messages, 0);
   const emailChannel = byChannel('EMAIL');
   const whatsapp = byChannel('WHATSAPP');
@@ -492,16 +522,16 @@ function buildChannelHealthRows(input: {
       mode: `${activeEmailAccounts.length}/${input.emailAccounts.length} 个账号启用 · ${activeEmailAccounts.map((account) => account.imapHost).filter(Boolean).slice(0, 2).join('、') || '未配置 IMAP'}`,
       configured: emailConfigured,
       tokenExpired: false,
-      tokenLabel: emailConfigured ? `已配置 ${activeEmailAccounts.length} 个邮箱` : input.emailAccounts.length > 0 ? '缺邮箱授权码' : '未添加邮箱账号',
+      tokenLabel: oauthEmailCount > 0 ? `Google OAuth 已授权 ${oauthEmailCount} 个邮箱` : appPasswordEmailCount > 0 ? `IMAP 授权码已配置 ${appPasswordEmailCount} 个邮箱` : input.configured.googleOk ? 'Google Client 已配置,待一键授权' : input.emailAccounts.length > 0 ? '缺邮箱授权' : '未添加邮箱账号',
       dataCount: emailDataCount,
       pendingCount: emailChannel.pending,
       lastSeenAt: maxDate(emailLatest, emailChannel.lastSeenAt),
-      setupAction: input.emailAccounts.length > 0 ? '补齐邮箱授权码或应用专用密码,再运行邮件同步。' : '先在系统设置添加 Gmail/IMAP 邮箱账号和授权码。',
-      emptyAction: '运行邮件同步并检查 IMAP 主机、授权码和 Gmail 安全设置。',
+      setupAction: input.configured.googleOk ? '点击 Gmail 一键授权,用 Google OAuth 接入邮箱同步。' : '先在渠道设置填写 Google OAuth Client ID/Secret,保存后发起一键授权。',
+      emptyAction: '运行邮件同步并检查 Google OAuth、IMAP 主机和 Gmail 安全设置。',
       staleAction: '邮件超过 7 天无新数据,检查 Gmail/IMAP 授权是否失效。',
       pendingAction: '邮件有待回复积压,进入统一收件箱优先清询盘和报价邮件。',
-      href: '/settings',
-      linkLabel: '管理邮箱账号',
+      href: input.configured.googleOk ? '/api/auth/google/start' : '/settings/channels',
+      linkLabel: input.configured.googleOk ? '发起 Gmail 授权' : '配置 Google Client',
     }),
     makeChannelRow({
       key: 'whatsapp',
