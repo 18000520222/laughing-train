@@ -6,6 +6,7 @@ import { createDefaultSalesAssignmentRules, executeSalesAssignmentRules } from '
 import { buildSalesRadar } from '@/lib/sales-radar';
 import { runEmailActionAutopilot } from '@/lib/email-actions';
 import { buildEmailClassificationAudit, reclassifyEmailMessages } from '@/lib/email-audit';
+import { buildEmailSecurityAudit, runEmailSecurityWatch } from '@/lib/email-security-audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -159,6 +160,23 @@ async function runEmailAutopilot(formData: FormData) {
   redirect(`/sales-command?${qs.toString()}`);
 }
 
+async function runEmailSecurityAction(formData: FormData) {
+  'use server';
+  await requireAdminUser();
+  const apply = String(formData.get('apply') || '') === 'true';
+  const limit = Math.max(1, Math.min(200, parseInt(String(formData.get('limit') || '50'), 10) || 50));
+  const result = await runEmailSecurityWatch({ dryRun: !apply, limit });
+  const qs = new URLSearchParams({
+    emailSecurity: apply ? 'applied' : 'dry',
+    staleCandidates: String(result.staleCandidates),
+    freshPending: String(result.freshPending),
+    archived: String(result.archived),
+    notified: String(result.adminNotifications),
+    skippedDuplicates: String(result.skippedDuplicates),
+  });
+  redirect(`/sales-command?${qs.toString()}#email-security-audit`);
+}
+
 async function createRadarTask(formData: FormData) {
   'use server';
   const user = await requireSalesUser();
@@ -264,6 +282,14 @@ export default async function SalesCommandPage({
     created: firstParam(searchParams.created),
     cleared: firstParam(searchParams.cleared),
     skipped: firstParam(searchParams.skipped),
+  };
+  const emailSecurityResult = {
+    status: firstParam(searchParams.emailSecurity),
+    staleCandidates: firstParam(searchParams.staleCandidates),
+    freshPending: firstParam(searchParams.freshPending),
+    archived: firstParam(searchParams.archived),
+    notified: firstParam(searchParams.notified),
+    skippedDuplicates: firstParam(searchParams.skippedDuplicates),
   };
   const nextBulkResult = {
     bulk: firstParam(searchParams.nextBulk),
@@ -409,6 +435,7 @@ export default async function SalesCommandPage({
   const actionAttribution = await buildSalesActionAttributionReport({ since: thirtyDaysAgo, until: new Date() });
   const stageVelocity = await buildOpportunityStageVelocityReport({ since: thirtyDaysAgo, until: new Date() });
   const emailAudit = await buildEmailClassificationAudit({ sampleLimit: 8 });
+  const emailSecurity = await buildEmailSecurityAudit({ sampleLimit: 8 });
   const channelQuality = await buildChannelQualityReport({ since: ninetyDaysAgo });
 
   return (
@@ -787,6 +814,59 @@ export default async function SalesCommandPage({
             </div>
           </div>
         </div>
+        <section id="email-security-audit" className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4">
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-xs font-black text-gray-500">安全邮件审计台</h3>
+              <p className="mt-1 text-[11px] font-bold text-gray-400">验证码、可疑登录、账号变更和平台安全提醒单独审计;过期验证码归档,近期安全事件通知管理员。</p>
+            </div>
+            {canManage && (
+              <div className="flex flex-wrap gap-2">
+                <form action={runEmailSecurityAction}>
+                  <input type="hidden" name="limit" value="50" />
+                  <button className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-700 hover:bg-indigo-100">预演安全归档</button>
+                </form>
+                <form action={runEmailSecurityAction}>
+                  <input type="hidden" name="apply" value="true" />
+                  <input type="hidden" name="limit" value="50" />
+                  <button className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 hover:bg-rose-100">归档过期安全邮件</button>
+                </form>
+              </div>
+            )}
+          </div>
+          {emailSecurityResult.status && <EmailSecurityResultBanner result={emailSecurityResult} />}
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <AttributionMetric label="安全邮件" value={emailSecurity.total} detail="AUTH_SECURITY 分类" tone={emailSecurity.total > 0 ? 'blue' : 'gray'} />
+            <AttributionMetric label="待确认" value={emailSecurity.pending} detail={`${emailSecurity.activePending} 封未过期`} tone={emailSecurity.pending > 0 ? 'rose' : 'gray'} />
+            <AttributionMetric label="过期待归档" value={emailSecurity.stalePending} detail={`超过 ${emailSecurity.staleHours} 小时`} tone={emailSecurity.stalePending > 0 ? 'amber' : 'gray'} />
+            <AttributionMetric label="信号类型" value={emailSecurity.signals.length} detail="验证码/登录/账号等" tone={emailSecurity.signals.length > 0 ? 'violet' : 'gray'} />
+          </div>
+          <div className="mt-4 rounded-xl bg-white px-4 py-3 text-xs font-bold text-gray-600">{emailSecurity.recommendation}</div>
+          <div className="mt-4 grid gap-4 xl:grid-cols-3">
+            <div className="rounded-xl border border-gray-100 bg-white p-4">
+              <h4 className="text-xs font-black text-gray-500">安全信号</h4>
+              <div className="mt-3 space-y-3">
+                {emailSecurity.signals.map((item: any) => (
+                  <AttributionBar key={item.signal} label={item.label} value={item.count} max={Math.max(1, ...emailSecurity.signals.map((row: any) => row.count))} detail={item.signal} />
+                ))}
+                {emailSecurity.signals.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无安全信号。</div>}
+              </div>
+            </div>
+            <div className="rounded-xl border border-gray-100 bg-white p-4">
+              <h4 className="text-xs font-black text-gray-500">来源平台</h4>
+              <div className="mt-3 space-y-3">
+                {emailSecurity.providers.map((item: any) => (
+                  <AttributionBar key={item.provider} label={item.provider} value={item.count} max={Math.max(1, ...emailSecurity.providers.map((row: any) => row.count))} detail="近 300 封安全邮件抽样" />
+                ))}
+                {emailSecurity.providers.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无来源平台。</div>}
+              </div>
+            </div>
+            <EmailSecurityPreview title="过期待归档" rows={emailSecurity.staleMessages} empty="暂无过期安全邮件。" />
+          </div>
+          <div className="mt-4">
+            <EmailSecurityPreview title="最近安全邮件" rows={emailSecurity.recentMessages} empty="暂无安全邮件。" />
+          </div>
+        </section>
       </section>
 
       <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
@@ -1925,6 +2005,53 @@ function EmailAutopilotResultBanner({
       <span className="ml-2">生成 {result.created || '0'}</span>
       <span className="ml-2">清理 {result.cleared || '0'}</span>
       {result.skipped ? <span className="ml-2 opacity-75">跳过 {result.skipped}</span> : null}
+    </div>
+  );
+}
+
+function EmailSecurityResultBanner({
+  result,
+}: {
+  result: { status?: string; staleCandidates?: string; freshPending?: string; archived?: string; notified?: string; skippedDuplicates?: string };
+}) {
+  const dryRun = result.status === 'dry';
+  return (
+    <div className={`mb-3 rounded-lg border px-4 py-3 text-xs font-bold ${dryRun ? 'border-indigo-100 bg-indigo-50 text-indigo-800' : 'border-emerald-100 bg-emerald-50 text-emerald-800'}`}>
+      {dryRun ? '安全邮件归档预演完成' : '安全邮件归档已执行'}
+      <span className="ml-2">过期候选 {result.staleCandidates || '0'}</span>
+      <span className="ml-2">近期待确认 {result.freshPending || '0'}</span>
+      <span className="ml-2">已归档 {result.archived || '0'}</span>
+      <span className="ml-2">通知 {result.notified || '0'}</span>
+      {result.skippedDuplicates ? <span className="ml-2 opacity-75">重复跳过 {result.skippedDuplicates}</span> : null}
+    </div>
+  );
+}
+
+function EmailSecurityPreview({ title, rows, empty }: { title: string; rows: any[]; empty: string }) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-white p-4">
+      <h4 className="text-xs font-black text-gray-500">{title}</h4>
+      <div className="mt-3 space-y-2">
+        {rows.slice(0, 8).map((msg) => (
+          <div key={msg.id} className="rounded-lg bg-gray-50 px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 truncate text-xs font-black text-gray-900">{msg.subject}</div>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-black ${msg.actionRequired ? 'bg-rose-50 text-rose-700' : 'bg-white text-gray-500'}`}>{msg.signalLabel}</span>
+            </div>
+            <div className="mt-1 truncate text-[11px] font-bold text-gray-500">{msg.from}</div>
+            <div className="mt-1 flex flex-wrap gap-1 text-[11px] font-bold text-gray-400">
+              <span>{msg.dateLabel}</span>
+              <span>·</span>
+              <span>{msg.accountEmail}</span>
+              <span>·</span>
+              <span>{msg.ageHours}h</span>
+            </div>
+            <div className="mt-1 truncate text-[11px] font-medium text-gray-400">{msg.reason}</div>
+          </div>
+        ))}
+        {rows.length > 8 && <div className="text-[11px] font-bold text-gray-400">另有 {rows.length - 8} 封。</div>}
+        {rows.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">{empty}</div>}
+      </div>
     </div>
   );
 }
