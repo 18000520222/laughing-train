@@ -9,6 +9,8 @@ import { runEmailActionAutopilot } from '@/lib/email-actions';
 import { buildEmailActionClosureAudit, buildEmailClassificationAudit, reclassifyEmailMessages } from '@/lib/email-audit';
 import { buildEmailSecurityAudit, runEmailSecurityWatch } from '@/lib/email-security-audit';
 import { buildChannelMessageRevenueReport } from '@/lib/channel-revenue-insights';
+import { buildAutomationFunnelInsights } from '@/lib/automation-insights';
+import { buildSalesPriorityQueue } from '@/lib/sales-priority-queue';
 
 export const dynamic = 'force-dynamic';
 
@@ -459,6 +461,11 @@ export default async function SalesCommandPage({
   const emailActionClosure = await buildEmailActionClosureAudit({ since: thirtyDaysAgo, until: new Date(), sampleLimit: 8 });
   const emailSecurity = await buildEmailSecurityAudit({ sampleLimit: 8 });
   const channelQuality = await buildChannelQualityReport({ since: ninetyDaysAgo });
+  const automationFunnel = buildAutomationFunnelInsights(await prisma.automationFlow.findMany({
+    orderBy: { updatedAt: 'desc' },
+    take: 200,
+    include: { runs: { orderBy: { createdAt: 'desc' }, take: 20 } },
+  }));
   const [channelRevenueMessages, channelRevenueTasks, channelRevenueOpportunities] = await Promise.all([
     prisma.inboxMessage.findMany({
       where: { direction: 'IN', companyId: { not: null }, createdAt: { gte: thirtyDaysAgo, lt: new Date() } },
@@ -495,6 +502,16 @@ export default async function SalesCommandPage({
     until: new Date(),
   });
   const healthAutomationEffect = await buildCustomerHealthAutomationEffectReport({ since: thirtyDaysAgo, until: new Date() });
+  const priorityQueue = buildSalesPriorityQueue({
+    channelSamples: channelRevenue.samples,
+    salesTasks,
+    staleOpportunities: staleOpportunityRows,
+    customerHealthRows,
+    automationRisks: automationFunnel.riskFlows,
+    emailTasks: emailActionClosure.topTasks,
+    healthTasks: healthAutomationEffect.topTasks,
+    now: new Date(),
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
@@ -529,6 +546,8 @@ export default async function SalesCommandPage({
         <Metric label="已逾期任务" value={overdueTaskCount} tone="rose" />
         <Metric label="24小时内到期" value={todayTaskCount} tone="amber" />
       </section>
+
+      <DailyPriorityPanel queue={priorityQueue} />
 
       <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -1480,6 +1499,79 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: st
       <div className="mt-1 text-2xl font-black">{value}</div>
     </div>
   );
+}
+
+function DailyPriorityPanel({ queue }: { queue: ReturnType<typeof buildSalesPriorityQueue> }) {
+  return (
+    <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-bold text-gray-900">老板每日作战清单</h2>
+          <p className="mt-1 text-xs text-gray-400">合并逾期消息、销售任务、停滞商机、客户健康、自动化风险和邮件动作,按风险与收入影响排序。</p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-black">
+          <span className="rounded-lg bg-rose-50 px-3 py-2 text-rose-700">高危 {queue.urgentCount}</span>
+          <span className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-700">影响 ${Math.round(queue.revenueAtRisk).toLocaleString()}</span>
+          <span className="rounded-lg bg-slate-100 px-3 py-2 text-slate-700">候选 {queue.totalCandidates}</span>
+        </div>
+      </div>
+      <div className="mb-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{queue.recommendation}</div>
+      <div className="mb-4 flex flex-wrap gap-2">
+        {queue.byKind.map((row) => (
+          <span key={row.kind} className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-black text-slate-600">{row.label} {row.count}</span>
+        ))}
+        {queue.byKind.length === 0 && <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-black text-emerald-700">暂无高优先级事项</span>}
+      </div>
+      <div className="grid gap-3 xl:grid-cols-2">
+        {queue.items.map((item, index) => (
+          <Link key={item.id} href={item.href} className={`block rounded-xl border p-4 transition hover:-translate-y-0.5 hover:shadow-sm ${priorityToneClass(item.tone)}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-black">#{index + 1}</span>
+                  <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-black">{item.kindLabel}</span>
+                  <span className="text-[11px] font-black opacity-70">负责人 {item.ownerName}</span>
+                </div>
+                <div className="mt-2 truncate text-sm font-black">{item.title}</div>
+                <div className="mt-1 truncate text-xs font-bold opacity-75">{item.subject}</div>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className="text-2xl font-black">{item.score}</div>
+                <div className="text-[10px] font-black opacity-60">优先分</div>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 text-[11px] font-bold md:grid-cols-3">
+              <div className="rounded-lg bg-white/75 px-3 py-2">
+                <div className="opacity-50">原因</div>
+                <div className="mt-0.5 truncate">{item.reason}</div>
+              </div>
+              <div className="rounded-lg bg-white/75 px-3 py-2">
+                <div className="opacity-50">动作</div>
+                <div className="mt-0.5 truncate">{item.action}</div>
+              </div>
+              <div className="rounded-lg bg-white/75 px-3 py-2">
+                <div className="opacity-50">证据</div>
+                <div className="mt-0.5 truncate">{item.evidence}</div>
+              </div>
+            </div>
+          </Link>
+        ))}
+        {queue.items.length === 0 && <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm font-bold text-emerald-700">今日暂无高优先级风险事项。</div>}
+      </div>
+    </section>
+  );
+}
+
+function priorityToneClass(tone: string) {
+  const colors: Record<string, string> = {
+    rose: 'border-rose-100 bg-rose-50 text-rose-900',
+    amber: 'border-amber-100 bg-amber-50 text-amber-900',
+    blue: 'border-blue-100 bg-blue-50 text-blue-900',
+    violet: 'border-violet-100 bg-violet-50 text-violet-900',
+    emerald: 'border-emerald-100 bg-emerald-50 text-emerald-900',
+    slate: 'border-slate-100 bg-slate-50 text-slate-900',
+  };
+  return colors[tone] || colors.slate;
 }
 
 function NextActionBulkResultBanner({
