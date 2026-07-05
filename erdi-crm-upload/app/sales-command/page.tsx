@@ -307,6 +307,12 @@ export default async function SalesCommandPage({
     updated: firstParam(searchParams.updated),
     skipped: firstParam(searchParams.skipped),
   };
+  const priorityActionResult = {
+    status: firstParam(searchParams.priorityAction),
+    created: firstParam(searchParams.priorityCreated),
+    notified: firstParam(searchParams.priorityNotified),
+    skipped: firstParam(searchParams.prioritySkipped),
+  };
 
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -547,7 +553,7 @@ export default async function SalesCommandPage({
         <Metric label="24小时内到期" value={todayTaskCount} tone="amber" />
       </section>
 
-      <DailyPriorityPanel queue={priorityQueue} />
+      <DailyPriorityPanel queue={priorityQueue} result={priorityActionResult} />
 
       <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -1501,9 +1507,15 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: st
   );
 }
 
-function DailyPriorityPanel({ queue }: { queue: ReturnType<typeof buildSalesPriorityQueue> }) {
+function DailyPriorityPanel({
+  queue,
+  result,
+}: {
+  queue: ReturnType<typeof buildSalesPriorityQueue>;
+  result: { status?: string; created?: string; notified?: string; skipped?: string };
+}) {
   return (
-    <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+    <section id="daily-priority" className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="font-bold text-gray-900">老板每日作战清单</h2>
@@ -1522,9 +1534,10 @@ function DailyPriorityPanel({ queue }: { queue: ReturnType<typeof buildSalesPrio
         ))}
         {queue.byKind.length === 0 && <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-black text-emerald-700">暂无高优先级事项</span>}
       </div>
+      {result.status && <PriorityActionResultBanner result={result} />}
       <div className="grid gap-3 xl:grid-cols-2">
         {queue.items.map((item, index) => (
-          <Link key={item.id} href={item.href} className={`block rounded-xl border p-4 transition hover:-translate-y-0.5 hover:shadow-sm ${priorityToneClass(item.tone)}`}>
+          <div key={item.id} className={`rounded-xl border p-4 ${priorityToneClass(item.tone)}`}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -1554,7 +1567,16 @@ function DailyPriorityPanel({ queue }: { queue: ReturnType<typeof buildSalesPrio
                 <div className="mt-0.5 truncate">{item.evidence}</div>
               </div>
             </div>
-          </Link>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <form action="/api/sales-command/priority-action" method="post">
+                <input type="hidden" name="itemId" value={item.id} />
+                <button className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-black text-white hover:bg-gray-800">
+                  {priorityActionLabel(item.kind)}
+                </button>
+              </form>
+              <Link href={item.href} className="rounded-lg bg-white/80 px-3 py-2 text-xs font-black hover:bg-white">打开详情</Link>
+            </div>
+          </div>
         ))}
         {queue.items.length === 0 && <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm font-bold text-emerald-700">今日暂无高优先级风险事项。</div>}
       </div>
@@ -1572,6 +1594,36 @@ function priorityToneClass(tone: string) {
     slate: 'border-slate-100 bg-slate-50 text-slate-900',
   };
   return colors[tone] || colors.slate;
+}
+
+function priorityActionLabel(kind: string) {
+  if (kind === 'AUTOMATION_RISK') return '通知管理员';
+  if (kind === 'SALES_TASK' || kind === 'EMAIL_ACTION' || kind === 'HEALTH_TASK') return '提醒负责人';
+  return '生成任务';
+}
+
+function PriorityActionResultBanner({
+  result,
+}: {
+  result: { status?: string; created?: string; notified?: string; skipped?: string };
+}) {
+  const labels: Record<string, string> = {
+    task: '作战清单任务已生成',
+    notify: '作战清单提醒已发送',
+    exists: '作战清单任务已存在,已提醒负责人',
+    missing: '事项已不存在或已被清理',
+    forbidden: '当前账号无权处理该事项',
+    invalid: '事项参数无效',
+  };
+  const isError = result.status === 'missing' || result.status === 'forbidden' || result.status === 'invalid';
+  return (
+    <div className={`mb-4 rounded-lg border px-4 py-3 text-xs font-bold ${isError ? 'border-amber-100 bg-amber-50 text-amber-800' : 'border-emerald-100 bg-emerald-50 text-emerald-800'}`}>
+      {labels[result.status || ''] || '作战清单动作已执行'}
+      <span className="ml-2">生成 {result.created || '0'}</span>
+      <span className="ml-2">通知 {result.notified || '0'}</span>
+      {result.skipped ? <span className="ml-2 opacity-75">跳过 {result.skipped}</span> : null}
+    </div>
+  );
 }
 
 function NextActionBulkResultBanner({

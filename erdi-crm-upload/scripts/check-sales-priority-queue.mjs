@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 const sourcePath = path.join(process.cwd(), 'lib/sales-priority-queue.ts');
 const source = fs.readFileSync(sourcePath, 'utf8');
 const pageSource = fs.readFileSync(path.join(process.cwd(), 'app/sales-command/page.tsx'), 'utf8');
+const actionRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/sales-command/priority-action/route.ts'), 'utf8');
 const compiled = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.CommonJS,
@@ -115,6 +116,13 @@ if (!pageSource.includes('老板每日作战清单')) failures.push('daily prior
 if (!pageSource.includes('buildSalesPriorityQueue')) failures.push('sales command does not build priority queue');
 if (!pageSource.includes('buildAutomationFunnelInsights')) failures.push('automation risk feed not wired into sales command');
 if (!pageSource.includes('priorityQueue')) failures.push('priority queue variable missing from sales command');
+if (!pageSource.includes('/api/sales-command/priority-action')) failures.push('daily priority action form missing');
+if (!pageSource.includes('priorityActionLabel')) failures.push('priority action labels missing');
+if (!pageSource.includes('PriorityActionResultBanner')) failures.push('priority action result banner missing');
+if (!actionRouteSource.includes('export async function POST')) failures.push('priority action POST route missing');
+if (!actionRouteSource.includes('source: SOURCE') || !actionRouteSource.includes("const SOURCE = 'DAILY_PRIORITY'")) failures.push('daily priority task source missing');
+if (!actionRouteSource.includes('createMessageTask') || !actionRouteSource.includes('createOpportunityTask') || !actionRouteSource.includes('notifyAutomationRisk')) failures.push('priority action handlers missing');
+if (!actionRouteSource.includes('priority:${itemId}')) failures.push('priority idempotency sourceRef missing');
 
 if (failures.length > 0) {
   for (const failure of failures) console.error(failure);
