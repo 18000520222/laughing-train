@@ -22,7 +22,7 @@
     },
     {
       "path": "/api/cron/automation-timeouts",
-      "schedule": "15 * * * *"
+      "schedule": "15 8 * * *"
     },
     {
       "path": "/api/cron/automation-health",
