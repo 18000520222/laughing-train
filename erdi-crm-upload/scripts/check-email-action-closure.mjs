@@ -3,6 +3,8 @@ import path from 'node:path';
 
 const auditSource = fs.readFileSync(path.join(process.cwd(), 'lib/email-audit.ts'), 'utf8');
 const salesCommandSource = fs.readFileSync(path.join(process.cwd(), 'app/sales-command/page.tsx'), 'utf8');
+const emailActionsSource = fs.readFileSync(path.join(process.cwd(), 'lib/email-actions.ts'), 'utf8');
+const labelApplyRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/emails/label-plan/apply/route.ts'), 'utf8');
 
 const checks = [
   {
@@ -40,6 +42,18 @@ const checks = [
   {
     ok: salesCommandSource.includes('emailActionClosure.topTasks'),
     message: 'sales command does not render closure samples',
+  },
+  {
+    ok: emailActionsSource.includes('export async function applyGmailLabelPlan') && emailActionsSource.includes('Gmail待归档'),
+    message: 'gmail label plan apply helper missing',
+  },
+  {
+    ok: labelApplyRouteSource.includes('applyGmailLabelPlan') && labelApplyRouteSource.includes('emailLabelPlan'),
+    message: 'gmail label plan apply route missing',
+  },
+  {
+    ok: salesCommandSource.includes('/api/emails/label-plan/apply') && salesCommandSource.includes('EmailLabelPlanResultBanner') && salesCommandSource.includes('id="gmail-label-plan"'),
+    message: 'sales command gmail label plan apply UI missing',
   },
 ];
 

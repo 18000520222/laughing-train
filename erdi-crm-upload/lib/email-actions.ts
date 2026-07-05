@@ -1,5 +1,6 @@
 import type { SalesTaskPriority, SalesTaskType } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { GMAIL_LABEL_PLANS } from '@/lib/email-label-plan';
 
 export const EMAIL_TASK_CATEGORIES = new Set([
   'INQUIRY',
@@ -110,6 +111,70 @@ export async function clearNoiseEmails(ids: string[]) {
     cleared++;
   }
   return { cleared, skipped: Math.max(0, ids.length - cleared) };
+}
+
+export async function applyGmailLabelPlan({
+  planKey,
+  actorUserId,
+  limit = 100,
+  dryRun = true,
+}: {
+  planKey: string;
+  actorUserId?: string;
+  limit?: number;
+  dryRun?: boolean;
+}) {
+  const plan = GMAIL_LABEL_PLANS.find((item) => item.key === planKey);
+  if (!plan) return { ok: false, reason: 'plan_not_found', planKey, mode: 'missing', candidates: 0, tagged: 0, created: 0, cleared: 0, skipped: 0 };
+
+  const mode = labelPlanMode(plan.category);
+  const safeLimit = Math.max(1, Math.min(500, limit));
+  const where: any = {
+    category: plan.category,
+    NOT: { classificationTags: { has: plan.labelName } },
+  };
+  if (mode === 'task') where.actionRequired = true;
+
+  const emails = await prisma.emailMessage.findMany({
+    where,
+    orderBy: [{ actionRequired: 'desc' }, { classificationScore: 'desc' }, { date: 'desc' }],
+    take: safeLimit,
+    select: { id: true, classificationTags: true },
+  });
+  if (dryRun) {
+    return { ok: true, reason: 'dry_run', planKey, labelName: plan.labelName, mode, candidates: emails.length, tagged: 0, created: 0, cleared: 0, skipped: 0 };
+  }
+
+  let tagged = 0;
+  let cleared = 0;
+  for (const email of emails) {
+    const extraTags = mode === 'archive'
+      ? [plan.labelName, 'Gmail待归档', '已清理']
+      : mode === 'review'
+      ? [plan.labelName, '待人工复核']
+      : [plan.labelName, 'Gmail标签计划'];
+    await prisma.emailMessage.update({
+      where: { id: email.id },
+      data: {
+        actionRequired: mode === 'archive' ? false : undefined,
+        classifiedAt: new Date(),
+        classificationTags: mergeTags(email.classificationTags, extraTags),
+      },
+    });
+    tagged++;
+    if (mode === 'archive') cleared++;
+  }
+
+  let created = 0;
+  let skipped = 0;
+  if (mode === 'task' && emails.length > 0 && actorUserId) {
+    const taskResult = await createTasksFromEmails(emails.map((email) => email.id), actorUserId);
+    created = taskResult.created;
+    cleared += taskResult.cleared;
+    skipped += taskResult.skipped;
+  }
+
+  return { ok: true, reason: 'applied', planKey, labelName: plan.labelName, mode, candidates: emails.length, tagged, created, cleared, skipped };
 }
 
 export async function runEmailActionAutopilot({
@@ -388,6 +453,13 @@ function splitName(name: string) {
 
 function mergeTags(current: string[], extra: string[]) {
   return Array.from(new Set([...(current || []), ...extra]));
+}
+
+function labelPlanMode(category: string) {
+  if (category === 'MARKETING_NEWSLETTER') return 'archive';
+  if (category === 'PLATFORM_ALERT') return 'review';
+  if (EMAIL_TASK_CATEGORIES.has(category)) return 'task';
+  return 'watch';
 }
 
 function trimSender(from: string) {

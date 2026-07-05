@@ -291,6 +291,15 @@ export default async function SalesCommandPage({
     cleared: firstParam(searchParams.cleared),
     skipped: firstParam(searchParams.skipped),
   };
+  const emailLabelPlanResult = {
+    status: firstParam(searchParams.emailLabelPlan),
+    planKey: firstParam(searchParams.labelPlanKey),
+    candidates: firstParam(searchParams.labelCandidates),
+    tagged: firstParam(searchParams.labelTagged),
+    created: firstParam(searchParams.labelCreated),
+    cleared: firstParam(searchParams.labelCleared),
+    skipped: firstParam(searchParams.labelSkipped),
+  };
   const emailSecurityResult = {
     status: firstParam(searchParams.emailSecurity),
     staleCandidates: firstParam(searchParams.staleCandidates),
@@ -1060,7 +1069,8 @@ export default async function SalesCommandPage({
         <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-bold text-blue-800">
           重跑分类前先用预演接口查看 `changed/migrations/changedSamples`;确认后再执行“复核最近 500 封”。
         </div>
-        <GmailReadinessPanel readiness={emailAudit.gmailReadiness} plans={emailAudit.gmailLabelPlan} />
+        <GmailReadinessPanel readiness={emailAudit.gmailReadiness} plans={emailAudit.gmailLabelPlan} canManage={canManage} />
+        {emailLabelPlanResult.status && <EmailLabelPlanResultBanner result={emailLabelPlanResult} />}
         <section className="mt-4 rounded-xl border border-gray-100 bg-white p-4">
           <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -3110,14 +3120,14 @@ function AttributionMetric({ label, value, detail, tone }: { label: string; valu
   );
 }
 
-function GmailReadinessPanel({ readiness, plans }: { readiness: any; plans: any[] }) {
+function GmailReadinessPanel({ readiness, plans, canManage }: { readiness: any; plans: any[]; canManage: boolean }) {
   const color = readiness.status === 'ready'
     ? 'border-emerald-100 bg-emerald-50 text-emerald-900'
     : readiness.status === 'empty'
       ? 'border-amber-100 bg-amber-50 text-amber-900'
       : 'border-rose-100 bg-rose-50 text-rose-900';
   return (
-    <div className={`mt-4 rounded-xl border p-4 ${color}`}>
+    <div id="gmail-label-plan" className={`mt-4 scroll-mt-24 rounded-xl border p-4 ${color}`}>
       <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <h3 className="text-sm font-black">{readiness.title}</h3>
@@ -3145,6 +3155,21 @@ function GmailReadinessPanel({ readiness, plans }: { readiness: any; plans: any[
             </div>
             <div className="mt-1 line-clamp-2 text-[11px] font-bold opacity-70">{plan.executionHint || plan.description}</div>
             <div className="mt-1 truncate text-[11px] font-medium opacity-60">{plan.gmailQuery}</div>
+            {canManage && (plan.messageCount || 0) > 0 && (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <form action="/api/emails/label-plan/apply" method="post">
+                  <input type="hidden" name="planKey" value={plan.key} />
+                  <input type="hidden" name="limit" value="100" />
+                  <button className="w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[11px] font-black text-gray-700 hover:bg-gray-50">预演</button>
+                </form>
+                <form action="/api/emails/label-plan/apply" method="post">
+                  <input type="hidden" name="planKey" value={plan.key} />
+                  <input type="hidden" name="apply" value="true" />
+                  <input type="hidden" name="limit" value="100" />
+                  <button className="w-full rounded-lg bg-gray-900 px-2 py-1.5 text-[11px] font-black text-white hover:bg-gray-800">应用</button>
+                </form>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -3198,6 +3223,26 @@ function EmailBulkResultBanner({
       <span className="ml-2">生成 {result.created || '0'}</span>
       <span className="ml-2">清理 {result.cleared || '0'}</span>
       {result.skipped ? <span className="ml-2 text-emerald-600">跳过 {result.skipped}</span> : null}
+    </div>
+  );
+}
+
+function EmailLabelPlanResultBanner({
+  result,
+}: {
+  result: { status?: string; planKey?: string; candidates?: string; tagged?: string; created?: string; cleared?: string; skipped?: string };
+}) {
+  const dryRun = result.status === 'dry';
+  const invalid = result.status === 'invalid';
+  return (
+    <div className={`mt-3 rounded-lg border px-4 py-3 text-xs font-bold ${invalid ? 'border-rose-100 bg-rose-50 text-rose-800' : dryRun ? 'border-blue-100 bg-blue-50 text-blue-800' : 'border-emerald-100 bg-emerald-50 text-emerald-800'}`}>
+      {invalid ? '标签计划参数无效' : dryRun ? 'Gmail 标签计划预演完成' : 'Gmail 标签计划已应用到 CRM'}
+      {result.planKey ? <span className="ml-2">计划 {result.planKey}</span> : null}
+      <span className="ml-2">候选 {result.candidates || '0'}</span>
+      <span className="ml-2">已标记 {result.tagged || '0'}</span>
+      <span className="ml-2">生成任务 {result.created || '0'}</span>
+      <span className="ml-2">清理 {result.cleared || '0'}</span>
+      {result.skipped ? <span className="ml-2">跳过 {result.skipped}</span> : null}
     </div>
   );
 }
