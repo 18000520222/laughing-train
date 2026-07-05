@@ -10,6 +10,8 @@ const source = fs.readFileSync(sourcePath, 'utf8');
 const pageSource = fs.readFileSync(path.join(process.cwd(), 'app/sales-command/page.tsx'), 'utf8');
 const actionRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/sales-command/priority-action/route.ts'), 'utf8');
 const morningRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/sales-command/morning-briefing/route.ts'), 'utf8');
+const morningCronSource = fs.readFileSync(path.join(process.cwd(), 'app/api/cron/morning-briefing/route.ts'), 'utf8');
+const morningWatchSource = fs.readFileSync(path.join(process.cwd(), 'lib/sales-morning-briefing-watch.ts'), 'utf8');
 const compiled = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.CommonJS,
@@ -152,10 +154,18 @@ if (!actionRouteSource.includes('source: SOURCE') || !actionRouteSource.includes
 if (!actionRouteSource.includes('createMessageTask') || !actionRouteSource.includes('createOpportunityTask') || !actionRouteSource.includes('notifyAutomationRisk')) failures.push('priority action handlers missing');
 if (!actionRouteSource.includes('priority:${itemId}')) failures.push('priority idempotency sourceRef missing');
 if (!morningRouteSource.includes('export async function POST')) failures.push('morning briefing POST route missing');
-if (!morningRouteSource.includes('resolveBriefingTarget')) failures.push('morning briefing target resolver missing');
-if (!morningRouteSource.includes('groupTargets')) failures.push('morning briefing grouping missing');
-if (!morningRouteSource.includes('老板晨会摘要: 今日必须处理')) failures.push('morning briefing notification title missing');
+if (!morningRouteSource.includes('sendMorningBriefingNotifications')) failures.push('morning briefing route should use shared notification helper');
 if (!morningRouteSource.includes('morningNotify')) failures.push('morning briefing redirect result missing');
+if (!morningWatchSource.includes('buildSalesMorningBriefingFromDatabase')) failures.push('morning briefing database builder missing');
+if (!morningWatchSource.includes('sendMorningBriefingNotifications')) failures.push('morning briefing shared notification sender missing');
+if (!morningWatchSource.includes('resolveBriefingTarget')) failures.push('morning briefing target resolver missing');
+if (!morningWatchSource.includes('groupTargets')) failures.push('morning briefing grouping missing');
+if (!morningWatchSource.includes('老板晨会摘要: 今日必须处理')) failures.push('morning briefing notification title missing');
+if (!morningWatchSource.includes('createdAt: { gte: input.todayStart }')) failures.push('morning briefing daily dedupe missing');
+if (!morningCronSource.includes('export async function GET')) failures.push('morning briefing cron GET route missing');
+if (!morningCronSource.includes('buildSalesMorningBriefingFromDatabase')) failures.push('morning briefing cron database builder missing');
+if (!morningCronSource.includes('sendMorningBriefingNotifications')) failures.push('morning briefing cron sender missing');
+if (!morningCronSource.includes('MORNING_BRIEFING_KEY')) failures.push('morning briefing cron key missing');
 
 if (failures.length > 0) {
   for (const failure of failures) console.error(failure);
