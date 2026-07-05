@@ -1,11 +1,11 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { repairAutomationRiskFlow } from '@/lib/automation-risk-repair';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
 const ALLOWED_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SALES']);
-const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'];
 const SOURCE = 'DAILY_PRIORITY';
 
 export async function POST(req: Request) {
@@ -67,7 +67,7 @@ async function handlePriorityItem({
   if (kind === 'MESSAGE_SLA') return createMessageTask(targetId, itemId, currentUserId, role);
   if (kind === 'OPPORTUNITY_STALL') return createOpportunityTask(targetId, itemId, currentUserId, role);
   if (kind === 'CUSTOMER_HEALTH') return createCustomerHealthTask(targetId, itemId, currentUserId, role);
-  if (kind === 'AUTOMATION_RISK') return notifyAutomationRisk(targetId);
+  if (kind === 'AUTOMATION_RISK') return repairAutomationRisk(targetId, currentUserId);
   if (kind === 'SALES_TASK' || kind === 'EMAIL_ACTION' || kind === 'HEALTH_TASK') return remindTaskOwner(targetId, currentUserId, role);
   return { status: 'invalid', created: 0, notified: 0, skipped: 1 };
 }
@@ -189,21 +189,11 @@ async function remindTaskOwner(taskId: string, currentUserId: string, role: stri
   return { status: 'notify', created: 0, notified: 1, skipped: 0 };
 }
 
-async function notifyAutomationRisk(flowId: string) {
-  const flow = await prisma.automationFlow.findUnique({ where: { id: flowId } });
-  if (!flow) return { status: 'missing', created: 0, notified: 0, skipped: 1 };
-  const admins = await prisma.user.findMany({ where: { role: { in: ADMIN_ROLES as any }, isActive: true }, select: { id: true } });
-  if (admins.length === 0) return { status: 'missing', created: 0, notified: 0, skipped: 1 };
-  await prisma.notification.createMany({
-    data: admins.map((admin) => ({
-      userId: admin.id,
-      type: 'SYSTEM' as any,
-      title: '作战清单提醒: 自动化流程风险',
-      body: `${flow.name}: 请复核条件、动作和失败记录。`,
-      link: `/automation?flow=${flow.id}`,
-    })),
-  });
-  return { status: 'notify', created: 0, notified: admins.length, skipped: 0 };
+async function repairAutomationRisk(flowId: string, currentUserId: string) {
+  const result = await repairAutomationRiskFlow({ flowId, userId: currentUserId });
+  if (!result.ok) return { status: result.status, created: 0, notified: 0, skipped: result.skipped || 1 };
+  const created = result.updated + result.createdRun + result.replayed;
+  return { status: result.status, created, notified: result.notified, skipped: result.skipped };
 }
 
 async function createOwnerNotification(userId: string, title: string, body: string, link: string) {

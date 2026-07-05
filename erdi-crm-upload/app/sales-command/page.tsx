@@ -2189,7 +2189,7 @@ function priorityToneClass(tone: string) {
 }
 
 function priorityActionLabel(kind: string) {
-  if (kind === 'AUTOMATION_RISK') return '通知管理员';
+  if (kind === 'AUTOMATION_RISK') return '修复风险';
   if (kind === 'SALES_TASK' || kind === 'EMAIL_ACTION' || kind === 'HEALTH_TASK') return '提醒负责人';
   return '生成任务';
 }
@@ -2202,6 +2202,12 @@ function PriorityActionResultBanner({
   const labels: Record<string, string> = {
     task: '作战清单任务已生成',
     notify: '作战清单提醒已发送',
+    activated: '自动化风险流程已开启',
+    tested: '自动化风险流程已生成测试运行',
+    replayed: '自动化失败运行已重放处理',
+    tuned: '自动化风险流程已写入调参建议',
+    notified: '自动化风险已提醒管理员复核',
+    stable: '自动化流程当前状态稳定',
     exists: '作战清单任务已存在,已提醒负责人',
     bulk: '作战清单批量动作已执行',
     missing: '事项已不存在或已被清理',

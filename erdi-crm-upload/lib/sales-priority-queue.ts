@@ -121,6 +121,8 @@ type AutomationRiskInput = {
   channelLabel: string;
   actionType: string;
   reason: string;
+  repairLabel?: string;
+  repairHint?: string;
   weight: number;
   failedRuns: number;
   runs: number;
@@ -400,8 +402,8 @@ function automationItem(row: AutomationRiskInput): SalesPriorityItem {
     score,
     impactUSD: row.failedRuns * 1000,
     reason: row.reason,
-    action: '复核条件、动作和失败记录,必要时重放或暂停流程。',
-    evidence: `${row.runs} 次运行 · ${row.failedRuns} 次失败`,
+    action: row.repairLabel ? `${row.repairLabel}: ${row.repairHint || row.reason}` : '一键修复自动化风险,必要时重放、测试或写入调参建议。',
+    evidence: `${row.runs} 次运行 · ${row.failedRuns} 次失败${row.repairLabel ? ` · ${row.repairLabel}` : ''}`,
     tone: row.failedRuns > 0 || row.weight >= 90 ? 'rose' : 'violet',
   };
 }

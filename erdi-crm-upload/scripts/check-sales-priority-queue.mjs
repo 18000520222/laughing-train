@@ -330,6 +330,7 @@ if (!Array.isArray(queue.items) || queue.items.length < 5) failures.push('priori
 if (queue.urgentCount < 2) failures.push(`urgent count too low: ${queue.urgentCount}`);
 if (queue.revenueAtRisk < 90000) failures.push(`revenue at risk too low: ${queue.revenueAtRisk}`);
 if (!queue.items.some((item) => item.kind === 'AUTOMATION_RISK')) failures.push('automation risk missing from queue');
+if (!queue.items.some((item) => item.kind === 'AUTOMATION_RISK' && item.action.includes('一键修复'))) failures.push('automation risk repair action missing from queue');
 if (!queue.items.some((item) => item.kind === 'COMPLETION_EVIDENCE_ESCALATION' && item.kindLabel === '补证据升级')) failures.push('completion evidence escalation missing from queue');
 if (!queue.items.some((item) => item.kind === 'MESSAGE_SLA' && item.action.includes('先回复客户'))) failures.push('overdue message action missing');
 if (!queue.items.some((item) => item.kind === 'OPPORTUNITY_STALL' && item.href === '/opportunity/opp1')) failures.push('stalled opportunity link missing');
@@ -401,7 +402,9 @@ if (!actionRouteSource.includes('export async function POST')) failures.push('pr
 if (!actionRouteSource.includes('parsePriorityItemIds')) failures.push('priority action batch parser missing');
 if (!actionRouteSource.includes("form.get('itemIds')") && !actionRouteSource.includes("form.getAll('itemIds')")) failures.push('priority action itemIds support missing');
 if (!actionRouteSource.includes('source: SOURCE') || !actionRouteSource.includes("const SOURCE = 'DAILY_PRIORITY'")) failures.push('daily priority task source missing');
-if (!actionRouteSource.includes('createMessageTask') || !actionRouteSource.includes('createOpportunityTask') || !actionRouteSource.includes('notifyAutomationRisk')) failures.push('priority action handlers missing');
+if (!actionRouteSource.includes('createMessageTask') || !actionRouteSource.includes('createOpportunityTask') || !actionRouteSource.includes('repairAutomationRiskFlow')) failures.push('priority action handlers missing');
+if (!pageSource.includes("if (kind === 'AUTOMATION_RISK') return '修复风险'")) failures.push('automation risk priority action label should repair risk');
+if (!pageSource.includes('自动化风险流程已开启') || !pageSource.includes('自动化失败运行已重放处理')) failures.push('priority action banner missing automation repair statuses');
 if (!actionRouteSource.includes('priority:${itemId}')) failures.push('priority idempotency sourceRef missing');
 if (!morningRouteSource.includes('export async function POST')) failures.push('morning briefing POST route missing');
 if (!morningRouteSource.includes('sendMorningBriefingNotifications')) failures.push('morning briefing route should use shared notification helper');
