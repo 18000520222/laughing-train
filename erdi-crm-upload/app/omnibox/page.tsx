@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import type { InboxStatus, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { buildOmniboxEffectivenessReport } from '@/lib/omnibox-insights';
 import OmniboxClient from './OmniboxClient';
 
 export const dynamic = 'force-dynamic';
@@ -17,7 +18,10 @@ export default async function OmniboxPage({
     redirect('/dashboard?error=unauthorized');
   }
 
-  const [messages, slaMessages, settings] = await Promise.all([
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const [messages, slaMessages, omniboxTasks, settings] = await Promise.all([
     prisma.inboxMessage.findMany({
       where: { direction: 'IN' },
       orderBy: { createdAt: 'desc' },
@@ -30,6 +34,12 @@ export default async function OmniboxPage({
       take: 500,
       include: { company: { select: { id: true, name: true, country: true, customerCode: true, owner: { select: { name: true, email: true } } } } },
     }),
+    prisma.salesTask.findMany({
+      where: { source: 'OMNIBOX_BULK', createdAt: { gte: thirtyDaysAgo } },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+      include: { company: { select: { id: true, name: true } }, owner: { select: { name: true, email: true } } },
+    }),
     prisma.systemSettings.findUnique({ where: { id: 'default' } }),
   ]);
 
@@ -40,6 +50,7 @@ export default async function OmniboxPage({
     REPLIED: messages.filter((m) => m.status === 'REPLIED').length,
   };
   const sla = buildInboxSlaReport(slaMessages);
+  const effectiveness = buildOmniboxEffectivenessReport({ messages: slaMessages, tasks: omniboxTasks });
   const bulkResult = {
     bulk: firstParam(searchParams.bulk),
     count: firstParam(searchParams.count),
@@ -133,6 +144,43 @@ export default async function OmniboxPage({
               ))}
               {sla.channelRows.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无渠道积压。</div>}
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="mb-6 rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">全渠道会话效果复盘</h2>
+            <p className="mt-1 text-xs text-gray-500">参考 Intercom 响应速度/效果报表、Freshdesk first response SLA、Zendesk 队列和 HubSpot Conversations Inbox,复盘渠道消息是否及时回复并沉淀销售动作。</p>
+          </div>
+          <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">近样本 + 近30天任务</span>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <SlaMetric label="入站消息" value={effectiveness.total} detail={`${effectiveness.pending} 待回复`} tone="blue" />
+          <SlaMetric label="回复率" value={formatPercent(effectiveness.replyRate)} detail={`24h内 ${formatPercent(effectiveness.slaRate)}`} tone={(effectiveness.replyRate || 0) >= 0.7 ? 'emerald' : 'amber'} />
+          <SlaMetric label="平均回复" value={formatHours(effectiveness.avgReplyHours)} detail="按 REPLIED 更新时间估算" tone={(effectiveness.avgReplyHours || 0) <= 24 ? 'emerald' : 'amber'} />
+          <SlaMetric label="AI草稿率" value={formatPercent(effectiveness.draftRate)} detail={`${effectiveness.autoSendable} 可自动发`} tone={effectiveness.draftReady > 0 ? 'blue' : 'slate'} />
+          <SlaMetric label="高意向待回复" value={effectiveness.highIntentPending} detail={`${effectiveness.highIntent} 条高意向`} tone={effectiveness.highIntentPending > 0 ? 'rose' : 'emerald'} />
+          <SlaMetric label="转销售任务" value={effectiveness.taskConverted} detail={`转化率 ${formatPercent(effectiveness.taskRate)}`} tone={effectiveness.taskConverted > 0 ? 'emerald' : 'amber'} />
+        </div>
+        <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{effectiveness.recommendation}</div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-3">
+          <EffectivenessPanel title="按渠道" rows={effectiveness.byChannel} max={effectiveness.maxChannelTotal} />
+          <EffectivenessPanel title="按意图" rows={effectiveness.byIntent} max={effectiveness.maxIntentTotal} />
+          <EffectivenessPanel title="按负责人" rows={effectiveness.byOwner} max={effectiveness.maxOwnerTotal} />
+        </div>
+        <div className="mt-4 rounded-xl border border-gray-100 p-4">
+          <h3 className="text-xs font-black text-gray-500">收件箱转任务样本</h3>
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            {effectiveness.taskSamples.map((task) => (
+              <div key={task.id} className="rounded-lg bg-gray-50 px-3 py-2">
+                <div className="truncate text-xs font-black text-gray-900">{task.companyName}</div>
+                <div className="mt-1 truncate text-[11px] font-bold text-gray-500">{task.title}</div>
+                <div className="mt-1 text-[11px] font-bold text-gray-400">{task.ownerName} · {task.createdAtLabel}</div>
+              </div>
+            ))}
+            {effectiveness.taskSamples.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无收件箱转任务样本。</div>}
           </div>
         </div>
       </section>
@@ -375,6 +423,33 @@ function SlaBar({ label, value, max, detail }: { label: string; value: number; m
   );
 }
 
+function EffectivenessPanel({ title, rows, max }: { title: string; rows: any[]; max: number }) {
+  return (
+    <div className="rounded-xl border border-gray-100 p-4">
+      <h3 className="text-xs font-black text-gray-500">{title}</h3>
+      <div className="mt-3 space-y-3">
+        {rows.map((row) => (
+          <div key={row.key}>
+            <div className="mb-1 flex items-center justify-between gap-3">
+              <div className="min-w-0 truncate text-xs font-black text-gray-700">{row.label}</div>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${row.healthScore >= 80 ? 'bg-emerald-50 text-emerald-700' : row.healthScore >= 55 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>
+                {row.healthScore}
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-gray-100">
+              <div className="h-2 rounded-full bg-blue-500" style={{ width: `${Math.max(3, Math.round((row.total / Math.max(1, max)) * 100))}%` }} />
+            </div>
+            <div className="mt-1 text-[11px] font-bold text-gray-400">
+              总 {row.total} · 待 {row.pending} · 回复 {formatPercent(row.replyRate)} · 24h {formatPercent(row.slaRate)} · 任务 {row.taskConverted}
+            </div>
+          </div>
+        ))}
+        {rows.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无复盘数据。</div>}
+      </div>
+    </div>
+  );
+}
+
 function BulkResultBanner({ bulk, count, skipped }: { bulk: string; count?: string; skipped?: string }) {
   const label: Record<string, string> = {
     tasks: '已生成销售任务',
@@ -471,6 +546,18 @@ function CleanupPreview({
 
 function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function formatPercent(value: number | null) {
+  if (value === null) return '-';
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatHours(value: number | null) {
+  if (value === null) return '-';
+  if (value < 1) return '<1小时';
+  if (value < 24) return `${Math.round(value)}小时`;
+  return `${Math.round(value / 24)}天`;
 }
 
 function hoursSince(value: Date | string | null | undefined) {
