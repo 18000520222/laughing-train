@@ -20,6 +20,8 @@ const actionClosurePath = path.join(process.cwd(), 'lib/sales-action-closure.ts'
 const actionClosureSource = fs.readFileSync(actionClosurePath, 'utf8');
 const completionEvidencePath = path.join(process.cwd(), 'lib/sales-completion-evidence.ts');
 const completionEvidenceSource = fs.readFileSync(completionEvidencePath, 'utf8');
+const completionEvidenceEscalationPath = path.join(process.cwd(), 'lib/sales-completion-evidence-escalation.ts');
+const completionEvidenceEscalationSource = fs.readFileSync(completionEvidenceEscalationPath, 'utf8');
 const completionEvidenceRepairSource = fs.readFileSync(path.join(process.cwd(), 'lib/sales-completion-evidence-repair.ts'), 'utf8');
 const vercelConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'vercel.json'), 'utf8'));
 const compiled = ts.transpileModule(source, {
@@ -68,6 +70,21 @@ const completionEvidenceSandbox = {
 };
 vm.runInNewContext(completionEvidenceCompiled.outputText, completionEvidenceSandbox, { filename: completionEvidencePath });
 const { buildSalesCompletionEvidenceReport } = completionEvidenceSandbox.module.exports;
+const completionEvidenceEscalationCompiled = ts.transpileModule(completionEvidenceEscalationSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2020,
+    esModuleInterop: true,
+  },
+});
+const completionEvidenceEscalationExported = {};
+const completionEvidenceEscalationSandbox = {
+  exports: completionEvidenceEscalationExported,
+  module: { exports: completionEvidenceEscalationExported },
+  require,
+};
+vm.runInNewContext(completionEvidenceEscalationCompiled.outputText, completionEvidenceEscalationSandbox, { filename: completionEvidenceEscalationPath });
+const { buildCompletionEvidenceEscalationReport } = completionEvidenceEscalationSandbox.module.exports;
 
 const now = new Date('2026-07-04T12:00:00Z');
 const queue = buildSalesPriorityQueue({
@@ -248,6 +265,51 @@ const completionEvidence = buildSalesCompletionEvidenceReport({
     },
   ],
 });
+const completionEvidenceEscalation = buildCompletionEvidenceEscalationReport({
+  now,
+  escalationNotifications: 4,
+  tasks: [
+    {
+      id: 'repair-escalated',
+      title: '补完成证据: Done without evidence',
+      status: 'TODO',
+      source: 'COMPLETION_EVIDENCE_AUDIT',
+      sourceRef: 'completion-evidence:done-missing',
+      dueAt: new Date('2026-07-03T08:00:00Z'),
+      escalatedAt: new Date('2026-07-04T06:00:00Z'),
+      createdAt: new Date('2026-07-03T00:00:00Z'),
+      completedAt: null,
+      owner: { name: 'Sales A', email: 'a@example.com' },
+      company: { id: 'c1', name: 'Priority Buyer' },
+    },
+    {
+      id: 'repair-overdue',
+      title: '补完成证据: Done with note only',
+      status: 'TODO',
+      source: 'COMPLETION_EVIDENCE_AUDIT',
+      sourceRef: 'completion-evidence:done-weak',
+      dueAt: new Date('2026-07-04T06:00:00Z'),
+      escalatedAt: null,
+      createdAt: new Date('2026-07-03T12:00:00Z'),
+      completedAt: null,
+      owner: { name: 'Sales B', email: 'b@example.com' },
+      company: { id: 'c2', name: 'Task Buyer' },
+    },
+    {
+      id: 'repair-resolved',
+      title: '补完成证据: Done with outbound and opportunity',
+      status: 'DONE',
+      source: 'COMPLETION_EVIDENCE_AUDIT',
+      sourceRef: 'completion-evidence:done-strong',
+      dueAt: new Date('2026-07-04T06:00:00Z'),
+      escalatedAt: null,
+      createdAt: new Date('2026-07-03T12:00:00Z'),
+      completedAt: new Date('2026-07-04T11:00:00Z'),
+      owner: { name: 'Sales C', email: 'c@example.com' },
+      company: { id: 'c3', name: 'Defense Buyer' },
+    },
+  ],
+});
 
 const failures = [];
 if (!Array.isArray(queue.items) || queue.items.length < 5) failures.push('priority queue should include cross-module items');
@@ -276,6 +338,12 @@ if (completionEvidence.missingEvidence !== 1) failures.push('completion evidence
 if (completionEvidence.weakEvidence !== 1) failures.push('completion evidence should detect note-only evidence');
 if (completionEvidence.strongEvidence !== 1) failures.push('completion evidence should detect outbound/stage evidence');
 if (!completionEvidence.rows.some((row) => row.statusLabel === '有业务结果')) failures.push('completion evidence strong row missing');
+if (completionEvidenceEscalation.totalRepairTasks !== 3) failures.push('completion evidence escalation should inspect repair tasks');
+if (completionEvidenceEscalation.openRepairTasks !== 2) failures.push('completion evidence escalation open tasks mismatch');
+if (completionEvidenceEscalation.overdueOpenTasks !== 2) failures.push('completion evidence escalation overdue tasks mismatch');
+if (completionEvidenceEscalation.escalatedOpenTasks !== 1) failures.push('completion evidence escalation escalated tasks mismatch');
+if (completionEvidenceEscalation.resolvedTasks !== 1) failures.push('completion evidence escalation resolved tasks mismatch');
+if (!completionEvidenceEscalation.ownerRows.some((row) => row.label === 'Sales A' && row.escalated === 1)) failures.push('completion evidence escalation owner ranking missing');
 if (!pageSource.includes('老板每日作战清单')) failures.push('daily priority panel UI missing');
 if (!pageSource.includes('老板晨会摘要')) failures.push('morning briefing UI missing');
 if (!pageSource.includes('晨会通知处理闭环')) failures.push('morning briefing closure UI missing');
@@ -291,6 +359,10 @@ if (!pageSource.includes('stageChangedAt: { gte: completionWindowStart }')) fail
 if (!pageSource.includes('/api/sales-command/completion-evidence')) failures.push('completion evidence action route not wired');
 if (!pageSource.includes('批量补证据') || !pageSource.includes('补证据')) failures.push('completion evidence repair buttons missing');
 if (!pageSource.includes('CompletionEvidenceResultBanner')) failures.push('completion evidence result banner missing');
+if (!pageSource.includes('补证据升级审计')) failures.push('completion evidence escalation UI missing');
+if (!pageSource.includes('buildCompletionEvidenceEscalationReport')) failures.push('completion evidence escalation report not wired');
+if (!pageSource.includes('补证据任务逾期升级')) failures.push('completion evidence escalation notifications not queried');
+if (!pageSource.includes('CompletionEvidenceEscalationPanel')) failures.push('completion evidence escalation panel not rendered');
 if (!pageSource.includes('处理晨会前三项') || !pageSource.includes('一键处理全部高危')) failures.push('morning briefing bulk buttons missing');
 if (!pageSource.includes('通知前三项负责人') || !pageSource.includes('通知全部高危负责人')) failures.push('morning briefing notify buttons missing');
 if (!pageSource.includes('MorningNotifyResultBanner')) failures.push('morning briefing notify result banner missing');
@@ -349,6 +421,10 @@ if (!completionEvidenceSource.includes('缺完成证据')) failures.push('comple
 if (!completionEvidenceSource.includes('有业务结果')) failures.push('completion evidence strong status missing');
 if (!completionEvidenceSource.includes('商机推进')) failures.push('completion evidence opportunity proof missing');
 if (!completionEvidenceSource.includes('allRows: sortedRows')) failures.push('completion evidence full audit rows missing');
+if (!completionEvidenceEscalationSource.includes('buildCompletionEvidenceEscalationReport')) failures.push('completion evidence escalation builder missing');
+if (!completionEvidenceEscalationSource.includes('ownerRows')) failures.push('completion evidence escalation owner rows missing');
+if (!completionEvidenceEscalationSource.includes('companyRows')) failures.push('completion evidence escalation company rows missing');
+if (!completionEvidenceEscalationSource.includes('补证据任务已升级')) failures.push('completion evidence escalation recommendation missing');
 if (!completionEvidenceRepairSource.includes("COMPLETION_EVIDENCE_REPAIR_SOURCE = 'COMPLETION_EVIDENCE_AUDIT'")) failures.push('completion evidence shared source missing');
 if (!completionEvidenceRepairSource.includes('runCompletionEvidenceRepairWatch')) failures.push('completion evidence watch helper missing');
 if (!completionEvidenceRepairSource.includes('escalateStaleCompletionEvidenceRepairs')) failures.push('completion evidence escalation helper missing');

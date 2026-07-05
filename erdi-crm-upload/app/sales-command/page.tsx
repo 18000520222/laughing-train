@@ -14,6 +14,7 @@ import { buildSalesMorningBriefing, buildSalesOwnerPriorityReport, buildSalesPri
 import { buildMorningBriefingClosureReport } from '@/lib/sales-morning-briefing-closure';
 import { buildSalesActionClosureReport } from '@/lib/sales-action-closure';
 import { buildSalesCompletionEvidenceReport } from '@/lib/sales-completion-evidence';
+import { buildCompletionEvidenceEscalationReport } from '@/lib/sales-completion-evidence-escalation';
 
 export const dynamic = 'force-dynamic';
 
@@ -605,6 +606,29 @@ export default async function SalesCommandPage({
     messages: completionMessages,
     opportunities: completionOpportunities,
   });
+  const [completionRepairTasks, completionEscalationNotifications] = await Promise.all([
+    prisma.salesTask.findMany({
+      where: {
+        source: 'COMPLETION_EVIDENCE_AUDIT',
+        OR: [
+          { createdAt: { gte: thirtyDaysAgo } },
+          { escalatedAt: { gte: thirtyDaysAgo } },
+          { status: 'TODO' },
+        ],
+      },
+      orderBy: [{ escalatedAt: 'desc' }, { dueAt: 'asc' }, { createdAt: 'desc' }],
+      take: 120,
+      include: { owner: true, company: true },
+    }),
+    prisma.notification.count({
+      where: { title: '补证据任务逾期升级', createdAt: { gte: thirtyDaysAgo } },
+    }),
+  ]);
+  const completionEscalation = buildCompletionEvidenceEscalationReport({
+    tasks: completionRepairTasks,
+    escalationNotifications: completionEscalationNotifications,
+    now: new Date(),
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
@@ -644,6 +668,7 @@ export default async function SalesCommandPage({
       <MorningClosurePanel report={morningClosure} />
       <ActionClosurePanel report={actionClosure} />
       <CompletionEvidencePanel report={completionEvidence} result={completionEvidenceResult} />
+      <CompletionEvidenceEscalationPanel report={completionEscalation} />
       <DailyPriorityPanel queue={priorityQueue} result={priorityActionResult} />
       <OwnerPriorityPanel report={ownerPriorityReport} />
 
@@ -1887,6 +1912,84 @@ function CompletionEvidenceResultBanner({ result }: { result: { status?: string;
     ? `没有新建任务,${skipped || 0} 个事项已存在补证据任务或无权限。`
     : '未选择需要补证据的任务。';
   return <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-bold text-blue-700">{text}</div>;
+}
+
+function CompletionEvidenceEscalationPanel({ report }: { report: ReturnType<typeof buildCompletionEvidenceEscalationReport> }) {
+  return (
+    <section id="completion-evidence-escalation" className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-bold text-gray-900">补证据升级审计</h2>
+          <p className="mt-1 text-xs text-gray-400">追踪补证据任务是否按时处理,以及哪些负责人和客户反复进入升级队列。</p>
+        </div>
+        <Link href="/tasks?view=escalated" className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-black text-white hover:bg-gray-800">查看升级任务</Link>
+      </div>
+      <div className="mb-4 grid grid-cols-2 gap-2 text-xs font-black md:grid-cols-6">
+        <div className="rounded-lg bg-slate-100 px-3 py-2 text-slate-700"><div className="text-lg">{report.totalRepairTasks}</div><div>补证据任务</div></div>
+        <div className="rounded-lg bg-blue-50 px-3 py-2 text-blue-700"><div className="text-lg">{report.openRepairTasks}</div><div>待处理</div></div>
+        <div className="rounded-lg bg-amber-50 px-3 py-2 text-amber-700"><div className="text-lg">{report.overdueOpenTasks}</div><div>已逾期</div></div>
+        <div className="rounded-lg bg-rose-50 px-3 py-2 text-rose-700"><div className="text-lg">{report.escalatedOpenTasks}</div><div>已升级</div></div>
+        <div className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-700"><div className="text-lg">{formatLocalPercent(report.resolutionRate)}</div><div>补齐率</div></div>
+        <div className="rounded-lg bg-violet-50 px-3 py-2 text-violet-700"><div className="text-lg">{report.escalationNotifications}</div><div>升级通知</div></div>
+      </div>
+      <div className="mb-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{report.recommendation}</div>
+      <div className="grid gap-4 xl:grid-cols-[0.85fr_0.85fr_1.3fr]">
+        <div className="rounded-xl border border-gray-100 p-4">
+          <h3 className="text-xs font-black text-gray-500">负责人升级排行</h3>
+          <div className="mt-3 space-y-3">
+            {report.ownerRows.map((row) => (
+              <EscalationGroupBar key={row.key} row={row} max={report.ownerRows[0]?.score || 1} />
+            ))}
+            {report.ownerRows.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无负责人升级数据。</div>}
+          </div>
+        </div>
+        <div className="rounded-xl border border-gray-100 p-4">
+          <h3 className="text-xs font-black text-gray-500">客户升级排行</h3>
+          <div className="mt-3 space-y-3">
+            {report.companyRows.map((row) => (
+              <EscalationGroupBar key={row.key} row={row} max={report.companyRows[0]?.score || 1} />
+            ))}
+            {report.companyRows.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无客户升级数据。</div>}
+          </div>
+        </div>
+        <div className="rounded-xl border border-gray-100 p-4">
+          <h3 className="text-xs font-black text-gray-500">关键补证据任务</h3>
+          <div className="mt-3 space-y-2">
+            {report.rows.map((row) => (
+              <div key={row.taskId} className={`rounded-lg px-3 py-2 ${row.tone === 'rose' ? 'bg-rose-50 text-rose-900' : row.tone === 'amber' ? 'bg-amber-50 text-amber-900' : row.tone === 'emerald' ? 'bg-emerald-50 text-emerald-900' : 'bg-slate-50 text-slate-800'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <Link href={row.href} className="min-w-0 truncate text-xs font-black text-indigo-700 hover:underline">{row.companyName}</Link>
+                  <span className="shrink-0 rounded-full bg-white/75 px-2 py-0.5 text-[11px] font-black">{row.statusLabel}</span>
+                </div>
+                <div className="mt-1 truncate text-[11px] font-bold opacity-75">{row.ownerName} · {row.taskTitle}</div>
+                <div className="mt-1 text-[11px] font-bold opacity-60">
+                  {row.dueAt ? `逾期 ${row.ageHours}h` : '暂无截止时间'}
+                  {row.escalatedAt ? ` · 升级 ${new Date(row.escalatedAt).toLocaleString('zh-CN')}` : ''}
+                </div>
+              </div>
+            ))}
+            {report.rows.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">暂无补证据任务样本。</div>}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function EscalationGroupBar({ row, max }: { row: { label: string; score: number; total: number; open: number; overdue: number; escalated: number; resolved: number }; max: number }) {
+  const width = `${Math.max(4, Math.round((row.score / Math.max(1, max)) * 100))}%`;
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-xs font-black text-gray-900">{row.label}</span>
+        <span className="shrink-0 text-xs font-black text-gray-500">{row.score}</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-gray-100">
+        <div className="h-full rounded-full bg-rose-500" style={{ width }} />
+      </div>
+      <div className="mt-1 text-[11px] font-bold text-gray-400">总 {row.total} · 待 {row.open} · 逾期 {row.overdue} · 升级 {row.escalated} · 已补 {row.resolved}</div>
+    </div>
+  );
 }
 
 function DailyPriorityPanel({
