@@ -23,8 +23,9 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '500', 10) || 500, 1), 2000);
   const includeClassified = searchParams.get('all') === '1';
+  const dryRun = ['1', 'true', 'yes'].includes((searchParams.get('dryRun') || '').toLowerCase());
 
-  const result = await reclassifyEmailMessages({ limit, includeClassified });
+  const result = await reclassifyEmailMessages({ limit, includeClassified, dryRun });
 
   return NextResponse.json({
     ok: true,

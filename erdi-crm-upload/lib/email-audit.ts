@@ -134,16 +134,40 @@ export async function buildEmailClassificationAudit({ sampleLimit = 10 }: { samp
   };
 }
 
-export async function reclassifyEmailMessages({ limit = 500, includeClassified = false }: { limit?: number; includeClassified?: boolean } = {}) {
+export async function reclassifyEmailMessages({
+  limit = 500,
+  includeClassified = false,
+  dryRun = false,
+}: {
+  limit?: number;
+  includeClassified?: boolean;
+  dryRun?: boolean;
+} = {}) {
   const safeLimit = Math.min(Math.max(limit, 1), 2000);
   const messages = await prisma.emailMessage.findMany({
     where: includeClassified ? {} : { category: 'UNCLASSIFIED' },
     orderBy: { date: 'desc' },
     take: safeLimit,
-    select: { id: true, from: true, subject: true, textBody: true, htmlBody: true, category: true, actionRequired: true, isLead: true },
+    select: {
+      id: true,
+      from: true,
+      subject: true,
+      textBody: true,
+      htmlBody: true,
+      category: true,
+      categoryReason: true,
+      classificationScore: true,
+      actionRequired: true,
+      isLead: true,
+      classificationTags: true,
+      date: true,
+      account: { select: { email: true } },
+    },
   });
 
   const counts: Record<string, number> = {};
+  const migrations: Record<string, number> = {};
+  const changedSamples = [];
   let changed = 0;
   let actionRequired = 0;
   let leads = 0;
@@ -153,31 +177,81 @@ export async function reclassifyEmailMessages({ limit = 500, includeClassified =
     counts[classification.category] = (counts[classification.category] || 0) + 1;
     if (classification.actionRequired) actionRequired++;
     if (classification.isLead) leads++;
-    if (msg.category !== classification.category || msg.actionRequired !== classification.actionRequired || msg.isLead !== classification.isLead) {
+    const changedFields = changedEmailFields(msg, classification);
+    if (changedFields.length > 0) {
       changed++;
+      const key = `${msg.category}->${classification.category}`;
+      migrations[key] = (migrations[key] || 0) + 1;
+      if (changedSamples.length < 12) {
+        changedSamples.push({
+          id: msg.id,
+          from: trimSender(msg.from),
+          subject: msg.subject || '无主题',
+          dateLabel: msg.date.toLocaleDateString('zh-CN'),
+          accountEmail: msg.account.email,
+          oldCategory: msg.category,
+          oldCategoryLabel: emailCategoryLabel(msg.category),
+          newCategory: classification.category,
+          newCategoryLabel: emailCategoryLabel(classification.category),
+          oldScore: msg.classificationScore,
+          newScore: classification.classificationScore,
+          oldActionRequired: msg.actionRequired,
+          newActionRequired: classification.actionRequired,
+          oldIsLead: msg.isLead,
+          newIsLead: classification.isLead,
+          reason: classification.categoryReason,
+          changedFields,
+        });
+      }
     }
 
-    await prisma.emailMessage.update({
-      where: { id: msg.id },
-      data: {
-        isLead: classification.isLead,
-        category: classification.category,
-        categoryReason: classification.categoryReason,
-        classificationScore: classification.classificationScore,
-        actionRequired: classification.actionRequired,
-        classifiedAt: new Date(),
-        classificationTags: classification.classificationTags,
-      },
-    });
+    if (!dryRun) {
+      await prisma.emailMessage.update({
+        where: { id: msg.id },
+        data: {
+          isLead: classification.isLead,
+          category: classification.category,
+          categoryReason: classification.categoryReason,
+          classificationScore: classification.classificationScore,
+          actionRequired: classification.actionRequired,
+          classifiedAt: new Date(),
+          classificationTags: classification.classificationTags,
+        },
+      });
+    }
   }
 
   return {
+    dryRun,
     scanned: messages.length,
     changed,
     actionRequired,
     leads,
     counts,
+    migrations,
+    changedSamples,
   };
+}
+
+function changedEmailFields(
+  msg: {
+    category: string;
+    categoryReason: string | null;
+    classificationScore: number;
+    actionRequired: boolean;
+    isLead: boolean;
+    classificationTags: string[];
+  },
+  classification: ReturnType<typeof classifyEmail>
+) {
+  const fields = [];
+  if (msg.category !== classification.category) fields.push('category');
+  if ((msg.categoryReason || '') !== classification.categoryReason) fields.push('reason');
+  if (msg.classificationScore !== classification.classificationScore) fields.push('score');
+  if (msg.actionRequired !== classification.actionRequired) fields.push('actionRequired');
+  if (msg.isLead !== classification.isLead) fields.push('isLead');
+  if (JSON.stringify(msg.classificationTags || []) !== JSON.stringify(classification.classificationTags)) fields.push('tags');
+  return fields;
 }
 
 const emailSampleSelect = {

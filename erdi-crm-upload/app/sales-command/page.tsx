@@ -616,6 +616,12 @@ export default async function SalesCommandPage({
           </div>
           {canManage && (
             <div className="flex flex-wrap gap-2">
+              <a
+                href="/api/emails/classify?limit=500&all=1&dryRun=true"
+                className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 hover:bg-blue-100"
+              >
+                预演最近 500 封
+              </a>
               <form action={rerunEmailClassification}>
                 <input type="hidden" name="limit" value="500" />
                 <button className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-100">重跑未分类 500 封</button>
@@ -636,6 +642,9 @@ export default async function SalesCommandPage({
           <AttributionMetric label="低置信" value={emailAudit.lowConfidence} detail="需人工复核" tone={emailAudit.lowConfidence > 0 ? 'violet' : 'gray'} />
         </div>
         <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{emailAudit.recommendation}</div>
+        <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-bold text-blue-800">
+          重跑分类前先用预演接口查看 `changed/migrations/changedSamples`;确认后再执行“复核最近 500 封”。
+        </div>
         <GmailReadinessPanel readiness={emailAudit.gmailReadiness} plans={emailAudit.gmailLabelPlan} />
         <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4">
           <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
