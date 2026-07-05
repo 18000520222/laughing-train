@@ -223,10 +223,20 @@ async function completeSalesTask(formData: FormData) {
   redirect('/sales-command');
 }
 
-export default async function SalesCommandPage() {
+export default async function SalesCommandPage({
+  searchParams = {},
+}: {
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
   const role = (cookies().get('auth_role')?.value || '').toUpperCase();
   if (role !== 'SUPER_ADMIN' && role !== 'ADMIN' && role !== 'SALES') redirect('/dashboard');
   const canManage = role === 'SUPER_ADMIN' || role === 'ADMIN';
+  const emailBulkResult = {
+    bulk: firstParam(searchParams.emailBulk),
+    created: firstParam(searchParams.created),
+    cleared: firstParam(searchParams.cleared),
+    skipped: firstParam(searchParams.skipped),
+  };
 
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -479,6 +489,53 @@ export default async function SalesCommandPage() {
           <AttributionMetric label="低置信" value={emailAudit.lowConfidence} detail="需人工复核" tone={emailAudit.lowConfidence > 0 ? 'violet' : 'gray'} />
         </div>
         <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{emailAudit.recommendation}</div>
+        <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4">
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-xs font-black text-gray-500">邮件动作清理台</h3>
+              <p className="mt-1 text-[11px] font-bold text-gray-400">按 Pipedrive 邮件转活动和 Zendesk 批量处理思路,把需要动作的邮件直接沉淀为销售任务或清理噪音。</p>
+            </div>
+            <Link href="/tasks?view=week" className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-black text-white hover:bg-gray-800">查看任务</Link>
+          </div>
+          {emailBulkResult.bulk && <EmailBulkResultBanner result={emailBulkResult} />}
+          <div className="grid gap-3 md:grid-cols-3">
+            <EmailBulkActionCard
+              title="邮件转任务"
+              count={emailAudit.taskQueue.length}
+              detail="询盘、报价、订单、财务、物流、技术和验证码邮件,转成可追责任务。"
+              action="create_tasks"
+              buttonLabel="生成邮件任务"
+              ids={emailAudit.taskQueue.map((msg) => msg.id)}
+              tone="blue"
+            />
+            <EmailBulkActionCard
+              title="清理噪音"
+              count={emailAudit.noiseQueue.length}
+              detail="SEO、营销、平台通知、内部和其他低价值邮件,清除待动作标记。"
+              action="clear_noise"
+              buttonLabel="清理待动作"
+              ids={emailAudit.noiseQueue.map((msg) => msg.id)}
+              tone="slate"
+            />
+            <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
+              <div className="text-xs font-black text-amber-700">人工复核</div>
+              <div className="mt-2 text-2xl font-black text-amber-900">{emailAudit.reviewQueue.length}</div>
+              <div className="mt-2 text-xs font-bold text-amber-700">低置信和未分类邮件先复核关键词,再重跑分类。</div>
+              {canManage && (
+                <form action={rerunEmailClassification} className="mt-4">
+                  <input type="hidden" name="limit" value="500" />
+                  <input type="hidden" name="includeClassified" value="true" />
+                  <button className="w-full rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white hover:bg-amber-700">复核最近 500 封</button>
+                </form>
+              )}
+            </div>
+          </div>
+          <div className="mt-4 grid gap-3 xl:grid-cols-3">
+            <EmailCleanupPreview title="转任务预览" rows={emailAudit.taskQueue} empty="暂无可转任务邮件。" />
+            <EmailCleanupPreview title="噪音清理预览" rows={emailAudit.noiseQueue} empty="暂无可清理噪音邮件。" />
+            <EmailCleanupPreview title="复核预览" rows={emailAudit.reviewQueue} empty="暂无需复核邮件。" />
+          </div>
+        </div>
         <div className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr_1.1fr]">
           <div className="rounded-xl border border-gray-100 p-4">
             <h3 className="text-xs font-black text-gray-500">分类分布</h3>
@@ -1410,6 +1467,86 @@ function EmailAuditItem({ msg }: { msg: any }) {
       <div className="mt-1 truncate text-[11px] font-medium text-gray-400">{msg.categoryReason}</div>
     </div>
   );
+}
+
+function EmailBulkResultBanner({
+  result,
+}: {
+  result: { bulk?: string; created?: string; cleared?: string; skipped?: string };
+}) {
+  const label: Record<string, string> = {
+    tasks: '邮件任务已生成',
+    cleared: '邮件噪音已清理',
+    empty: '没有选中可处理邮件',
+  };
+  return (
+    <div className="mb-3 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
+      {label[result.bulk || ''] || '邮件批量动作已执行'}
+      <span className="ml-2">生成 {result.created || '0'}</span>
+      <span className="ml-2">清理 {result.cleared || '0'}</span>
+      {result.skipped ? <span className="ml-2 text-emerald-600">跳过 {result.skipped}</span> : null}
+    </div>
+  );
+}
+
+function EmailBulkActionCard({
+  title,
+  count,
+  detail,
+  action,
+  buttonLabel,
+  ids,
+  tone,
+}: {
+  title: string;
+  count: number;
+  detail: string;
+  action: string;
+  buttonLabel: string;
+  ids: string[];
+  tone: 'blue' | 'slate';
+}) {
+  const color = tone === 'blue'
+    ? 'border-blue-100 bg-blue-50 text-blue-900'
+    : 'border-slate-100 bg-slate-50 text-slate-900';
+  const buttonColor = tone === 'blue' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-700 hover:bg-slate-800';
+  return (
+    <div className={`rounded-xl border p-4 ${color}`}>
+      <div className="text-xs font-black opacity-75">{title}</div>
+      <div className="mt-2 text-2xl font-black">{count}</div>
+      <div className="mt-2 min-h-[34px] text-xs font-bold opacity-75">{detail}</div>
+      <form action="/api/emails/bulk" method="post" className="mt-4">
+        <input type="hidden" name="action" value={action} />
+        <input type="hidden" name="ids" value={ids.join(',')} />
+        <button
+          type="submit"
+          disabled={ids.length === 0}
+          className={`w-full rounded-lg px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:bg-gray-300 ${buttonColor}`}
+        >
+          {buttonLabel}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function EmailCleanupPreview({ title, rows, empty }: { title: string; rows: any[]; empty: string }) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-white p-4">
+      <div className="text-xs font-black text-gray-500">{title}</div>
+      <div className="mt-3 space-y-2">
+        {rows.slice(0, 5).map((msg) => (
+          <EmailAuditItem key={msg.id} msg={msg} />
+        ))}
+        {rows.length > 5 && <div className="text-[11px] font-bold text-gray-400">另有 {rows.length - 5} 封已纳入本次批量队列。</div>}
+        {rows.length === 0 && <div className="rounded-lg bg-gray-50 p-3 text-xs font-bold text-gray-400">{empty}</div>}
+      </div>
+    </div>
+  );
+}
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 function AttributionBar({ label, value, max, detail }: { label: string; value: number; max: number; detail: string }) {

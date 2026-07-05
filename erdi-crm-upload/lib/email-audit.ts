@@ -3,6 +3,8 @@ import { classifyEmail, emailCategoryLabel } from '@/lib/email-classifier';
 
 const LOW_CONFIDENCE_SCORE = 50;
 const REVIEW_CATEGORIES = ['UNCLASSIFIED', 'OTHER'];
+const TASK_CATEGORIES = ['INQUIRY', 'QUOTE_PI', 'ORDER_PO', 'PAYMENT_FINANCE', 'LOGISTICS', 'TECH_SUPPORT', 'AUTH_SECURITY'];
+const NOISE_CATEGORIES = ['SEO_SPAM', 'MARKETING_NEWSLETTER', 'PLATFORM_ALERT', 'INTERNAL', 'OTHER'];
 
 export async function buildEmailClassificationAudit({ sampleLimit = 10 }: { sampleLimit?: number } = {}) {
   const [
@@ -15,6 +17,8 @@ export async function buildEmailClassificationAudit({ sampleLimit = 10 }: { samp
     categoryRows,
     recentActionMessages,
     reviewQueue,
+    taskQueue,
+    noiseQueue,
     accountRows,
     leadDomainRows,
   ] = await Promise.all([
@@ -46,6 +50,18 @@ export async function buildEmailClassificationAudit({ sampleLimit = 10 }: { samp
       },
       orderBy: [{ classificationScore: 'asc' }, { date: 'desc' }],
       take: sampleLimit,
+      select: emailSampleSelect,
+    }),
+    prisma.emailMessage.findMany({
+      where: { actionRequired: true, category: { in: TASK_CATEGORIES } },
+      orderBy: [{ isLead: 'desc' }, { classificationScore: 'desc' }, { date: 'desc' }],
+      take: 20,
+      select: emailSampleSelect,
+    }),
+    prisma.emailMessage.findMany({
+      where: { actionRequired: true, category: { in: NOISE_CATEGORIES } },
+      orderBy: [{ classificationScore: 'asc' }, { date: 'desc' }],
+      take: 20,
       select: emailSampleSelect,
     }),
     prisma.emailAccount.findMany({
@@ -89,6 +105,8 @@ export async function buildEmailClassificationAudit({ sampleLimit = 10 }: { samp
     maxCategoryCount: Math.max(1, ...categories.map((row) => row.count)),
     recentActionMessages: recentActionMessages.map(normalizeEmailSample),
     reviewQueue: reviewQueue.map(normalizeEmailSample),
+    taskQueue: taskQueue.map(normalizeEmailSample),
+    noiseQueue: noiseQueue.map(normalizeEmailSample),
     accounts: accountRows.map((account) => ({
       id: account.id,
       email: account.email,
