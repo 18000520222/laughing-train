@@ -313,6 +313,11 @@ export default async function SalesCommandPage({
     notified: firstParam(searchParams.priorityNotified),
     skipped: firstParam(searchParams.prioritySkipped),
   };
+  const morningNotifyResult = {
+    status: firstParam(searchParams.morningNotify),
+    notified: firstParam(searchParams.morningNotified),
+    skipped: firstParam(searchParams.morningSkipped),
+  };
 
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -555,7 +560,7 @@ export default async function SalesCommandPage({
         <Metric label="24小时内到期" value={todayTaskCount} tone="amber" />
       </section>
 
-      <MorningBriefingPanel briefing={morningBriefing} />
+      <MorningBriefingPanel briefing={morningBriefing} result={morningNotifyResult} />
       <DailyPriorityPanel queue={priorityQueue} result={priorityActionResult} />
       <OwnerPriorityPanel report={ownerPriorityReport} />
 
@@ -1511,9 +1516,15 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: st
   );
 }
 
-function MorningBriefingPanel({ briefing }: { briefing: ReturnType<typeof buildSalesMorningBriefing> }) {
+function MorningBriefingPanel({
+  briefing,
+  result,
+}: {
+  briefing: ReturnType<typeof buildSalesMorningBriefing>;
+  result: { status?: string; notified?: string; skipped?: string };
+}) {
   return (
-    <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+    <section id="morning-briefing" className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="font-bold text-gray-900">老板晨会摘要</h2>
@@ -1526,6 +1537,7 @@ function MorningBriefingPanel({ briefing }: { briefing: ReturnType<typeof buildS
         </div>
       </div>
       <div className="rounded-xl bg-gray-900 px-4 py-3 text-sm font-black text-white">{briefing.headline}</div>
+      {result.status && <MorningNotifyResultBanner result={result} />}
       <div className="mt-4 grid gap-3 lg:grid-cols-3">
         <div className="rounded-xl border border-rose-100 bg-rose-50 p-4 text-rose-900">
           <div className="text-xs font-black opacity-60">今天先盯负责人</div>
@@ -1552,6 +1564,15 @@ function MorningBriefingPanel({ briefing }: { briefing: ReturnType<typeof buildS
             处理晨会前三项
           </button>
         </form>
+        <form action="/api/sales-command/morning-briefing" method="post">
+          <input type="hidden" name="itemIds" value={briefing.topItemIds.join(',')} />
+          <button
+            disabled={briefing.topItemIds.length === 0}
+            className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-gray-300"
+          >
+            通知前三项负责人
+          </button>
+        </form>
         <form action="/api/sales-command/priority-action" method="post">
           <input type="hidden" name="itemIds" value={briefing.urgentItemIds.join(',')} />
           <button
@@ -1559,6 +1580,15 @@ function MorningBriefingPanel({ briefing }: { briefing: ReturnType<typeof buildS
             className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:border-gray-100 disabled:bg-gray-100 disabled:text-gray-400"
           >
             一键处理全部高危
+          </button>
+        </form>
+        <form action="/api/sales-command/morning-briefing" method="post">
+          <input type="hidden" name="itemIds" value={briefing.urgentItemIds.join(',')} />
+          <button
+            disabled={briefing.urgentItemIds.length === 0}
+            className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-gray-100 disabled:bg-gray-100 disabled:text-gray-400"
+          >
+            通知全部高危负责人
           </button>
         </form>
       </div>
@@ -1586,6 +1616,15 @@ function MorningBriefingPanel({ briefing }: { briefing: ReturnType<typeof buildS
         {briefing.watchOwners.length === 0 && <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm font-bold text-emerald-700">今日暂无负责人需要晨会点名。</div>}
       </div>
     </section>
+  );
+}
+
+function MorningNotifyResultBanner({ result }: { result: { status?: string; notified?: string; skipped?: string } }) {
+  const label = result.status === 'sent' ? '晨会摘要已通知' : result.status === 'empty' ? '晨会摘要无可通知对象' : result.status === 'invalid' ? '晨会摘要通知失败' : '晨会摘要通知已处理';
+  return (
+    <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-bold text-blue-700">
+      {label}: 通知 {result.notified || 0} 人{result.skipped ? `,跳过 ${result.skipped}` : ''}
+    </div>
   );
 }
 

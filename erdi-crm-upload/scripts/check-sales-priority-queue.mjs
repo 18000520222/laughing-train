@@ -9,6 +9,7 @@ const sourcePath = path.join(process.cwd(), 'lib/sales-priority-queue.ts');
 const source = fs.readFileSync(sourcePath, 'utf8');
 const pageSource = fs.readFileSync(path.join(process.cwd(), 'app/sales-command/page.tsx'), 'utf8');
 const actionRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/sales-command/priority-action/route.ts'), 'utf8');
+const morningRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/sales-command/morning-briefing/route.ts'), 'utf8');
 const compiled = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.CommonJS,
@@ -128,6 +129,9 @@ if (!morningBriefing.playbook.some((line) => line.includes('晨会') || line.inc
 if (!pageSource.includes('老板每日作战清单')) failures.push('daily priority panel UI missing');
 if (!pageSource.includes('老板晨会摘要')) failures.push('morning briefing UI missing');
 if (!pageSource.includes('处理晨会前三项') || !pageSource.includes('一键处理全部高危')) failures.push('morning briefing bulk buttons missing');
+if (!pageSource.includes('通知前三项负责人') || !pageSource.includes('通知全部高危负责人')) failures.push('morning briefing notify buttons missing');
+if (!pageSource.includes('MorningNotifyResultBanner')) failures.push('morning briefing notify result banner missing');
+if (!pageSource.includes('/api/sales-command/morning-briefing')) failures.push('morning briefing notify route not wired');
 if (!pageSource.includes('buildSalesMorningBriefing')) failures.push('sales command does not build morning briefing');
 if (!pageSource.includes('负责人每日战报')) failures.push('owner priority panel UI missing');
 if (!pageSource.includes('处理此负责人') || !pageSource.includes('只处理高危')) failures.push('owner priority bulk buttons missing');
@@ -147,6 +151,11 @@ if (!actionRouteSource.includes("form.get('itemIds')") && !actionRouteSource.inc
 if (!actionRouteSource.includes('source: SOURCE') || !actionRouteSource.includes("const SOURCE = 'DAILY_PRIORITY'")) failures.push('daily priority task source missing');
 if (!actionRouteSource.includes('createMessageTask') || !actionRouteSource.includes('createOpportunityTask') || !actionRouteSource.includes('notifyAutomationRisk')) failures.push('priority action handlers missing');
 if (!actionRouteSource.includes('priority:${itemId}')) failures.push('priority idempotency sourceRef missing');
+if (!morningRouteSource.includes('export async function POST')) failures.push('morning briefing POST route missing');
+if (!morningRouteSource.includes('resolveBriefingTarget')) failures.push('morning briefing target resolver missing');
+if (!morningRouteSource.includes('groupTargets')) failures.push('morning briefing grouping missing');
+if (!morningRouteSource.includes('老板晨会摘要: 今日必须处理')) failures.push('morning briefing notification title missing');
+if (!morningRouteSource.includes('morningNotify')) failures.push('morning briefing redirect result missing');
 
 if (failures.length > 0) {
   for (const failure of failures) console.error(failure);
