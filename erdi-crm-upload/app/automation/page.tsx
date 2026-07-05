@@ -21,6 +21,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { prisma } from '@/lib/prisma';
+import { createAutomationBlueprintPack } from '@/lib/automation-blueprint';
 import {
   AUTOMATION_BLUEPRINT_GROUPS,
   AUTOMATION_CORE_TEMPLATE_KEYS,
@@ -111,44 +112,13 @@ async function createBlueprintPack(formData: FormData) {
     .filter(Boolean);
   const keys = requestedKeys.length ? requestedKeys : AUTOMATION_CORE_TEMPLATE_KEYS;
   const status = String(formData.get('status') || 'ACTIVE') === 'DRAFT' ? 'DRAFT' : 'ACTIVE';
-  const existing = await prisma.automationFlow.findMany({
-    where: { templateKey: { in: keys } },
-    select: { templateKey: true },
-  });
-  const existingKeys = new Set(existing.map((flow) => flow.templateKey).filter(Boolean));
-  const templates = keys
-    .filter((key) => !existingKeys.has(key))
-    .map((key) => getTemplate(key))
-    .filter(Boolean);
-
-  let created = 0;
-  for (const template of templates) {
-    if (!template) continue;
-    await prisma.automationFlow.create({
-      data: {
-        flowCode: nextFlowCode(),
-        name: template.name,
-        description: template.description,
-        category: template.category,
-        templateKey: template.key,
-        channel: template.channel as any,
-        status: status as any,
-        triggerType: template.triggerType,
-        triggerConfig: template.triggerConfig as any,
-        conditionType: template.conditionType || null,
-        conditionConfig: (template.conditionConfig || undefined) as any,
-        actionType: template.actionType,
-        actionConfig: template.actionConfig as any,
-        canvas: buildCanvas(template) as any,
-      },
-    });
-    created++;
-  }
+  const result = await createAutomationBlueprintPack({ keys, status });
 
   const url = new URL('/automation', 'http://local');
   url.searchParams.set('pack', status === 'ACTIVE' ? 'activated' : 'drafted');
-  url.searchParams.set('created', String(created));
-  url.searchParams.set('skipped', String(Math.max(0, keys.length - created)));
+  url.searchParams.set('created', String(result.created));
+  url.searchParams.set('activated', String(result.activated));
+  url.searchParams.set('skipped', String(result.skipped));
   redirect(`${url.pathname}${url.search}`);
 }
 
@@ -303,6 +273,7 @@ export default async function AutomationPage(props: any) {
   const packResult = {
     pack: firstParam(sp.pack),
     created: firstParam(sp.created),
+    activated: firstParam(sp.activated),
     skipped: firstParam(sp.skipped),
   };
 
@@ -912,7 +883,7 @@ function automationBlueprintRecommendation(input: { missingKeys: string[]; activ
 function BlueprintPackResultBanner({
   result,
 }: {
-  result: { pack?: string; created?: string; skipped?: string };
+  result: { pack?: string; created?: string; activated?: string; skipped?: string };
 }) {
   const label: Record<string, string> = {
     activated: '核心自动化流程已补齐并开启',
@@ -922,6 +893,7 @@ function BlueprintPackResultBanner({
     <div className="mb-4 rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs font-bold text-indigo-800">
       {label[result.pack || ''] || '自动化蓝图动作已执行'}
       <span className="ml-2">新增 {result.created || '0'}</span>
+      <span className="ml-2">已激活 {result.activated || '0'}</span>
       <span className="ml-2 text-indigo-600">已存在/跳过 {result.skipped || '0'}</span>
     </div>
   );
