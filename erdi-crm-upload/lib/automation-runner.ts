@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 
 type InboxWithCompany = Awaited<ReturnType<typeof loadInbox>>;
-type Flow = NonNullable<Awaited<ReturnType<typeof loadActiveFlows>>>[number];
+type Flow = NonNullable<Awaited<ReturnType<typeof loadFlow>>>;
 
 const SALES_ROLES = ['SUPER_ADMIN', 'ADMIN', 'SALES'] as const;
 
@@ -10,6 +10,10 @@ async function loadInbox(inboxId: string) {
     where: { id: inboxId },
     include: { company: { include: { owner: true } } },
   });
+}
+
+async function loadFlow(flowId: string) {
+  return prisma.automationFlow.findUnique({ where: { id: flowId } });
 }
 
 async function loadActiveFlows(channel: string) {
@@ -30,45 +34,77 @@ export async function runAutomationsForInbox(inboxId: string) {
   let matchedCount = 0;
 
   for (const flow of flows) {
+    const result = await runAutomationFlowForInbox(flow, inbox);
+    if (result.matched) matchedCount++;
+  }
+
+  return { evaluated: flows.length, matched: matchedCount };
+}
+
+export async function replayAutomationRun(runId: string, { userId }: { userId?: string } = {}) {
+  const previous = await prisma.automationRun.findUnique({
+    where: { id: runId },
+    select: { id: true, flowId: true, inboxMessageId: true, status: true },
+  });
+  if (!previous) return { ok: false, reason: '运行记录不存在' };
+  if (!previous.inboxMessageId) return { ok: false, reason: '该运行没有原始收件箱消息,不可重放' };
+
+  const [flow, inbox] = await Promise.all([loadFlow(previous.flowId), loadInbox(previous.inboxMessageId)]);
+  if (!flow) return { ok: false, reason: '流程不存在' };
+  if (!inbox || inbox.direction !== 'IN') return { ok: false, reason: '原始消息不存在或不是入站消息' };
+  if (flow.triggerType === 'NO_REPLY_TIMEOUT') return { ok: false, reason: '未回复超时流程由定时任务按轮次处理,不可手动重放' };
+
+  const replay = await runAutomationFlowForInbox(flow, inbox, {
+    ignoreExisting: true,
+    source: 'manual_replay',
+    replayOfRunId: previous.id,
+    userId,
+  });
+  return {
+    ok: true,
+    flowId: flow.id,
+    inboxId: inbox.id,
+    replayOfRunId: previous.id,
+    createdRunId: replay.createdRunId,
+    matched: replay.matched,
+    status: replay.status,
+    skippedExisting: replay.skippedExisting,
+  };
+}
+
+async function runAutomationFlowForInbox(
+  flow: Flow,
+  inbox: NonNullable<InboxWithCompany>,
+  options: { ignoreExisting?: boolean; source?: string; replayOfRunId?: string; userId?: string } = {}
+) {
+  if (!options.ignoreExisting) {
     const existingRun = await prisma.automationRun.findFirst({
       where: { flowId: flow.id, inboxMessageId: inbox.id },
       select: { id: true },
     });
-    if (existingRun) continue;
-
-    const trigger = await matchesTrigger(flow, inbox);
-    const condition = trigger ? matchesCondition(flow, inbox) : { ok: false, reason: '触发器未命中' };
-    const matched = trigger && condition.ok;
-    if (matched) matchedCount++;
-
-    const actionOutput = matched ? await executeInternalAction(flow, inbox) : { skippedReason: condition.reason };
-    const runStatus = matched ? ('status' in actionOutput ? actionOutput.status : 'MATCHED') : 'SKIPPED';
-    await prisma.automationRun.create({
-      data: {
-        flowId: flow.id,
-        inboxMessageId: inbox.id,
-        channel: inbox.channel as any,
-        contactKey: inbox.companyId || inbox.threadId || inbox.senderId,
-        status: runStatus,
-        matched,
-        summary: matched ? `自动化命中: ${flow.name}` : `自动化跳过: ${condition.reason}`,
-        input: {
-          inboxId: inbox.id,
-          triggerType: flow.triggerType,
-          conditionType: flow.conditionType,
-          senderId: inbox.senderId,
-          companyId: inbox.companyId,
-          intent: inbox.intent,
-          detectedLang: inbox.detectedLang,
-        },
-        output: actionOutput,
-      },
-    });
-
-    await refreshFlowStats(flow.id);
+    if (existingRun) return { matched: false, status: 'SKIPPED' as const, skippedExisting: true };
   }
 
-  return { evaluated: flows.length, matched: matchedCount };
+  const trigger = await matchesTrigger(flow, inbox);
+  const condition = trigger ? matchesCondition(flow, inbox) : { ok: false, reason: '触发器未命中' };
+  const matched = trigger && condition.ok;
+  const actionOutput = matched ? await executeInternalAction(flow, inbox) : { skippedReason: condition.reason };
+  const runStatus = matched ? ('status' in actionOutput ? actionOutput.status : 'MATCHED') : 'SKIPPED';
+  const output = {
+    ...actionOutput,
+    ...(options.replayOfRunId ? { replayOfRunId: options.replayOfRunId, replayedAt: new Date().toISOString() } : {}),
+  };
+  const run = await createAutomationRun(
+    flow,
+    inbox,
+    matched,
+    runStatus,
+    matched ? `${options.replayOfRunId ? '重放命中' : '自动化命中'}: ${flow.name}` : `${options.replayOfRunId ? '重放跳过' : '自动化跳过'}: ${condition.reason}`,
+    output,
+    { userId: options.userId, source: options.source || 'inbox_ingest' }
+  );
+  await refreshFlowStats(flow.id);
+  return { matched, status: runStatus, createdRunId: run.id, skippedExisting: false };
 }
 
 export async function runNoReplyTimeoutAutomations({ limit = 100 }: { limit?: number } = {}) {
@@ -360,9 +396,10 @@ async function createAutomationRun(
   matched: boolean,
   status: 'MATCHED' | 'SKIPPED' | 'ACTION_SENT' | 'FAILED',
   summary: string,
-  output: Record<string, unknown>
+  output: Record<string, unknown>,
+  options: { userId?: string; source?: string } = {}
 ) {
-  await prisma.automationRun.create({
+  return prisma.automationRun.create({
     data: {
       flowId: flow.id,
       inboxMessageId: inbox.id,
@@ -379,9 +416,12 @@ async function createAutomationRun(
         companyId: inbox.companyId,
         intent: inbox.intent,
         detectedLang: inbox.detectedLang,
+        source: options.source || 'automation_runner',
       },
       output: output as any,
+      userId: options.userId,
     },
+    select: { id: true },
   });
 }
 

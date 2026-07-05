@@ -19,6 +19,7 @@ const PUBLIC_PREFIXES = [
   '/api/tracking/webhook',
   '/api/cron/',        // 定时任务(自带 ?key= / Bearer 校验)
   '/api/automation/bootstrap', // 自动化蓝图运维补齐(自带 ?key= / Bearer 校验)
+  '/api/automation/runs/replay', // 自动化运行重放(自带 ?key= / Bearer 校验)
   '/api/emails/classify', // 邮件历史分类回填(自带 ?key= / Bearer 校验)
   '/api/tasks/calendar', // ICS 日历订阅(自带签名 token / session 校验)
 ];

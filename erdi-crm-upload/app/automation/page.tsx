@@ -14,6 +14,7 @@ import {
   PauseCircle,
   PlayCircle,
   Plus,
+  RefreshCcw,
   Search,
   Tags,
   Trash2,
@@ -22,6 +23,7 @@ import {
 } from 'lucide-react';
 import { prisma } from '@/lib/prisma';
 import { createAutomationBlueprintPack } from '@/lib/automation-blueprint';
+import { replayAutomationRun } from '@/lib/automation-runner';
 import {
   AUTOMATION_BLUEPRINT_GROUPS,
   AUTOMATION_CORE_TEMPLATE_KEYS,
@@ -261,6 +263,23 @@ async function testFlow(formData: FormData) {
   redirect(`/automation?flow=${id}`);
 }
 
+async function replayRun(formData: FormData) {
+  'use server';
+  const role = getRole();
+  if (!canAccess(role)) return;
+
+  const runId = String(formData.get('runId') || '');
+  if (!runId) return;
+  const cookieUserId = cookies().get('auth_userId')?.value || undefined;
+  const result = await replayAutomationRun(runId, { userId: cookieUserId });
+  const url = new URL('/automation', 'http://local');
+  url.searchParams.set('replay', result.ok ? 'ok' : 'failed');
+  if (result.flowId) url.searchParams.set('flow', result.flowId);
+  if (result.createdRunId) url.searchParams.set('createdRun', result.createdRunId);
+  if (result.reason) url.searchParams.set('reason', result.reason);
+  redirect(`${url.pathname}${url.search}`);
+}
+
 export default async function AutomationPage(props: any) {
   const role = getRole();
   if (!canAccess(role)) redirect('/dashboard?error=unauthorized');
@@ -275,6 +294,11 @@ export default async function AutomationPage(props: any) {
     created: firstParam(sp.created),
     activated: firstParam(sp.activated),
     skipped: firstParam(sp.skipped),
+  };
+  const replayResult = {
+    replay: firstParam(sp.replay),
+    createdRun: firstParam(sp.createdRun),
+    reason: firstParam(sp.reason),
   };
 
   const where: any = {};
@@ -354,6 +378,7 @@ export default async function AutomationPage(props: any) {
           </span>
         </div>
         {packResult.pack && <BlueprintPackResultBanner result={packResult} />}
+        {replayResult.replay && <ReplayResultBanner result={replayResult} />}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {blueprint.groups.map((group) => (
             <BlueprintGroupCard key={group.key} group={group} />
@@ -899,6 +924,21 @@ function BlueprintPackResultBanner({
   );
 }
 
+function ReplayResultBanner({
+  result,
+}: {
+  result: { replay?: string; createdRun?: string; reason?: string };
+}) {
+  const ok = result.replay === 'ok';
+  return (
+    <div className={`mb-4 rounded-lg border px-4 py-3 text-xs font-bold ${ok ? 'border-emerald-100 bg-emerald-50 text-emerald-800' : 'border-rose-100 bg-rose-50 text-rose-800'}`}>
+      {ok ? '自动化运行已重放' : '自动化运行重放失败'}
+      {ok && result.createdRun && <span className="ml-2">新运行 {result.createdRun.slice(-6).toUpperCase()}</span>}
+      {!ok && result.reason && <span className="ml-2">{result.reason}</span>}
+    </div>
+  );
+}
+
 function BlueprintGroupCard({ group }: { group: any }) {
   const complete = group.coverageRate >= 1;
   const activeComplete = group.activeRate >= 1;
@@ -1105,6 +1145,15 @@ function RunList({ runs, showFlow = false }: { runs: any[]; showFlow?: boolean }
             <span>{new Date(run.createdAt).toLocaleString('zh-CN')}</span>
             {run.user && <span>{run.user.name || run.user.email}</span>}
           </div>
+          {run.inboxMessageId && (
+            <form action={replayRun} className="mt-3">
+              <input type="hidden" name="runId" value={run.id} />
+              <button className="inline-flex items-center gap-1 rounded-md border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-[11px] font-black text-indigo-700 hover:bg-indigo-100">
+                <RefreshCcw className="h-3 w-3" />
+                重放
+              </button>
+            </form>
+          )}
         </div>
       ))}
     </div>
