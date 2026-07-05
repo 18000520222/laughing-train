@@ -15,6 +15,7 @@ const automation = read('lib/automation.ts');
 const inbox = read('lib/inbox.ts');
 const omnibox = read('app/omnibox/page.tsx');
 const revenue = read('lib/channel-revenue-insights.ts');
+const middleware = read('middleware.ts');
 
 const checks = [
   {
@@ -48,6 +49,10 @@ const checks = [
   {
     ok: settingsPage.includes('/api/salesmartly/webhook') && settingsPage.includes('salesmartlyWebhookKey') && settingsPage.includes("byChannel('SALESMARTLY')"),
     message: 'Channel settings page is missing SaleSmartly configuration/health',
+  },
+  {
+    ok: middleware.includes('/api/salesmartly/webhook'),
+    message: 'SaleSmartly webhook is not public in middleware',
   },
   {
     ok: automation.includes('SALESMARTLY') && inbox.includes('SaleSmartly') && omnibox.includes('SALESMARTLY') && revenue.includes('SALESMARTLY'),
