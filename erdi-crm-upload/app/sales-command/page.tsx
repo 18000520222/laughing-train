@@ -11,6 +11,7 @@ import { buildEmailSecurityAudit, runEmailSecurityWatch } from '@/lib/email-secu
 import { buildChannelMessageRevenueReport } from '@/lib/channel-revenue-insights';
 import { buildAutomationFunnelInsights } from '@/lib/automation-insights';
 import { buildSalesMorningBriefing, buildSalesOwnerPriorityReport, buildSalesPriorityQueue } from '@/lib/sales-priority-queue';
+import { buildMorningBriefingClosureReport } from '@/lib/sales-morning-briefing-closure';
 
 export const dynamic = 'force-dynamic';
 
@@ -348,6 +349,7 @@ export default async function SalesCommandPage({
     salesTasks,
     ownerRows,
     sourceRows,
+    morningNotifications,
   ] = await Promise.all([
     prisma.user.findMany({ where: { role: { in: ['SUPER_ADMIN', 'ADMIN', 'SALES'] as any }, isActive: true }, orderBy: [{ role: 'asc' }, { createdAt: 'asc' }] }),
     prisma.salesAssignmentRule.findMany({ orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }] }),
@@ -438,6 +440,12 @@ export default async function SalesCommandPage({
     }),
     prisma.company.groupBy({ by: ['ownerId'], _count: { _all: true } }),
     prisma.company.groupBy({ by: ['source'], _count: { _all: true }, orderBy: { _count: { source: 'desc' } }, take: 8 }),
+    prisma.notification.findMany({
+      where: { title: '老板晨会摘要: 今日必须处理', createdAt: { gte: sevenDaysAgo } },
+      orderBy: { createdAt: 'desc' },
+      take: 120,
+      include: { user: { select: { name: true, email: true, role: true } } },
+    }),
   ]);
 
   const usersById = new Map(users.map((u) => [u.id, u]));
@@ -525,6 +533,7 @@ export default async function SalesCommandPage({
   });
   const ownerPriorityReport = buildSalesOwnerPriorityReport(priorityQueue.items);
   const morningBriefing = buildSalesMorningBriefing(priorityQueue.items, ownerPriorityReport.rows);
+  const morningClosure = buildMorningBriefingClosureReport(morningNotifications, new Date());
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
@@ -561,6 +570,7 @@ export default async function SalesCommandPage({
       </section>
 
       <MorningBriefingPanel briefing={morningBriefing} result={morningNotifyResult} />
+      <MorningClosurePanel report={morningClosure} />
       <DailyPriorityPanel queue={priorityQueue} result={priorityActionResult} />
       <OwnerPriorityPanel report={ownerPriorityReport} />
 
@@ -1625,6 +1635,51 @@ function MorningNotifyResultBanner({ result }: { result: { status?: string; noti
     <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-bold text-blue-700">
       {label}: 通知 {result.notified || 0} 人{result.skipped ? `,跳过 ${result.skipped}` : ''}
     </div>
+  );
+}
+
+function MorningClosurePanel({ report }: { report: ReturnType<typeof buildMorningBriefingClosureReport> }) {
+  return (
+    <section className="mb-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-bold text-gray-900">晨会通知处理闭环</h2>
+          <p className="mt-1 text-xs text-gray-400">近 7 天晨会摘要是否送到、是否已读、是否重复积压,用于追人和追结果。</p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-black">
+          <span className="rounded-lg bg-slate-100 px-3 py-2 text-slate-700">已发 {report.total}</span>
+          <span className="rounded-lg bg-rose-50 px-3 py-2 text-rose-700">未读 {report.unread}</span>
+          <span className="rounded-lg bg-amber-50 px-3 py-2 text-amber-700">超过24h未读 {report.staleUnread}</span>
+          <span className="rounded-lg bg-blue-50 px-3 py-2 text-blue-700">已读率 {report.readRate === null ? '-' : `${Math.round(report.readRate * 100)}%`}</span>
+        </div>
+      </div>
+      <div className="mb-4 rounded-xl bg-gray-50 px-4 py-3 text-xs font-bold text-gray-600">{report.recommendation}</div>
+      <div className="grid gap-3 xl:grid-cols-3">
+        {report.ownerRows.map((row) => (
+          <div key={row.ownerEmail} className={`rounded-xl border p-4 ${row.staleUnread > 0 ? 'border-rose-100 bg-rose-50 text-rose-900' : row.unread > 0 ? 'border-amber-100 bg-amber-50 text-amber-900' : 'border-emerald-100 bg-emerald-50 text-emerald-900'}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-black">{row.ownerName}</div>
+                <div className="mt-1 truncate text-[11px] font-bold opacity-70">{row.ownerEmail}</div>
+              </div>
+              <div className="shrink-0 rounded-lg bg-white/75 px-2 py-1 text-[11px] font-black">{row.lastStatusLabel}</div>
+            </div>
+            <div className="mt-3 grid grid-cols-4 gap-2 text-center text-[11px] font-black">
+              <div className="rounded-lg bg-white/75 px-2 py-2"><div className="text-sm">{row.sent}</div><div className="opacity-50">收到</div></div>
+              <div className="rounded-lg bg-white/75 px-2 py-2"><div className="text-sm">{row.read}</div><div className="opacity-50">已读</div></div>
+              <div className="rounded-lg bg-white/75 px-2 py-2"><div className="text-sm">{row.unread}</div><div className="opacity-50">未读</div></div>
+              <div className="rounded-lg bg-white/75 px-2 py-2"><div className="text-sm">{row.repeatedLines}</div><div className="opacity-50">重复</div></div>
+            </div>
+            <div className="mt-3 rounded-lg bg-white/75 px-3 py-2 text-[11px] font-bold">
+              <div className="opacity-50">最近事项</div>
+              <div className="mt-0.5 truncate">{row.topLine}</div>
+              <div className="mt-0.5 opacity-70">事项 {row.lineCount} · 最近 {new Date(row.lastNotifiedAt).toLocaleString('zh-CN')}</div>
+            </div>
+          </div>
+        ))}
+        {report.ownerRows.length === 0 && <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm font-bold text-slate-500">近 7 天暂无晨会摘要通知记录。</div>}
+      </div>
+    </section>
   );
 }
 

@@ -12,6 +12,7 @@ const actionRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/sale
 const morningRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/sales-command/morning-briefing/route.ts'), 'utf8');
 const morningCronSource = fs.readFileSync(path.join(process.cwd(), 'app/api/cron/morning-briefing/route.ts'), 'utf8');
 const morningWatchSource = fs.readFileSync(path.join(process.cwd(), 'lib/sales-morning-briefing-watch.ts'), 'utf8');
+const morningClosureSource = fs.readFileSync(path.join(process.cwd(), 'lib/sales-morning-briefing-closure.ts'), 'utf8');
 const compiled = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.CommonJS,
@@ -130,6 +131,9 @@ if (morningBriefing.topItemIds.length !== 3 || morningBriefing.urgentItemIds.len
 if (!morningBriefing.playbook.some((line) => line.includes('晨会') || line.includes('客户消息') || line.includes('商机'))) failures.push('morning briefing playbook missing');
 if (!pageSource.includes('老板每日作战清单')) failures.push('daily priority panel UI missing');
 if (!pageSource.includes('老板晨会摘要')) failures.push('morning briefing UI missing');
+if (!pageSource.includes('晨会通知处理闭环')) failures.push('morning briefing closure UI missing');
+if (!pageSource.includes('buildMorningBriefingClosureReport')) failures.push('morning briefing closure report not wired');
+if (!pageSource.includes('超过24h未读')) failures.push('morning briefing stale unread label missing');
 if (!pageSource.includes('处理晨会前三项') || !pageSource.includes('一键处理全部高危')) failures.push('morning briefing bulk buttons missing');
 if (!pageSource.includes('通知前三项负责人') || !pageSource.includes('通知全部高危负责人')) failures.push('morning briefing notify buttons missing');
 if (!pageSource.includes('MorningNotifyResultBanner')) failures.push('morning briefing notify result banner missing');
@@ -166,6 +170,11 @@ if (!morningCronSource.includes('export async function GET')) failures.push('mor
 if (!morningCronSource.includes('buildSalesMorningBriefingFromDatabase')) failures.push('morning briefing cron database builder missing');
 if (!morningCronSource.includes('sendMorningBriefingNotifications')) failures.push('morning briefing cron sender missing');
 if (!morningCronSource.includes('MORNING_BRIEFING_KEY')) failures.push('morning briefing cron key missing');
+if (!morningClosureSource.includes('buildMorningBriefingClosureReport')) failures.push('morning briefing closure builder missing');
+if (!morningClosureSource.includes('staleUnread')) failures.push('morning briefing stale unread metric missing');
+if (!morningClosureSource.includes('repeatedLineCount')) failures.push('morning briefing repeated line metric missing');
+if (!morningClosureSource.includes('超过 24 小时未读')) failures.push('morning briefing closure recommendation missing');
+if (!morningClosureSource.includes('停滞商机')) failures.push('morning briefing top risk line priority missing');
 
 if (failures.length > 0) {
   for (const failure of failures) console.error(failure);
