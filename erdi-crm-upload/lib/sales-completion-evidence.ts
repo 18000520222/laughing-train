@@ -77,6 +77,7 @@ export function buildSalesCompletionEvidenceReport({
   const weakEvidence = rows.filter((row) => row.evidenceCount > 0 && row.stageChangeCount === 0 && row.outboundCount === 0).length;
   const strongEvidence = rows.filter((row) => row.stageChangeCount > 0 || row.outboundCount > 0).length;
   const onTimeDone = rows.filter((row) => !row.dueAt || row.completedAt.getTime() <= row.dueAt.getTime()).length;
+  const sortedRows = rows.sort((a, b) => toneRank(a.tone) - toneRank(b.tone) || b.completedAt.getTime() - a.completedAt.getTime());
 
   return {
     completedTasks: rows.length,
@@ -86,9 +87,8 @@ export function buildSalesCompletionEvidenceReport({
     onTimeDone,
     evidenceRate: rows.length ? (rows.length - missingEvidence) / rows.length : null,
     strongEvidenceRate: rows.length ? strongEvidence / rows.length : null,
-    rows: rows
-      .sort((a, b) => toneRank(a.tone) - toneRank(b.tone) || b.completedAt.getTime() - a.completedAt.getTime())
-      .slice(0, 9),
+    allRows: sortedRows,
+    rows: sortedRows.slice(0, 9),
     recommendation: completionEvidenceRecommendation({ completedTasks: rows.length, missingEvidence, weakEvidence, strongEvidence }),
   };
 }

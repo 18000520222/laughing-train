@@ -11,6 +11,7 @@ const pageSource = fs.readFileSync(path.join(process.cwd(), 'app/sales-command/p
 const actionRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/sales-command/priority-action/route.ts'), 'utf8');
 const morningRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/sales-command/morning-briefing/route.ts'), 'utf8');
 const completionEvidenceRouteSource = fs.readFileSync(path.join(process.cwd(), 'app/api/sales-command/completion-evidence/route.ts'), 'utf8');
+const completionEvidenceCronSource = fs.readFileSync(path.join(process.cwd(), 'app/api/cron/completion-evidence/route.ts'), 'utf8');
 const morningCronSource = fs.readFileSync(path.join(process.cwd(), 'app/api/cron/morning-briefing/route.ts'), 'utf8');
 const morningWatchSource = fs.readFileSync(path.join(process.cwd(), 'lib/sales-morning-briefing-watch.ts'), 'utf8');
 const morningClosureSource = fs.readFileSync(path.join(process.cwd(), 'lib/sales-morning-briefing-closure.ts'), 'utf8');
@@ -18,6 +19,8 @@ const actionClosurePath = path.join(process.cwd(), 'lib/sales-action-closure.ts'
 const actionClosureSource = fs.readFileSync(actionClosurePath, 'utf8');
 const completionEvidencePath = path.join(process.cwd(), 'lib/sales-completion-evidence.ts');
 const completionEvidenceSource = fs.readFileSync(completionEvidencePath, 'utf8');
+const completionEvidenceRepairSource = fs.readFileSync(path.join(process.cwd(), 'lib/sales-completion-evidence-repair.ts'), 'utf8');
+const vercelConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'vercel.json'), 'utf8'));
 const compiled = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.CommonJS,
@@ -314,10 +317,10 @@ if (!morningRouteSource.includes('export async function POST')) failures.push('m
 if (!morningRouteSource.includes('sendMorningBriefingNotifications')) failures.push('morning briefing route should use shared notification helper');
 if (!morningRouteSource.includes('morningNotify')) failures.push('morning briefing redirect result missing');
 if (!completionEvidenceRouteSource.includes('export async function POST')) failures.push('completion evidence POST route missing');
-if (!completionEvidenceRouteSource.includes("const SOURCE = 'COMPLETION_EVIDENCE_AUDIT'")) failures.push('completion evidence source missing');
-if (!completionEvidenceRouteSource.includes('completion-evidence:${task.id}')) failures.push('completion evidence idempotency sourceRef missing');
-if (!completionEvidenceRouteSource.includes('补完成证据')) failures.push('completion evidence repair task title missing');
-if (!completionEvidenceRouteSource.includes('任务完成证据待补')) failures.push('completion evidence owner notification missing');
+if (!completionEvidenceRouteSource.includes('createCompletionEvidenceRepairTasks')) failures.push('completion evidence POST route should use shared repair helper');
+if (!completionEvidenceCronSource.includes('export async function GET')) failures.push('completion evidence cron GET route missing');
+if (!completionEvidenceCronSource.includes('runCompletionEvidenceRepairWatch')) failures.push('completion evidence cron should use shared watch helper');
+if (!completionEvidenceCronSource.includes('COMPLETION_EVIDENCE_KEY')) failures.push('completion evidence cron key missing');
 if (!morningWatchSource.includes('buildSalesMorningBriefingFromDatabase')) failures.push('morning briefing database builder missing');
 if (!morningWatchSource.includes('sendMorningBriefingNotifications')) failures.push('morning briefing shared notification sender missing');
 if (!morningWatchSource.includes('resolveBriefingTarget')) failures.push('morning briefing target resolver missing');
@@ -341,6 +344,13 @@ if (!completionEvidenceSource.includes('buildSalesCompletionEvidenceReport')) fa
 if (!completionEvidenceSource.includes('缺完成证据')) failures.push('completion evidence missing status missing');
 if (!completionEvidenceSource.includes('有业务结果')) failures.push('completion evidence strong status missing');
 if (!completionEvidenceSource.includes('商机推进')) failures.push('completion evidence opportunity proof missing');
+if (!completionEvidenceSource.includes('allRows: sortedRows')) failures.push('completion evidence full audit rows missing');
+if (!completionEvidenceRepairSource.includes("COMPLETION_EVIDENCE_REPAIR_SOURCE = 'COMPLETION_EVIDENCE_AUDIT'")) failures.push('completion evidence shared source missing');
+if (!completionEvidenceRepairSource.includes('runCompletionEvidenceRepairWatch')) failures.push('completion evidence watch helper missing');
+if (!completionEvidenceRepairSource.includes('completionEvidenceSourceRef(task.id)')) failures.push('completion evidence idempotency helper missing');
+if (!completionEvidenceRepairSource.includes('任务完成证据待补')) failures.push('completion evidence shared owner notification missing');
+if (!completionEvidenceRepairSource.includes('report.allRows')) failures.push('completion evidence watch should audit all rows');
+if (!vercelConfig.crons?.some((cron) => cron.path === '/api/cron/completion-evidence' && cron.schedule === '15 10 * * *')) failures.push('completion evidence Vercel cron missing');
 
 if (failures.length > 0) {
   for (const failure of failures) console.error(failure);

@@ -25,6 +25,10 @@
       "schedule": "45 9 * * *"
     },
     {
+      "path": "/api/cron/completion-evidence",
+      "schedule": "15 10 * * *"
+    },
+    {
       "path": "/api/cron/automation-timeouts",
       "schedule": "15 8 * * *"
     },
