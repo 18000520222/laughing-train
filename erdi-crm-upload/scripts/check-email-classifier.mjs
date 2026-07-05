@@ -89,6 +89,15 @@ const cases = [
     },
   },
   {
+    name: 'loyalty sender beats settlement words',
+    expected: 'MARKETING_NEWSLETTER',
+    input: {
+      from: '"IHG One Rewards" <ihgonerewards@points-mail.com>',
+      subject: 'Now’s the time to get 100% more points',
+      textBody: 'Refund your points and compare member price.',
+    },
+  },
+  {
     name: 'refund down payment',
     expected: 'PAYMENT_FINANCE',
     input: {

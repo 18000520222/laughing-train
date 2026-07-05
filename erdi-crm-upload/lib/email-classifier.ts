@@ -152,6 +152,10 @@ export function classifyEmail(input: { from?: string | null; subject?: string | 
     return result('INTERNAL', 'sender-own-domain', 35, false, false, ['内部邮件']);
   }
 
+  if (isLoyaltyMarketingSender(from, domain)) {
+    return result('MARKETING_NEWSLETTER', 'sender-loyalty-marketing', 20, false, false, ['营销新闻']);
+  }
+
   if (hasSeoSpamSignal(text)) {
     return result('SEO_SPAM', 'seo-spam-signal', 10, false, false, ['SEO垃圾']);
   }
@@ -262,6 +266,17 @@ function hasSeoSpamSignal(text: string) {
 
 function hasMarketingSignal(text: string) {
   return ['unsubscribe', 'newsletter', 'webinar', 'register now', 'free trial', 'promotion', 'limited time', 'click here', 'points', 'rewards', 'member benefits'].some((k) => text.includes(k));
+}
+
+function isLoyaltyMarketingSender(from: string, domain: string | null) {
+  const sender = from.toLowerCase();
+  const loyaltyDomains = ['points-mail.com', 'mc.ihg.com'];
+  return Boolean(
+    (domain && loyaltyDomains.some((d) => domain === d || domain.endsWith('.' + d))) ||
+      sender.includes('one rewards') ||
+      sender.includes('ihgonerewards') ||
+      sender.includes('ihg one rewards')
+  );
 }
 
 function hasDirectBusinessIntent(text: string) {
