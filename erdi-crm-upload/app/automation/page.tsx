@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import { prisma } from '@/lib/prisma';
 import {
+  AUTOMATION_BLUEPRINT_GROUPS,
+  AUTOMATION_CORE_TEMPLATE_KEYS,
   AUTOMATION_TEMPLATES,
   CHANNEL_LABEL,
   RUN_STATUS_LABEL,
@@ -60,7 +62,8 @@ function getRole() {
 }
 
 function nextFlowCode() {
-  return `AUTO-${Date.now().toString(36).toUpperCase()}`;
+  const suffix = Math.random().toString(36).slice(2, 7).toUpperCase();
+  return `AUTO-${Date.now().toString(36).toUpperCase()}-${suffix}`;
 }
 
 async function createFromTemplate(formData: FormData) {
@@ -95,6 +98,58 @@ async function createFromTemplate(formData: FormData) {
   });
 
   redirect(`/automation?flow=${flow.id}`);
+}
+
+async function createBlueprintPack(formData: FormData) {
+  'use server';
+  const role = getRole();
+  if (!canAccess(role)) return;
+
+  const requestedKeys = String(formData.get('templateKeys') || '')
+    .split(',')
+    .map((key) => key.trim())
+    .filter(Boolean);
+  const keys = requestedKeys.length ? requestedKeys : AUTOMATION_CORE_TEMPLATE_KEYS;
+  const status = String(formData.get('status') || 'ACTIVE') === 'DRAFT' ? 'DRAFT' : 'ACTIVE';
+  const existing = await prisma.automationFlow.findMany({
+    where: { templateKey: { in: keys } },
+    select: { templateKey: true },
+  });
+  const existingKeys = new Set(existing.map((flow) => flow.templateKey).filter(Boolean));
+  const templates = keys
+    .filter((key) => !existingKeys.has(key))
+    .map((key) => getTemplate(key))
+    .filter(Boolean);
+
+  let created = 0;
+  for (const template of templates) {
+    if (!template) continue;
+    await prisma.automationFlow.create({
+      data: {
+        flowCode: nextFlowCode(),
+        name: template.name,
+        description: template.description,
+        category: template.category,
+        templateKey: template.key,
+        channel: template.channel as any,
+        status: status as any,
+        triggerType: template.triggerType,
+        triggerConfig: template.triggerConfig as any,
+        conditionType: template.conditionType || null,
+        conditionConfig: (template.conditionConfig || undefined) as any,
+        actionType: template.actionType,
+        actionConfig: template.actionConfig as any,
+        canvas: buildCanvas(template) as any,
+      },
+    });
+    created++;
+  }
+
+  const url = new URL('/automation', 'http://local');
+  url.searchParams.set('pack', status === 'ACTIVE' ? 'activated' : 'drafted');
+  url.searchParams.set('created', String(created));
+  url.searchParams.set('skipped', String(Math.max(0, keys.length - created)));
+  redirect(`${url.pathname}${url.search}`);
 }
 
 async function toggleFlow(formData: FormData) {
@@ -245,6 +300,11 @@ export default async function AutomationPage(props: any) {
   const status = String(sp.status || '').trim();
   const channel = String(sp.channel || '').trim();
   const selectedId = String(sp.flow || '').trim();
+  const packResult = {
+    pack: firstParam(sp.pack),
+    created: firstParam(sp.created),
+    skipped: firstParam(sp.skipped),
+  };
 
   const where: any = {};
   if (q) {
@@ -290,6 +350,7 @@ export default async function AutomationPage(props: any) {
   const totalTriggers = flows.reduce((sum, flow) => sum + flow.triggerCount, 0);
   const totalContacts = flows.reduce((sum, flow) => sum + flow.uniqueContactCount, 0);
   const governance = buildAutomationGovernance(governanceFlows);
+  const blueprint = buildAutomationBlueprint(governanceFlows);
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 md:p-8">
@@ -310,6 +371,43 @@ export default async function AutomationPage(props: any) {
           <Metric icon={<BarChart3 className="h-4 w-4" />} label="触达客户" value={totalContacts} />
         </div>
       </header>
+
+      <section className="mb-6 rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">自动化蓝图补齐台</h2>
+            <p className="mt-1 text-xs text-gray-500">按 SaleSmartly 流程模板、HubSpot Workflows、Zapier Zaps、Zoho Workflow/Blueprint 的思路,扫描线索分配、AI 回复、画像、开发信和接待流程是否齐全。</p>
+          </div>
+          <span className={`rounded-lg px-3 py-2 text-xs font-black ${blueprint.coverageRate >= 0.8 ? 'bg-emerald-50 text-emerald-700' : blueprint.coverageRate >= 0.5 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>
+            蓝图覆盖 {formatAutomationPercent(blueprint.coverageRate)}
+          </span>
+        </div>
+        {packResult.pack && <BlueprintPackResultBanner result={packResult} />}
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {blueprint.groups.map((group) => (
+            <BlueprintGroupCard key={group.key} group={group} />
+          ))}
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto_auto]">
+          <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs font-bold text-slate-700">
+            {blueprint.recommendation}
+          </div>
+          <form action={createBlueprintPack}>
+            <input type="hidden" name="templateKeys" value={AUTOMATION_CORE_TEMPLATE_KEYS.join(',')} />
+            <input type="hidden" name="status" value="ACTIVE" />
+            <button disabled={blueprint.missingKeys.length === 0} className="h-full min-h-11 w-full rounded-lg bg-indigo-600 px-4 py-2 text-xs font-black text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300">
+              补齐并开启核心流程
+            </button>
+          </form>
+          <form action={createBlueprintPack}>
+            <input type="hidden" name="templateKeys" value={AUTOMATION_CORE_TEMPLATE_KEYS.join(',')} />
+            <input type="hidden" name="status" value="DRAFT" />
+            <button disabled={blueprint.missingKeys.length === 0} className="h-full min-h-11 w-full rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-xs font-black text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400">
+              只补草稿
+            </button>
+          </form>
+        </div>
+      </section>
 
       <section className="mb-6 rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -756,6 +854,117 @@ function buildAutomationGovernance(flows: any[]) {
     maxCategoryActive: Math.max(1, ...categoryRows.map((row) => row.activeFlows)),
     riskRows,
   };
+}
+
+function buildAutomationBlueprint(flows: any[]) {
+  const existingTemplateKeys = new Set(flows.map((flow) => flow.templateKey).filter(Boolean));
+  const activeTemplateKeys = new Set(flows.filter((flow) => flow.status === 'ACTIVE').map((flow) => flow.templateKey).filter(Boolean));
+  const missingKeys = AUTOMATION_CORE_TEMPLATE_KEYS.filter((key) => !existingTemplateKeys.has(key));
+  const activeMissingKeys = AUTOMATION_CORE_TEMPLATE_KEYS.filter((key) => !activeTemplateKeys.has(key));
+  const groups = AUTOMATION_BLUEPRINT_GROUPS.map((group) => {
+    const templates = group.templateKeys.map((key) => getTemplate(key)).filter(Boolean);
+    const existingCount = group.templateKeys.filter((key) => existingTemplateKeys.has(key)).length;
+    const activeCount = group.templateKeys.filter((key) => activeTemplateKeys.has(key)).length;
+    const missing = group.templateKeys
+      .filter((key) => !existingTemplateKeys.has(key))
+      .map((key) => getTemplate(key)?.name || key);
+    return {
+      ...group,
+      templates,
+      existingCount,
+      activeCount,
+      missing,
+      coverageRate: group.templateKeys.length ? existingCount / group.templateKeys.length : 1,
+      activeRate: group.templateKeys.length ? activeCount / group.templateKeys.length : 1,
+    };
+  });
+  const coverageRate = AUTOMATION_CORE_TEMPLATE_KEYS.length
+    ? (AUTOMATION_CORE_TEMPLATE_KEYS.length - missingKeys.length) / AUTOMATION_CORE_TEMPLATE_KEYS.length
+    : 1;
+  const activeRate = AUTOMATION_CORE_TEMPLATE_KEYS.length
+    ? (AUTOMATION_CORE_TEMPLATE_KEYS.length - activeMissingKeys.length) / AUTOMATION_CORE_TEMPLATE_KEYS.length
+    : 1;
+
+  return {
+    groups,
+    missingKeys,
+    activeMissingKeys,
+    coverageRate,
+    activeRate,
+    recommendation: automationBlueprintRecommendation({ missingKeys, activeMissingKeys, coverageRate, activeRate }),
+  };
+}
+
+function automationBlueprintRecommendation(input: { missingKeys: string[]; activeMissingKeys: string[]; coverageRate: number; activeRate: number }) {
+  if (input.missingKeys.length === AUTOMATION_CORE_TEMPLATE_KEYS.length) {
+    return '核心自动化蓝图还没有铺开。建议一键补齐并开启,先覆盖线索分配、线索评分、AI 草稿、语言识别、非工作时间兜底和开发信草稿。';
+  }
+  if (input.missingKeys.length > 0) {
+    return `核心蓝图还缺 ${input.missingKeys.length} 个流程。先补齐缺口,避免部分渠道和销售动作仍靠人工记忆。`;
+  }
+  if (input.activeMissingKeys.length > 0) {
+    return `核心蓝图已创建,但还有 ${input.activeMissingKeys.length} 个未开启。建议先测试再开启,保证入站线索能自动进入任务/草稿/提醒。`;
+  }
+  if (input.activeRate >= 0.9) return '核心自动化蓝图已基本启用。下一步看命中率、失败率和销售转化归因,继续微调条件。';
+  return '自动化蓝图已有基础覆盖,继续补齐未启用流程和低命中流程。';
+}
+
+function BlueprintPackResultBanner({
+  result,
+}: {
+  result: { pack?: string; created?: string; skipped?: string };
+}) {
+  const label: Record<string, string> = {
+    activated: '核心自动化流程已补齐并开启',
+    drafted: '核心自动化草稿已补齐',
+  };
+  return (
+    <div className="mb-4 rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs font-bold text-indigo-800">
+      {label[result.pack || ''] || '自动化蓝图动作已执行'}
+      <span className="ml-2">新增 {result.created || '0'}</span>
+      <span className="ml-2 text-indigo-600">已存在/跳过 {result.skipped || '0'}</span>
+    </div>
+  );
+}
+
+function BlueprintGroupCard({ group }: { group: any }) {
+  const complete = group.coverageRate >= 1;
+  const activeComplete = group.activeRate >= 1;
+  const tone = activeComplete ? 'emerald' : complete ? 'amber' : 'rose';
+  const color: Record<string, string> = {
+    emerald: 'border-emerald-100 bg-emerald-50 text-emerald-900',
+    amber: 'border-amber-100 bg-amber-50 text-amber-900',
+    rose: 'border-rose-100 bg-rose-50 text-rose-900',
+  };
+  return (
+    <div className={`rounded-xl border p-4 ${color[tone]}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-black opacity-75">{group.title}</div>
+          <div className="mt-2 text-2xl font-black">{group.existingCount}/{group.templateKeys.length}</div>
+        </div>
+        <span className="rounded-full bg-white/70 px-2 py-1 text-[11px] font-black">
+          开启 {group.activeCount}
+        </span>
+      </div>
+      <div className="mt-2 min-h-[40px] text-xs font-bold opacity-75">{group.description}</div>
+      <div className="mt-3 space-y-1">
+        {group.templates.map((template: any) => (
+          <div key={template.key} className="flex items-center justify-between gap-2 rounded-lg bg-white/70 px-2 py-1.5 text-[11px] font-bold">
+            <span className="truncate">{template.name}</span>
+            <span className="shrink-0 opacity-70">{template.channel}</span>
+          </div>
+        ))}
+      </div>
+      {group.missing.length > 0 && (
+        <div className="mt-3 text-[11px] font-black opacity-75">缺: {group.missing.join('、')}</div>
+      )}
+    </div>
+  );
+}
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 function formatAutomationPercent(value: number | null) {

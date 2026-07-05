@@ -15,6 +15,44 @@ export type AutomationTemplate = {
   actionConfig: Record<string, unknown>;
 };
 
+export const AUTOMATION_CORE_TEMPLATE_KEYS = [
+  'assign_sales_owner',
+  'score_high_value_lead',
+  'keyword_auto_reply',
+  'language_reply',
+  'off_hours_reply',
+  'tag_product_interest',
+  'nurture_silent_lead',
+  'welcome_new_visitor',
+];
+
+export const AUTOMATION_BLUEPRINT_GROUPS = [
+  {
+    key: 'lead_intake',
+    title: '线索进入与分配',
+    description: '新线索入库后自动评分、分配负责人并提醒销售,避免渠道线索掉地上。',
+    templateKeys: ['assign_sales_owner', 'score_high_value_lead'],
+  },
+  {
+    key: 'conversation_ai',
+    title: '会话 AI 回复',
+    description: '关键词识别、语言识别和非工作时间兜底,让多渠道询盘先进入可控草稿/提醒。',
+    templateKeys: ['keyword_auto_reply', 'language_reply', 'off_hours_reply'],
+  },
+  {
+    key: 'profile_nurture',
+    title: '画像与持续开发',
+    description: '从客户消息沉淀产品兴趣,对未回复客户生成多轮开发信草稿。',
+    templateKeys: ['tag_product_interest', 'nurture_silent_lead'],
+  },
+  {
+    key: 'visitor_reception',
+    title: '访客接待',
+    description: '网站或聊天入口首次会话自动生成欢迎和需求采集话术。',
+    templateKeys: ['welcome_new_visitor'],
+  },
+];
+
 export const CHANNEL_LABEL: Record<string, string> = {
   ALL: '全渠道',
   CHAT_WIDGET: '聊天插件',
