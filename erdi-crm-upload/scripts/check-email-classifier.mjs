@@ -107,6 +107,15 @@ const cases = [
     },
   },
   {
+    name: 'business inquiry beats footer marketing',
+    expected: 'INQUIRY',
+    input: {
+      from: '"Bogdan" <buyer@example.com>',
+      subject: 'Re: Response to Your Inquiry about LRF0818C',
+      textBody: 'Please confirm the laser rangefinder details. Unsubscribe from footer.',
+    },
+  },
+  {
     name: 'seo spam',
     expected: 'SEO_SPAM',
     input: {

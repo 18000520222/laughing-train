@@ -280,9 +280,22 @@ function isLoyaltyMarketingSender(from: string, domain: string | null) {
 }
 
 function hasDirectBusinessIntent(text: string) {
-  return ['please quote', 'quotation', 'rfq', 'purchase order', 'proforma invoice', 'we need', 'we require', 'send price', 'technical datasheet'].some((k) =>
-    text.includes(k)
-  );
+  return [
+    'please quote',
+    'quote request',
+    'quotation',
+    'inquiry',
+    'rfq',
+    'purchase order',
+    'proforma invoice',
+    'we need',
+    'we require',
+    'send price',
+    'technical datasheet',
+    'laser',
+    'rangefinder',
+    'lrf',
+  ].some((k) => text.includes(k));
 }
 
 function settlementSignal(text: string) {
