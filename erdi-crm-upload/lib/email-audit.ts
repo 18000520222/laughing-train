@@ -205,7 +205,7 @@ export async function reclassifyEmailMessages({
       }
     }
 
-    if (!dryRun) {
+    if (!dryRun && changedFields.length > 0) {
       await prisma.emailMessage.update({
         where: { id: msg.id },
         data: {
