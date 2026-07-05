@@ -71,6 +71,63 @@ export async function runAutomationsForInbox(inboxId: string) {
   return { evaluated: flows.length, matched: matchedCount };
 }
 
+export async function runNoReplyTimeoutAutomations({ limit = 100 }: { limit?: number } = {}) {
+  const flows = await prisma.automationFlow.findMany({
+    where: { status: 'ACTIVE', triggerType: 'NO_REPLY_TIMEOUT' },
+    orderBy: { updatedAt: 'desc' },
+  });
+  const result = {
+    flows: flows.length,
+    evaluated: 0,
+    matched: 0,
+    createdTasks: 0,
+    skipped: 0,
+  };
+
+  for (const flow of flows) {
+    const triggerConfig = jsonObject(flow.triggerConfig);
+    const waitHours = Math.max(1, Math.min(720, Number(triggerConfig.waitHours || 48) || 48));
+    const cutoff = new Date(Date.now() - waitHours * 60 * 60 * 1000);
+    const inboxMessages = await prisma.inboxMessage.findMany({
+      where: {
+        direction: 'IN',
+        status: { in: ['NEW', 'AI_DRAFTED'] as any },
+        ...(flow.channel === 'ALL' ? {} : { channel: flow.channel as any }),
+        OR: [{ sentAt: { lte: cutoff } }, { sentAt: null, createdAt: { lte: cutoff } }],
+      },
+      include: { company: { include: { owner: true } } },
+      orderBy: [{ sentAt: 'asc' }, { createdAt: 'asc' }],
+      take: Math.max(1, Math.min(200, limit)),
+    });
+
+    for (const inbox of inboxMessages) {
+      result.evaluated++;
+      const condition = await matchesNoReplyCondition(flow, inbox, waitHours);
+      if (!condition.ok) {
+        if (!condition.silent) {
+          await createAutomationRun(flow, inbox, false, 'SKIPPED', `自动化跳过: ${condition.reason}`, { skippedReason: condition.reason, waitHours });
+          await refreshFlowStats(flow.id);
+        }
+        result.skipped++;
+        continue;
+      }
+
+      const actionOutput = await executeNoReplyTimeoutAction(flow, inbox, waitHours, condition.round);
+      const status = 'status' in actionOutput ? actionOutput.status : 'MATCHED';
+      await createAutomationRun(flow, inbox, true, status, `自动化命中: ${flow.name}`, {
+        ...actionOutput,
+        waitHours,
+        round: condition.round,
+      });
+      await refreshFlowStats(flow.id);
+      result.matched++;
+      if (actionOutput.createdTaskId) result.createdTasks++;
+    }
+  }
+
+  return result;
+}
+
 async function matchesTrigger(flow: Flow, inbox: NonNullable<InboxWithCompany>) {
   if (flow.triggerType === 'CUSTOMER_MESSAGE') return true;
   if (flow.triggerType === 'NEW_LEAD' || flow.triggerType === 'NEW_VISITOR') {
@@ -78,6 +135,93 @@ async function matchesTrigger(flow: Flow, inbox: NonNullable<InboxWithCompany>) 
   }
   if (flow.triggerType === 'NO_REPLY_TIMEOUT') return false;
   return true;
+}
+
+async function matchesNoReplyCondition(flow: Flow, inbox: NonNullable<InboxWithCompany>, waitHours: number) {
+  if (!inbox.companyId || !inbox.company) return { ok: false, reason: '未关联客户', round: 0, silent: true };
+  if (inbox.status === 'REPLIED' || inbox.status === 'ARCHIVED') return { ok: false, reason: '消息已回复或归档', round: 0, silent: true };
+
+  const after = inbox.sentAt || inbox.createdAt;
+  const replied = await prisma.inboxMessage.findFirst({
+    where: {
+      id: { not: inbox.id },
+      direction: 'OUT',
+      createdAt: { gt: after },
+      OR: [
+        inbox.threadId ? { threadId: inbox.threadId } : undefined,
+        inbox.companyId ? { companyId: inbox.companyId } : undefined,
+        { channel: inbox.channel, senderId: inbox.senderId },
+      ].filter(Boolean) as any,
+    },
+    select: { id: true },
+  });
+  if (replied) return { ok: false, reason: '已有后续回复', round: 0, silent: true };
+
+  const config = jsonObject(flow.conditionConfig);
+  const maxRounds = Math.max(1, Math.min(10, Number(config.maxRounds || 3) || 3));
+  const previousRuns = await prisma.automationRun.findMany({
+    where: {
+      flowId: flow.id,
+      inboxMessageId: inbox.id,
+      matched: true,
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { createdAt: true },
+  });
+  if (previousRuns.length >= maxRounds) return { ok: false, reason: `已达到最大轮次 ${maxRounds}`, round: previousRuns.length, silent: true };
+  const latestRun = previousRuns[0];
+  if (latestRun) {
+    const nextAt = new Date(latestRun.createdAt.getTime() + waitHours * 60 * 60 * 1000);
+    if (nextAt.getTime() > Date.now()) return { ok: false, reason: '等待下一轮开发时间', round: previousRuns.length + 1, silent: true };
+  }
+  return { ok: true, round: previousRuns.length + 1, silent: false };
+}
+
+async function executeNoReplyTimeoutAction(flow: Flow, inbox: NonNullable<InboxWithCompany>, waitHours: number, round: number) {
+  const owner = inbox.company?.owner || (await fallbackOwner());
+  if (!owner || !inbox.companyId || !inbox.company) {
+    await notifyUsers(flow, inbox, `客户超时未回复,但未找到负责人或客户档案。询盘:${inquiryCode(inbox)}`);
+    return { status: 'SKIPPED' as const, skippedReason: '未找到负责人或客户档案' };
+  }
+
+  const sourceRef = `${flow.id}:${inbox.id}:round:${round}`;
+  const existingTask = await prisma.salesTask.findFirst({
+    where: { source: 'AUTOMATION_NO_REPLY_TIMEOUT', sourceRef, status: 'TODO' },
+    select: { id: true },
+  });
+  if (existingTask) return { status: 'MATCHED' as const, skippedReason: '已有待办任务', createdTaskId: null };
+
+  const dueAt = new Date();
+  dueAt.setHours(dueAt.getHours() + (round === 1 ? 24 : 48));
+  const draft = buildNoReplyDraft(flow, inbox, waitHours, round);
+  const task = await prisma.salesTask.create({
+    data: {
+      title: `自动化开发信草稿: ${inbox.company.name} 第 ${round} 轮`,
+      description: noReplyTaskDescription(flow, inbox, waitHours, round, draft.body),
+      type: 'EMAIL',
+      priority: round >= 3 ? 'HIGH' : 'NORMAL',
+      dueAt,
+      ownerId: owner.id,
+      companyId: inbox.companyId,
+      source: 'AUTOMATION_NO_REPLY_TIMEOUT',
+      sourceRef,
+      draftSubject: draft.subject,
+      draftBody: draft.body,
+      draftGeneratedAt: new Date(),
+    },
+  });
+
+  await prisma.followUp.create({
+    data: {
+      companyId: inbox.companyId,
+      userId: owner.id,
+      type: 'AUTOMATION_DRIP',
+      content: `自动化流程「${flow.name}」生成第 ${round} 轮开发信草稿。询盘:${inquiryCode(inbox)}`,
+    },
+  }).catch(() => null);
+
+  await notifyUsers(flow, inbox, `客户 ${waitHours} 小时未回复,已生成第 ${round} 轮开发信草稿。询盘:${inquiryCode(inbox)}`);
+  return { status: 'ACTION_SENT' as const, createdTaskId: task.id, draftSubject: draft.subject, round };
 }
 
 function matchesCondition(flow: Flow, inbox: NonNullable<InboxWithCompany>) {
@@ -210,6 +354,37 @@ async function refreshFlowStats(flowId: string) {
   });
 }
 
+async function createAutomationRun(
+  flow: Flow,
+  inbox: NonNullable<InboxWithCompany>,
+  matched: boolean,
+  status: 'MATCHED' | 'SKIPPED' | 'ACTION_SENT' | 'FAILED',
+  summary: string,
+  output: Record<string, unknown>
+) {
+  await prisma.automationRun.create({
+    data: {
+      flowId: flow.id,
+      inboxMessageId: inbox.id,
+      channel: inbox.channel as any,
+      contactKey: inbox.companyId || inbox.threadId || inbox.senderId,
+      status: status as any,
+      matched,
+      summary,
+      input: {
+        inboxId: inbox.id,
+        triggerType: flow.triggerType,
+        conditionType: flow.conditionType,
+        senderId: inbox.senderId,
+        companyId: inbox.companyId,
+        intent: inbox.intent,
+        detectedLang: inbox.detectedLang,
+      },
+      output: output as any,
+    },
+  });
+}
+
 async function isFirstMessageForContact(inbox: NonNullable<InboxWithCompany>) {
   const where = inbox.companyId
     ? { companyId: inbox.companyId, direction: 'IN' as const }
@@ -277,6 +452,55 @@ async function fallbackOwner() {
 
 function inquiryCode(inbox: NonNullable<InboxWithCompany>) {
   return `INQ-${inbox.createdAt.getFullYear()}-${inbox.id.slice(-6).toUpperCase()}`;
+}
+
+function buildNoReplyDraft(flow: Flow, inbox: NonNullable<InboxWithCompany>, waitHours: number, round: number) {
+  const companyName = inbox.company?.name || inbox.senderName || 'there';
+  const productHint = productHintFromText(searchableText(inbox));
+  const subject = round === 1 ? `Follow-up on your ERDI ${productHint} inquiry` : `Checking in on ERDI ${productHint} details`;
+  const body = [
+    `Hi ${companyName},`,
+    '',
+    `I wanted to follow up on your previous message about ${productHint}. We have not heard back for about ${waitHours} hours, so I am sending the key points again for your review.`,
+    '',
+    'To recommend the right ERDI solution, could you confirm:',
+    '1. Target range and working environment',
+    '2. Required wavelength / eye-safety requirement',
+    '3. Quantity plan and expected delivery time',
+    '4. Any size, weight, interface, or certification constraints',
+    '',
+    'Once we have these details, our sales engineer can prepare the suitable option, datasheet, and quotation.',
+    '',
+    'Best regards,',
+    'ERDI TECH LTD',
+    '',
+    `Automation note: generated by "${flow.name}" round ${round}. Please review before sending.`,
+  ].join('\n');
+  return { subject, body };
+}
+
+function noReplyTaskDescription(flow: Flow, inbox: NonNullable<InboxWithCompany>, waitHours: number, round: number, draftBody: string) {
+  return [
+    `流程: ${flow.name}`,
+    `客户: ${inbox.company?.name || '-'}`,
+    `渠道: ${inbox.channel}`,
+    `询盘: ${inquiryCode(inbox)}`,
+    `等待: ${waitHours} 小时`,
+    `轮次: ${round}`,
+    `客户原文: ${String(inbox.translatedText || inbox.originalText || '').slice(0, 500)}`,
+    '',
+    '开发信草稿:',
+    draftBody,
+  ].join('\n');
+}
+
+function productHintFromText(text: string) {
+  if (/1535/.test(text)) return '1535nm laser rangefinder';
+  if (/905/.test(text)) return '905nm laser rangefinder';
+  if (/designator|指示/.test(text)) return 'laser target designator';
+  if (/rangefinder|测距/.test(text)) return 'laser rangefinder';
+  if (/module|模块/.test(text)) return 'laser module';
+  return 'laser rangefinder';
 }
 
 function jsonObject(value: unknown) {
