@@ -1654,6 +1654,26 @@ function OwnerPriorityPanel({ report }: { report: ReturnType<typeof buildSalesOw
                 <span key={mix.label} className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black">{mix.label} {mix.count}</span>
               ))}
             </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <form action="/api/sales-command/priority-action" method="post">
+                <input type="hidden" name="itemIds" value={row.itemIds.join(',')} />
+                <button
+                  disabled={row.itemIds.length === 0}
+                  className="rounded-lg bg-gray-900 px-3 py-2 text-[11px] font-black text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
+                >
+                  处理此负责人
+                </button>
+              </form>
+              <form action="/api/sales-command/priority-action" method="post">
+                <input type="hidden" name="itemIds" value={row.urgentItemIds.join(',')} />
+                <button
+                  disabled={row.urgentItemIds.length === 0}
+                  className="rounded-lg bg-white/80 px-3 py-2 text-[11px] font-black hover:bg-white disabled:cursor-not-allowed disabled:text-gray-400"
+                >
+                  只处理高危
+                </button>
+              </form>
+            </div>
           </div>
         ))}
         {report.rows.length === 0 && <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm font-bold text-emerald-700">暂无负责人风险分布。</div>}

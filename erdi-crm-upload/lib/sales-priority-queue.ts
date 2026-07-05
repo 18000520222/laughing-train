@@ -18,6 +18,8 @@ export type SalesPriorityItem = {
 
 export type SalesOwnerPriorityRow = {
   ownerName: string;
+  itemIds: string[];
+  urgentItemIds: string[];
   itemCount: number;
   urgentCount: number;
   maxScore: number;
@@ -170,6 +172,8 @@ export function buildSalesOwnerPriorityReport(items: SalesPriorityItem[]) {
       const top = sorted[0];
       return {
         ownerName,
+        itemIds: sorted.map((item) => item.id),
+        urgentItemIds: sorted.filter((item) => item.score >= 90).map((item) => item.id),
         itemCount: ownerItems.length,
         urgentCount: ownerItems.filter((item) => item.score >= 90).length,
         maxScore: top?.score || 0,

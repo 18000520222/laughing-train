@@ -116,9 +116,12 @@ if (!queue.items.some((item) => item.kind === 'OPPORTUNITY_STALL' && item.href =
 if (!Array.isArray(ownerReport.rows) || ownerReport.rows.length < 5) failures.push('owner priority report should group owners');
 if (ownerReport.urgentOwnerCount < 2) failures.push(`urgent owner count too low: ${ownerReport.urgentOwnerCount}`);
 if (!ownerReport.rows.some((row) => row.ownerName === 'Sales C' && row.impactUSD >= 52000)) failures.push('owner report should retain stalled opportunity impact');
+if (!ownerReport.rows.every((row) => Array.isArray(row.itemIds) && row.itemIds.length === row.itemCount)) failures.push('owner report itemIds missing');
+if (!ownerReport.rows.some((row) => row.urgentItemIds.length > 0)) failures.push('owner report urgent itemIds missing');
 if (!ownerReport.recommendation.includes('负责人')) failures.push('owner report recommendation missing');
 if (!pageSource.includes('老板每日作战清单')) failures.push('daily priority panel UI missing');
 if (!pageSource.includes('负责人每日战报')) failures.push('owner priority panel UI missing');
+if (!pageSource.includes('处理此负责人') || !pageSource.includes('只处理高危')) failures.push('owner priority bulk buttons missing');
 if (!pageSource.includes('buildSalesPriorityQueue')) failures.push('sales command does not build priority queue');
 if (!pageSource.includes('buildSalesOwnerPriorityReport')) failures.push('sales command does not build owner priority report');
 if (!pageSource.includes('buildAutomationFunnelInsights')) failures.push('automation risk feed not wired into sales command');
