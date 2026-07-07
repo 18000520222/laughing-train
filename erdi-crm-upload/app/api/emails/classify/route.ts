@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { reclassifyEmailMessages } from '@/lib/email-audit';
+import { isCronAuthorized } from '@/lib/cron-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -8,11 +9,7 @@ export const maxDuration = 60;
 function authorized(req: Request): boolean {
   const role = (cookies().get('auth_role')?.value || '').toUpperCase();
   if (role === 'SUPER_ADMIN' || role === 'ADMIN') return true;
-  const { searchParams } = new URL(req.url);
-  if (searchParams.get('key') === (process.env.MAIL_CRON_KEY || 'erdi-mail-2026')) return true;
-  const auth = req.headers.get('authorization') || '';
-  if (process.env.CRON_SECRET && auth === `Bearer ${process.env.CRON_SECRET}`) return true;
-  return false;
+  return isCronAuthorized(req, [process.env.MAIL_CRON_KEY], ['erdi-mail-2026']);
 }
 
 export async function GET(req: Request) {

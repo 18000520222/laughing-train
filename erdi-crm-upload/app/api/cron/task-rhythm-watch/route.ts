@@ -1,20 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runSalesTaskRhythmWatch } from '@/lib/sales-task-rhythm-watch';
+import { isCronAuthorized } from '@/lib/cron-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const TASK_RHYTHM_KEY = process.env.TASK_RHYTHM_KEY || process.env.TASK_ESCALATION_KEY || process.env.TASK_REMINDER_KEY || process.env.MAIL_CRON_KEY || 'erdi-mail-2026';
-
-function authorized(req: NextRequest): boolean {
-  if (req.nextUrl.searchParams.get('key') === TASK_RHYTHM_KEY) return true;
-  const auth = req.headers.get('authorization') || '';
-  if (process.env.CRON_SECRET && auth === `Bearer ${process.env.CRON_SECRET}`) return true;
-  return false;
-}
+const TASK_RHYTHM_KEY = process.env.TASK_RHYTHM_KEY || process.env.TASK_ESCALATION_KEY || process.env.TASK_REMINDER_KEY || process.env.MAIL_CRON_KEY;
 
 export async function GET(req: NextRequest) {
-  if (!authorized(req)) {
+  if (!isCronAuthorized(req, [TASK_RHYTHM_KEY], ['erdi-mail-2026'])) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

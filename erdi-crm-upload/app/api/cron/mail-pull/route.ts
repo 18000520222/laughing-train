@@ -6,6 +6,7 @@ import { ingestInbound } from '@/lib/inbox';
 import type { NormalizedMessage } from '@/lib/channels/types';
 import { classifyEmail } from '@/lib/email-classifier';
 import { buildEmailImapAuth } from '@/lib/google-gmail-oauth';
+import { isCronAuthorized } from '@/lib/cron-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -96,17 +97,8 @@ function spamReason(parsed: any): string | null {
   return null;
 }
 
-/** 鉴权:Vercel Cron 会带 Authorization: Bearer <CRON_SECRET>;手动调用用 ?key= */
-function authorized(req: Request): boolean {
-  const { searchParams } = new URL(req.url);
-  if (searchParams.get('key') === (process.env.MAIL_CRON_KEY || 'erdi-mail-2026')) return true;
-  const auth = req.headers.get('authorization') || '';
-  if (process.env.CRON_SECRET && auth === `Bearer ${process.env.CRON_SECRET}`) return true;
-  return false;
-}
-
 export async function GET(req: Request) {
-  if (!authorized(req)) {
+  if (!isCronAuthorized(req, [process.env.MAIL_CRON_KEY], ['erdi-mail-2026'])) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
   const { searchParams } = new URL(req.url);

@@ -4,27 +4,21 @@
 // 复用中台 pipeline(去重/翻译/客户关联/AI 草稿)。
 // 未配置凭据的渠道 poll() 返回 [],自动跳过。
 //
-// 鉴权:?key=erdi-channel-2026 或 Vercel Cron 的 Authorization: Bearer。
+// 鉴权:生产使用环境变量 key 或 Vercel Cron 的 Authorization: Bearer。
 // GitHub Actions 每 10 分钟触发。
 
 import { NextRequest, NextResponse } from 'next/server';
 import { pollableAdapters } from '@/lib/channels/registry';
 import { ingestInbound } from '@/lib/inbox';
+import { isCronAuthorized } from '@/lib/cron-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const POLL_KEY = process.env.CHANNEL_POLL_KEY || 'erdi-channel-2026';
-
-function authorized(req: NextRequest): boolean {
-  if (req.nextUrl.searchParams.get('key') === POLL_KEY) return true;
-  const auth = req.headers.get('authorization') || '';
-  if (process.env.CRON_SECRET && auth === `Bearer ${process.env.CRON_SECRET}`) return true;
-  return false;
-}
+const POLL_KEY = process.env.CHANNEL_POLL_KEY;
 
 export async function GET(req: NextRequest) {
-  if (!authorized(req)) {
+  if (!isCronAuthorized(req, [POLL_KEY], ['erdi-channel-2026'])) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

@@ -1,21 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { escalateStaleCompletionEvidenceRepairs } from '@/lib/sales-completion-evidence-repair';
+import { isCronAuthorized } from '@/lib/cron-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const COMPLETION_EVIDENCE_ESCALATION_KEY =
-  process.env.COMPLETION_EVIDENCE_ESCALATION_KEY || process.env.COMPLETION_EVIDENCE_KEY || process.env.TASK_ESCALATION_KEY || process.env.TASK_REMINDER_KEY || process.env.MAIL_CRON_KEY || 'erdi-mail-2026';
-
-function authorized(req: NextRequest): boolean {
-  if (req.nextUrl.searchParams.get('key') === COMPLETION_EVIDENCE_ESCALATION_KEY) return true;
-  const auth = req.headers.get('authorization') || '';
-  if (process.env.CRON_SECRET && auth === `Bearer ${process.env.CRON_SECRET}`) return true;
-  return false;
-}
+  process.env.COMPLETION_EVIDENCE_ESCALATION_KEY || process.env.COMPLETION_EVIDENCE_KEY || process.env.TASK_ESCALATION_KEY || process.env.TASK_REMINDER_KEY || process.env.MAIL_CRON_KEY;
 
 export async function GET(req: NextRequest) {
-  if (!authorized(req)) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (!isCronAuthorized(req, [COMPLETION_EVIDENCE_ESCALATION_KEY], ['erdi-mail-2026'])) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
   const limit = intParam(req, 'limit', 50);
   const thresholdHours = intParam(req, 'thresholdHours', 12);

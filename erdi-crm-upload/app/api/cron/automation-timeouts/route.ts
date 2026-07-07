@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runNoReplyTimeoutAutomations } from '@/lib/automation-runner';
+import { isCronAuthorized } from '@/lib/cron-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -8,18 +9,10 @@ const AUTOMATION_TIMEOUT_KEY =
   process.env.AUTOMATION_TIMEOUT_KEY ||
   process.env.TASK_RHYTHM_KEY ||
   process.env.TASK_REMINDER_KEY ||
-  process.env.MAIL_CRON_KEY ||
-  'erdi-mail-2026';
-
-function authorized(req: NextRequest): boolean {
-  if (req.nextUrl.searchParams.get('key') === AUTOMATION_TIMEOUT_KEY) return true;
-  const auth = req.headers.get('authorization') || '';
-  if (process.env.CRON_SECRET && auth === `Bearer ${process.env.CRON_SECRET}`) return true;
-  return false;
-}
+  process.env.MAIL_CRON_KEY;
 
 export async function GET(req: NextRequest) {
-  if (!authorized(req)) {
+  if (!isCronAuthorized(req, [AUTOMATION_TIMEOUT_KEY], ['erdi-mail-2026'])) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

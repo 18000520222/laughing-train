@@ -1,24 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { buildGmailLabelPlanAudit, buildGmailLabelPlanStats, buildGmailLabelReadiness } from '@/lib/email-label-plan';
+import { isCronAuthorized } from '@/lib/cron-auth';
 
 export const dynamic = 'force-dynamic';
 
 const EMAIL_LABEL_PLAN_KEY =
   process.env.EMAIL_LABEL_PLAN_KEY ||
   process.env.EMAIL_AUDIT_WATCH_KEY ||
-  process.env.MAIL_CRON_KEY ||
-  'erdi-mail-2026';
-
-function authorized(req: NextRequest): boolean {
-  if (req.nextUrl.searchParams.get('key') === EMAIL_LABEL_PLAN_KEY) return true;
-  const auth = req.headers.get('authorization') || '';
-  if (process.env.CRON_SECRET && auth === `Bearer ${process.env.CRON_SECRET}`) return true;
-  return false;
-}
+  process.env.MAIL_CRON_KEY;
 
 export async function GET(req: NextRequest) {
-  if (!authorized(req)) {
+  if (!isCronAuthorized(req, [EMAIL_LABEL_PLAN_KEY], ['erdi-mail-2026'])) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
