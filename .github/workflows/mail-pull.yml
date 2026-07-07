@@ -1,11 +1,9 @@
 name: Mail Pull (准实时拉取邮件)
 
-# Vercel Hobby 计划 Cron 上限为每天 1 次，无法满足实时性。
-# 改用 GitHub Actions 每 5 分钟触发一次邮件同步路由，实现准实时入站。
+# 2026-07-07:Vercel team 因 functionInvocation 触发 fair-use block。
+# 解封并升级/确认预算前,邮件拉取只允许手动触发,避免每 5 分钟继续烧生产函数调用。
 on:
-  schedule:
-    - cron: '*/5 * * * *' # 每 5 分钟(UTC)
-  workflow_dispatch: {}      # 支持手动触发
+  workflow_dispatch: {}
 
 concurrency:
   group: mail-pull
@@ -21,7 +19,7 @@ jobs:
           echo "Triggering mail-pull at $(date -u)"
           code=$(curl -sS -o /tmp/resp.txt -w "%{http_code}" \
             --max-time 90 \
-            "https://crm.erdicn.com/api/cron/mail-pull?key=${MAIL_CRON_KEY}&n=30" || true)
+            "https://erdicrm.com/api/cron/mail-pull?key=${MAIL_CRON_KEY}&n=10" || true)
           echo "HTTP $code"
           echo "----- response -----"
           cat /tmp/resp.txt || true

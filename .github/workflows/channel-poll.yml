@@ -1,12 +1,9 @@
 name: Channel Poll (全渠道询盘轮询)
 
-# Vercel Hobby 计划 Cron 上限为每天 1 次。
-# 改用 GitHub Actions 每 10 分钟触发一次全渠道轮询，拉取阿里/亚马逊/Shopee 等
-# 无 webhook 或需主动拉取的渠道的新消息/订单，统一进入收件箱(翻译 + AI 草稿)。
+# 2026-07-07:Vercel team 因 functionInvocation 触发 fair-use block。
+# 解封并升级/确认预算前,渠道轮询只允许手动触发,避免每 10 分钟继续烧生产函数调用。
 on:
-  schedule:
-    - cron: '*/10 * * * *' # 每 10 分钟(UTC)
-  workflow_dispatch: {}      # 支持手动触发
+  workflow_dispatch: {}
 
 concurrency:
   group: channel-poll
@@ -22,7 +19,7 @@ jobs:
           echo "Triggering channel-poll at $(date -u)"
           code=$(curl -sS -o /tmp/resp.txt -w "%{http_code}" \
             --max-time 90 \
-            "https://crm.erdicn.com/api/cron/channel-poll?key=${CHANNEL_POLL_KEY}" || true)
+            "https://erdicrm.com/api/cron/channel-poll?key=${CHANNEL_POLL_KEY}" || true)
           echo "HTTP $code"
           echo "----- response -----"
           cat /tmp/resp.txt || true
