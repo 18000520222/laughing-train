@@ -218,6 +218,7 @@ const CHANNEL_LABEL: Record<string, string> = {
   INSTAGRAM: 'Instagram',
   LINKEDIN: 'LinkedIn',
   SALESMARTLY: 'SaleSmartly',
+  CHATWOOT: 'Chatwoot',
 };
 
 const INTENT_LABEL: Record<string, string> = {

@@ -2593,6 +2593,7 @@ function sourceLabel(source: string) {
     SHOPEE: 'Shopee',
     AMAZON: 'Amazon',
     SALESMARTLY: 'SaleSmartly',
+    CHATWOOT: 'Chatwoot',
     MANUAL: '手工录入',
     WEBSITE: '官网',
     UNKNOWN: '未知来源',

@@ -66,6 +66,7 @@ export const CHANNEL_LABEL: Record<string, string> = {
   INSTAGRAM: 'Instagram',
   LINKEDIN: 'LinkedIn',
   SALESMARTLY: 'SaleSmartly',
+  CHATWOOT: 'Chatwoot',
 };
 
 export const STATUS_LABEL: Record<string, string> = {

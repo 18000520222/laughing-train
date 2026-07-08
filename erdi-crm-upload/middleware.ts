@@ -18,6 +18,7 @@ const PUBLIC_PREFIXES = [
   '/api/alibaba/webhook',  // 阿里国际站消息推送
   '/api/shopee/webhook',   // Shopee push
   '/api/salesmartly/webhook',
+  '/api/chatwoot/webhook',
   '/api/tracking/webhook',
   '/api/cron/',        // 定时任务(自带 ?key= / Bearer 校验)
   '/api/automation/bootstrap', // 自动化蓝图运维补齐(自带 ?key= / Bearer 校验)

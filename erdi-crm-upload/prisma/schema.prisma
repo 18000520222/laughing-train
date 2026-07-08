@@ -112,6 +112,13 @@ model SystemSettings {
   salesmartlyReplyUrl   String?
   salesmartlyApiKey     String?
 
+  // Chatwoot open-source customer engagement suite
+  chatwootBaseUrl    String?
+  chatwootAccountId  String?
+  chatwootInboxId    String?
+  chatwootApiToken   String?
+  chatwootWebhookKey String?
+
   // Google / Gmail OAuth
   googleClientId     String?
   googleClientSecret String?
@@ -739,6 +746,7 @@ enum InboxChannel {
   LINKEDIN
   EMAIL
   SALESMARTLY
+  CHATWOOT
 }
 
 enum InboxStatus {
@@ -797,6 +805,7 @@ enum AutomationChannel {
   INSTAGRAM
   LINKEDIN
   SALESMARTLY
+  CHATWOOT
 }
 
 enum AutomationStatus {

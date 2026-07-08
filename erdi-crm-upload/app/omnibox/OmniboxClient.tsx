@@ -35,6 +35,7 @@ const CHANNEL_LABEL: Record<string, string> = {
   INSTAGRAM: 'Instagram',
   LINKEDIN: 'LinkedIn',
   SALESMARTLY: 'SaleSmartly',
+  CHATWOOT: 'Chatwoot',
 };
 const CHANNEL_COLOR: Record<string, string> = {
   EMAIL: 'bg-indigo-100 text-indigo-700',
@@ -45,6 +46,8 @@ const CHANNEL_COLOR: Record<string, string> = {
   FACEBOOK: 'bg-blue-100 text-blue-700',
   INSTAGRAM: 'bg-pink-100 text-pink-700',
   LINKEDIN: 'bg-sky-100 text-sky-700',
+  SALESMARTLY: 'bg-violet-100 text-violet-700',
+  CHATWOOT: 'bg-teal-100 text-teal-700',
 };
 const INTENT_LABEL: Record<string, string> = {
   PRICE_INQUIRY: '询价',
@@ -117,7 +120,7 @@ export default function OmniboxClient({
     }
   }
 
-  const channels = ['', 'EMAIL', 'WHATSAPP', 'ALIBABA', 'AMAZON', 'SHOPEE', 'FACEBOOK', 'INSTAGRAM', 'LINKEDIN'];
+  const channels = ['', 'EMAIL', 'WHATSAPP', 'ALIBABA', 'AMAZON', 'SHOPEE', 'FACEBOOK', 'INSTAGRAM', 'LINKEDIN', 'SALESMARTLY', 'CHATWOOT'];
   const statuses = ['', 'NEW', 'AI_DRAFTED', 'REPLIED'];
 
   return (

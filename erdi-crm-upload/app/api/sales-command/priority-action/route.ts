@@ -256,6 +256,7 @@ function channelLabel(channel: string) {
     INSTAGRAM: 'Instagram',
     LINKEDIN: 'LinkedIn',
     SALESMARTLY: 'SaleSmartly',
+    CHATWOOT: 'Chatwoot',
   };
   return labels[channel] || channel;
 }
