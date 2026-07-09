@@ -30,6 +30,25 @@ const SECRET_FIELDS = new Set([
   'googleClientSecret',
 ]);
 
+const hasEnv = (key: string) => Boolean(process.env[key]?.trim());
+
+type RuntimeChannelConfig = {
+  whatsapp360: boolean;
+  whatsappCloud: boolean;
+  facebookApp: boolean;
+  facebookAppIdOnly: boolean;
+  linkedinClient: boolean;
+  aftershipApi: boolean;
+  alibabaOauth: boolean;
+  amazonSpApi: boolean;
+  shopeePartner: boolean;
+  salesmartlyWebhook: boolean;
+  salesmartlyReply: boolean;
+  chatwootCore: boolean;
+  chatwootReply: boolean;
+  googleClient: boolean;
+};
+
 export default async function ChannelSettingsPage({
   searchParams,
 }: {
@@ -165,16 +184,48 @@ export default async function ChannelSettingsPage({
       <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-semibold">未配置</span>
     );
 
-  const waOk = !!(st.whatsapp360ApiKey || (st.whatsappToken && st.whatsappPhoneId));
-  const fbOk = !!(st.fbAppId && st.fbAppSecret);
-  const liOk = !!(st.linkedinClientId && st.linkedinClientSecret);
-  const aftershipOk = !!st.aftershipApiKey;
-  const abOk = !!(st.alibabaAppKey && st.alibabaAppSecret && st.alibabaAccessToken);
-  const amzOk = !!(st.amazonRefreshToken && st.amazonLwaClientId && st.amazonLwaClientSecret && st.amazonAwsAccessKeyId && st.amazonAwsSecretAccessKey);
-  const spOk = !!(st.shopeePartnerId && st.shopeePartnerKey && st.shopeeShopId);
-  const ssOk = !!st.salesmartlyWebhookKey;
-  const cwOk = !!(st.chatwootBaseUrl && st.chatwootAccountId);
-  const googleOk = !!(st.googleClientId && st.googleClientSecret);
+  const runtimeConfig: RuntimeChannelConfig = {
+    whatsapp360: hasEnv('WHATSAPP_360_API_KEY'),
+    whatsappCloud: hasEnv('WHATSAPP_TOKEN') && hasEnv('WHATSAPP_PHONE_ID'),
+    facebookApp: hasEnv('FB_APP_ID') && hasEnv('FB_APP_SECRET'),
+    facebookAppIdOnly: hasEnv('FB_APP_ID'),
+    linkedinClient: hasEnv('LINKEDIN_CLIENT_ID') && hasEnv('LINKEDIN_CLIENT_SECRET'),
+    aftershipApi: hasEnv('AFTERSHIP_API_KEY'),
+    alibabaOauth: hasEnv('ALIBABA_APP_KEY') && hasEnv('ALIBABA_APP_SECRET') && hasEnv('ALIBABA_ACCESS_TOKEN'),
+    amazonSpApi:
+      hasEnv('AMAZON_REFRESH_TOKEN') &&
+      hasEnv('AMAZON_LWA_CLIENT_ID') &&
+      hasEnv('AMAZON_LWA_CLIENT_SECRET') &&
+      hasEnv('AMAZON_AWS_ACCESS_KEY_ID') &&
+      hasEnv('AMAZON_AWS_SECRET_ACCESS_KEY'),
+    shopeePartner: hasEnv('SHOPEE_PARTNER_ID') && hasEnv('SHOPEE_PARTNER_KEY') && hasEnv('SHOPEE_SHOP_ID'),
+    salesmartlyWebhook: hasEnv('SALESMARTLY_WEBHOOK_KEY'),
+    salesmartlyReply: hasEnv('SALESMARTLY_REPLY_URL') && hasEnv('SALESMARTLY_API_KEY'),
+    chatwootCore: hasEnv('CHATWOOT_BASE_URL') && hasEnv('CHATWOOT_ACCOUNT_ID') && hasEnv('CHATWOOT_WEBHOOK_KEY'),
+    chatwootReply: hasEnv('CHATWOOT_BASE_URL') && hasEnv('CHATWOOT_ACCOUNT_ID') && hasEnv('CHATWOOT_API_TOKEN'),
+    googleClient: hasEnv('GOOGLE_CLIENT_ID') && hasEnv('GOOGLE_CLIENT_SECRET'),
+  };
+
+  const dbWaOk = !!(st.whatsapp360ApiKey || (st.whatsappToken && st.whatsappPhoneId));
+  const dbFbOk = !!(st.fbAppId && st.fbAppSecret);
+  const dbLiOk = !!(st.linkedinClientId && st.linkedinClientSecret);
+  const dbAftershipOk = !!st.aftershipApiKey;
+  const dbAbOk = !!(st.alibabaAppKey && st.alibabaAppSecret && st.alibabaAccessToken);
+  const dbAmzOk = !!(st.amazonRefreshToken && st.amazonLwaClientId && st.amazonLwaClientSecret && st.amazonAwsAccessKeyId && st.amazonAwsSecretAccessKey);
+  const dbSpOk = !!(st.shopeePartnerId && st.shopeePartnerKey && st.shopeeShopId);
+  const dbSsOk = !!st.salesmartlyWebhookKey;
+  const dbCwOk = !!(st.chatwootBaseUrl && st.chatwootAccountId);
+  const dbGoogleOk = !!(st.googleClientId && st.googleClientSecret);
+  const waOk = dbWaOk || runtimeConfig.whatsapp360 || runtimeConfig.whatsappCloud;
+  const fbOk = dbFbOk || runtimeConfig.facebookApp;
+  const liOk = dbLiOk || runtimeConfig.linkedinClient;
+  const aftershipOk = dbAftershipOk || runtimeConfig.aftershipApi;
+  const abOk = dbAbOk || runtimeConfig.alibabaOauth;
+  const amzOk = dbAmzOk || runtimeConfig.amazonSpApi;
+  const spOk = dbSpOk || runtimeConfig.shopeePartner;
+  const ssOk = dbSsOk || runtimeConfig.salesmartlyWebhook;
+  const cwOk = dbCwOk || runtimeConfig.chatwootCore;
+  const googleOk = dbGoogleOk || runtimeConfig.googleClient;
 
   const baseUrl = 'https://erdicrm.com';
   const channelHealthRows = buildChannelHealthRows({
@@ -186,6 +237,7 @@ export default async function ChannelSettingsPage({
     trackingEventCount,
     latestTrackingAt: latestTrackingEvent?.occurredAt || latestTrackingEvent?.createdAt || null,
     configured: { waOk, fbOk, liOk, aftershipOk, abOk, amzOk, spOk, ssOk, cwOk, googleOk },
+    runtimeConfig,
   });
   const channelHealthSummary = summarizeChannelHealth(channelHealthRows);
 
@@ -285,6 +337,7 @@ export default async function ChannelSettingsPage({
           <p className="text-xs text-gray-400 mb-4">
             Google OAuth Redirect URI：<code>{baseUrl}/api/auth/google/callback</code>。先填 Client ID/Secret 并保存，再点一键授权，CRM 会把 Gmail OAuth token 写入邮箱账号并用于 IMAP 同步。
           </p>
+          {!dbGoogleOk && runtimeConfig.googleClient && <RuntimeConfigHint text="已检测到 Google Client 来自环境变量；密钥不会回显，表单留空不会删除环境变量。" />}
           <div className="grid grid-cols-2 gap-4">
             <Field name="googleClientId" label="Google OAuth Client ID" defaultValue={st.googleClientId} />
             <Field name="googleClientSecret" label="Google OAuth Client Secret" defaultValue={st.googleClientSecret} type="password" />
@@ -298,6 +351,7 @@ export default async function ChannelSettingsPage({
             {status(waOk)}
           </div>
           <p className="text-xs text-gray-400 mb-4">推荐 360dialog BSP。Webhook 回调地址：<code>{baseUrl}/api/whatsapp/webhook</code></p>
+          {!dbWaOk && (runtimeConfig.whatsapp360 || runtimeConfig.whatsappCloud) && <RuntimeConfigHint text="已检测到 WhatsApp 凭据来自环境变量；密钥不会回显，表单留空不会删除环境变量。" />}
           <div className="mb-4">
             <Field name="whatsapp360ApiKey" label="360dialog API Key（推荐）" defaultValue={st.whatsapp360ApiKey} type="password" />
           </div>
@@ -314,6 +368,7 @@ export default async function ChannelSettingsPage({
             {status(ssOk)}
           </div>
           <p className="text-xs text-gray-400 mb-4">Webhook 回调地址：<code>{baseUrl}/api/salesmartly/webhook</code>。SaleSmartly 后台配置 webhook key；如需从 CRM 一键回复，再填 SaleSmartly 回复地址和 API Key。</p>
+          {!dbSsOk && runtimeConfig.salesmartlyWebhook && <RuntimeConfigHint text="已检测到 SaleSmartly Webhook Key 来自环境变量；密钥不会回显，表单留空不会删除环境变量。" />}
           <div className="grid grid-cols-2 gap-4">
             <Field name="salesmartlyWebhookKey" label="Webhook Key" defaultValue={st.salesmartlyWebhookKey} type="password" />
             <Field name="salesmartlyReplyUrl" label="Message Reply URL" defaultValue={st.salesmartlyReplyUrl} placeholder="https://..." />
@@ -329,6 +384,7 @@ export default async function ChannelSettingsPage({
           <p className="text-xs text-gray-400 mb-4">
             Webhook 回调地址：<code>{baseUrl}/api/chatwoot/webhook</code>。Chatwoot 后台 Webhooks 订阅 conversation/message/contact 事件；如需从 CRM 回发，必须填 Base URL、Account ID 和 API Token。
           </p>
+          {!dbCwOk && runtimeConfig.chatwootCore && <RuntimeConfigHint text="已检测到 Chatwoot 来自环境变量；生产 Webhook/API 可用，密钥不会回显，表单留空不会删除环境变量。" />}
           <div className="grid grid-cols-2 gap-4">
             <Field name="chatwootBaseUrl" label="Chatwoot Base URL" defaultValue={st.chatwootBaseUrl} placeholder="https://chat.yourdomain.com" />
             <Field name="chatwootAccountId" label="Account ID" defaultValue={st.chatwootAccountId} placeholder="1" />
@@ -348,6 +404,8 @@ export default async function ChannelSettingsPage({
             </div>
           </div>
           <p className="text-xs text-gray-400 mb-4">授权回调：<code>{baseUrl}/api/auth/facebook/callback</code>　·　Webhook：<code>{baseUrl}/api/facebook/webhook</code></p>
+          {!dbFbOk && runtimeConfig.facebookAppIdOnly && !runtimeConfig.facebookApp && <RuntimeConfigHint tone="amber" text="已检测到 FB_APP_ID 来自环境变量，但缺 FB_APP_SECRET；Meta OAuth 还不能算完整。" />}
+          {!dbFbOk && runtimeConfig.facebookApp && <RuntimeConfigHint text="已检测到 Meta App 凭据来自环境变量；密钥不会回显，表单留空不会删除环境变量。" />}
           <div className="grid grid-cols-2 gap-4">
             <Field name="fbAppId" label="App ID" defaultValue={st.fbAppId} />
             <Field name="fbAppSecret" label="App Secret" defaultValue={st.fbAppSecret} type="password" />
@@ -364,6 +422,7 @@ export default async function ChannelSettingsPage({
             </div>
           </div>
           <p className="text-xs text-gray-400 mb-4">授权回调：<code>{baseUrl}/api/auth/linkedin/callback</code></p>
+          {!dbLiOk && runtimeConfig.linkedinClient && <RuntimeConfigHint text="已检测到 LinkedIn Client 来自环境变量；密钥不会回显，表单留空不会删除环境变量。" />}
           <div className="grid grid-cols-2 gap-4">
             <Field name="linkedinClientId" label="Client ID" defaultValue={st.linkedinClientId} />
             <Field name="linkedinClientSecret" label="Client Secret" defaultValue={st.linkedinClientSecret} type="password" />
@@ -376,6 +435,7 @@ export default async function ChannelSettingsPage({
             {status(aftershipOk)}
           </div>
           <p className="text-xs text-gray-400 mb-4">配置后可在物流中心或 <code>/api/tracking/sync</code> 同步未签收运单。</p>
+          {!dbAftershipOk && runtimeConfig.aftershipApi && <RuntimeConfigHint text="已检测到 AfterShip API Key 来自环境变量；密钥不会回显，表单留空不会删除环境变量。" />}
           <Field name="aftershipApiKey" label="AfterShip API Key" defaultValue={st.aftershipApiKey} type="password" />
         </section>
 
@@ -389,6 +449,7 @@ export default async function ChannelSettingsPage({
             </div>
           </div>
           <p className="text-xs text-gray-400 mb-4">消息推送地址：<code>{baseUrl}/api/alibaba/webhook</code>　·　授权回调：<code>{baseUrl}/api/auth/alibaba/callback</code>（先填 AppKey/AppSecret 并「保存」，再点右上「一键授权」跳转阿里授权页，回来后 token 自动入库并续期）</p>
+          {!dbAbOk && runtimeConfig.alibabaOauth && <RuntimeConfigHint text="已检测到阿里 OAuth 凭据来自环境变量；密钥不会回显，表单留空不会删除环境变量。" />}
           <div className="grid grid-cols-2 gap-4">
             <Field name="alibabaAppKey" label="App Key" defaultValue={st.alibabaAppKey} />
             <Field name="alibabaAppSecret" label="App Secret" defaultValue={st.alibabaAppSecret} type="password" />
@@ -407,6 +468,7 @@ export default async function ChannelSettingsPage({
             </div>
           </div>
           <p className="text-xs text-gray-400 mb-4">亚马逊无消息 webhook，系统每 10 分钟轮询订单/消息。SP-API 正式请求需要 LWA token + AWS SigV4 签名。</p>
+          {!dbAmzOk && runtimeConfig.amazonSpApi && <RuntimeConfigHint text="已检测到 Amazon SP-API 凭据来自环境变量；密钥不会回显，表单留空不会删除环境变量。" />}
           <div className="grid grid-cols-2 gap-4">
             <Field name="amazonRefreshToken" label="LWA Refresh Token" defaultValue={st.amazonRefreshToken} type="password" />
             <Field name="amazonLwaClientId" label="LWA Client ID" defaultValue={st.amazonLwaClientId} />
@@ -429,6 +491,7 @@ export default async function ChannelSettingsPage({
             </div>
           </div>
           <p className="text-xs text-gray-400 mb-4">Push 回调地址：<code>{baseUrl}/api/shopee/webhook</code></p>
+          {!dbSpOk && runtimeConfig.shopeePartner && <RuntimeConfigHint text="已检测到 Shopee Partner 凭据来自环境变量；密钥不会回显，表单留空不会删除环境变量。" />}
           <div className="grid grid-cols-2 gap-4">
             <Field name="shopeePartnerId" label="Partner ID" defaultValue={st.shopeePartnerId} />
             <Field name="shopeePartnerKey" label="Partner Key" defaultValue={st.shopeePartnerKey} type="password" />
@@ -502,6 +565,7 @@ type InboxPendingHealth = {
 
 function buildChannelHealthRows(input: {
   st: any;
+  runtimeConfig: RuntimeChannelConfig;
   emailAccounts: EmailAccountHealth[];
   socialAccounts: SocialAccountHealth[];
   inboxTotals: InboxTotalHealth[];
@@ -543,6 +607,50 @@ function buildChannelHealthRows(input: {
   const linkedinInbox = byChannel('LINKEDIN');
   const salesmartly = byChannel('SALESMARTLY');
   const chatwoot = byChannel('CHATWOOT');
+  const googleClientLabel = input.st.googleClientId && input.st.googleClientSecret ? 'CRM 数据库' : input.runtimeConfig.googleClient ? '环境变量' : '';
+  const whatsappTokenLabel = input.st.whatsapp360ApiKey
+    ? '360dialog 已配置'
+    : input.runtimeConfig.whatsapp360
+      ? '360dialog 已配置(环境变量)'
+      : input.configured.waOk
+        ? input.runtimeConfig.whatsappCloud
+          ? 'Meta Cloud 已配置(环境变量)'
+          : 'Meta Cloud 已配置'
+        : '未配置 API Key/Token';
+  const salesmartlyTokenLabel = input.st.salesmartlyWebhookKey
+    ? input.st.salesmartlyReplyUrl
+      ? 'Webhook + 回复地址已配置'
+      : 'Webhook 已配置'
+    : input.runtimeConfig.salesmartlyWebhook
+      ? input.runtimeConfig.salesmartlyReply
+        ? 'Webhook + 回复地址已配置(环境变量)'
+        : 'Webhook 已配置(环境变量)'
+      : '未配置 Webhook Key';
+  const chatwootTokenLabel = input.st.chatwootBaseUrl
+    ? input.st.chatwootApiToken
+      ? 'Base URL + API Token 已配置'
+      : 'Base URL 已配置,待 API Token'
+    : input.runtimeConfig.chatwootCore
+      ? input.runtimeConfig.chatwootReply
+        ? 'Base URL + API Token 已配置(环境变量)'
+        : 'Webhook 已配置(环境变量),待 API Token'
+      : '未配置 Chatwoot';
+  const facebookTokenLabel = facebook.accountCount > 0
+    ? `${facebook.accountCount} 个账号已授权`
+    : input.configured.fbOk
+      ? input.runtimeConfig.facebookApp && !(input.st.fbAppId && input.st.fbAppSecret)
+        ? 'App 凭据已配置(环境变量)'
+        : 'App 凭据已配置'
+      : input.runtimeConfig.facebookAppIdOnly
+        ? '已配置 App ID,缺 App Secret'
+        : '未配置 App 凭据';
+  const linkedInTokenLabel = linkedin.accountCount > 0
+    ? `${linkedin.accountCount} 个账号已授权`
+    : input.configured.liOk
+      ? input.runtimeConfig.linkedinClient && !(input.st.linkedinClientId && input.st.linkedinClientSecret)
+        ? 'Client 已配置(环境变量)'
+        : 'Client 已配置'
+      : '未配置 Client';
 
   return [
     makeChannelRow({
@@ -551,7 +659,7 @@ function buildChannelHealthRows(input: {
       mode: `${activeEmailAccounts.length}/${input.emailAccounts.length} 个账号启用 · ${activeEmailAccounts.map((account) => account.imapHost).filter(Boolean).slice(0, 2).join('、') || '未配置 IMAP'}`,
       configured: emailConfigured,
       tokenExpired: false,
-      tokenLabel: oauthEmailCount > 0 ? `Google OAuth 已授权 ${oauthEmailCount} 个邮箱` : appPasswordEmailCount > 0 ? `IMAP 授权码已配置 ${appPasswordEmailCount} 个邮箱` : input.configured.googleOk ? 'Google Client 已配置,待一键授权' : input.emailAccounts.length > 0 ? '缺邮箱授权' : '未添加邮箱账号',
+      tokenLabel: oauthEmailCount > 0 ? `Google OAuth 已授权 ${oauthEmailCount} 个邮箱` : appPasswordEmailCount > 0 ? `IMAP 授权码已配置 ${appPasswordEmailCount} 个邮箱` : input.configured.googleOk ? `Google Client 已配置(${googleClientLabel}),待一键授权` : input.emailAccounts.length > 0 ? '缺邮箱授权' : '未添加邮箱账号',
       dataCount: emailDataCount,
       pendingCount: emailChannel.pending,
       lastSeenAt: maxDate(emailLatest, emailChannel.lastSeenAt),
@@ -568,7 +676,7 @@ function buildChannelHealthRows(input: {
       mode: 'Webhook + AI 草稿 + 人工确认',
       configured: input.configured.waOk,
       tokenExpired: false,
-      tokenLabel: input.st.whatsapp360ApiKey ? '360dialog 已配置' : input.configured.waOk ? 'Meta Cloud 已配置' : '未配置 API Key/Token',
+      tokenLabel: whatsappTokenLabel,
       dataCount: whatsapp.total,
       pendingCount: whatsapp.pending,
       lastSeenAt: whatsapp.lastSeenAt,
@@ -585,7 +693,7 @@ function buildChannelHealthRows(input: {
       mode: 'Webhook 入站 + CRM AI 草稿 + 可选回发',
       configured: input.configured.ssOk,
       tokenExpired: false,
-      tokenLabel: input.st.salesmartlyWebhookKey ? (input.st.salesmartlyReplyUrl ? 'Webhook + 回复地址已配置' : 'Webhook 已配置') : '未配置 Webhook Key',
+      tokenLabel: salesmartlyTokenLabel,
       dataCount: salesmartly.total,
       pendingCount: salesmartly.pending,
       lastSeenAt: salesmartly.lastSeenAt,
@@ -602,7 +710,7 @@ function buildChannelHealthRows(input: {
       mode: 'Webhook 入站 + CRM AI 草稿 + Chatwoot API 回发',
       configured: input.configured.cwOk,
       tokenExpired: false,
-      tokenLabel: input.st.chatwootBaseUrl ? (input.st.chatwootApiToken ? 'Base URL + API Token 已配置' : 'Base URL 已配置,待 API Token') : '未配置 Chatwoot',
+      tokenLabel: chatwootTokenLabel,
       dataCount: chatwoot.total,
       pendingCount: chatwoot.pending,
       lastSeenAt: chatwoot.lastSeenAt,
@@ -636,7 +744,7 @@ function buildChannelHealthRows(input: {
       mode: 'LWA OAuth + SP-API 轮询',
       configured: input.configured.amzOk,
       tokenExpired: false,
-      tokenLabel: input.configured.amzOk ? `${input.st.amazonRegion || 'na'} · ${input.st.amazonMarketplaceId || '默认站点'}` : '缺 LWA / AWS 凭据',
+      tokenLabel: input.configured.amzOk ? `${input.st.amazonRegion || process.env.AMAZON_REGION || 'na'} · ${input.st.amazonMarketplaceId || process.env.AMAZON_MARKETPLACE_ID || '默认站点'}` : '缺 LWA / AWS 凭据',
       dataCount: amazon.total,
       pendingCount: amazon.pending,
       lastSeenAt: amazon.lastSeenAt,
@@ -670,7 +778,7 @@ function buildChannelHealthRows(input: {
       mode: `${facebook.accountCount} 个 Page/账号 · Graph OAuth`,
       configured: input.configured.fbOk || facebook.accountCount > 0,
       tokenExpired: facebook.expired,
-      tokenLabel: facebook.accountCount > 0 ? `${facebook.accountCount} 个账号已授权` : input.configured.fbOk ? 'App 凭据已配置' : '未配置 App 凭据',
+      tokenLabel: facebookTokenLabel,
       dataCount: facebook.dataCount + facebookInbox.total,
       pendingCount: facebookInbox.pending,
       lastSeenAt: maxDate(facebook.lastSeenAt, facebookInbox.lastSeenAt),
@@ -687,7 +795,7 @@ function buildChannelHealthRows(input: {
       mode: `${instagram.accountCount} 个账号 · Meta Webhook`,
       configured: input.configured.fbOk || instagram.accountCount > 0,
       tokenExpired: instagram.expired,
-      tokenLabel: instagram.accountCount > 0 ? `${instagram.accountCount} 个账号已授权` : input.configured.fbOk ? 'Meta App 凭据已配置' : '未配置 Meta App',
+      tokenLabel: instagram.accountCount > 0 ? `${instagram.accountCount} 个账号已授权` : input.configured.fbOk ? facebookTokenLabel.replace('App', 'Meta App') : input.runtimeConfig.facebookAppIdOnly ? '已配置 Meta App ID,缺 App Secret' : '未配置 Meta App',
       dataCount: instagram.dataCount + instagramInbox.total,
       pendingCount: instagramInbox.pending,
       lastSeenAt: maxDate(instagram.lastSeenAt, instagramInbox.lastSeenAt),
@@ -704,7 +812,7 @@ function buildChannelHealthRows(input: {
       mode: `${linkedin.accountCount} 个账号 · Lead Gen Forms`,
       configured: input.configured.liOk || linkedin.accountCount > 0,
       tokenExpired: linkedin.expired,
-      tokenLabel: linkedin.accountCount > 0 ? `${linkedin.accountCount} 个账号已授权` : input.configured.liOk ? 'Client 已配置' : '未配置 Client',
+      tokenLabel: linkedInTokenLabel,
       dataCount: linkedin.dataCount + linkedinInbox.total,
       pendingCount: linkedinInbox.pending,
       lastSeenAt: maxDate(linkedin.lastSeenAt, linkedinInbox.lastSeenAt),
@@ -721,7 +829,7 @@ function buildChannelHealthRows(input: {
       mode: 'API Key + 物流事件同步',
       configured: input.configured.aftershipOk,
       tokenExpired: false,
-      tokenLabel: input.configured.aftershipOk ? 'API Key 已配置' : '未配置 API Key',
+      tokenLabel: input.configured.aftershipOk ? (input.runtimeConfig.aftershipApi && !input.st.aftershipApiKey ? 'API Key 已配置(环境变量)' : 'API Key 已配置') : '未配置 API Key',
       dataCount: input.trackingEventCount,
       pendingCount: 0,
       lastSeenAt: input.latestTrackingAt,
@@ -875,6 +983,15 @@ function ChannelHealthMetric({ label, value, detail, tone }: { label: string; va
       <div className="text-xs font-bold opacity-70">{label}</div>
       <div className="mt-1 text-xl font-black">{value}</div>
       <div className="mt-1 text-[11px] font-bold opacity-70">{detail}</div>
+    </div>
+  );
+}
+
+function RuntimeConfigHint({ text, tone = 'emerald' }: { text: string; tone?: 'emerald' | 'amber' }) {
+  const color = tone === 'amber' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  return (
+    <div className={`mb-4 rounded-lg border px-3 py-2 text-xs font-semibold ${color}`}>
+      {text}
     </div>
   );
 }
