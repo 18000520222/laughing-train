@@ -25,6 +25,7 @@ function expired(at: Date | null | undefined): boolean {
 // ---------------- Alibaba ----------------
 // 刷新端点(新版国际站网关)：/auth/token/refresh
 const ALIBABA_GATEWAY = 'https://openapi-api.alibaba.com/rest';
+const ALIBABA_TOKEN_TIMEOUT_MS = 8000;
 
 export async function getAlibabaAccessToken(): Promise<string | null> {
   const s = await getSettings();
@@ -47,7 +48,7 @@ export async function getAlibabaAccessToken(): Promise<string | null> {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ ...params, sign }).toString(),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(ALIBABA_TOKEN_TIMEOUT_MS),
     });
     const data: any = await res.json();
     const accessToken = data.access_token || data.accessToken;

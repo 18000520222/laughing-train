@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const POLL_KEY = process.env.CHANNEL_POLL_KEY;
-const CHANNEL_POLL_TIMEOUT_MS = 45000;
+const CHANNEL_POLL_TIMEOUT_MS = 12000;
 
 function timeoutAfter(ms: number, channel: string): Promise<never> {
   return new Promise((_, reject) => {

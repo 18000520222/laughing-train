@@ -21,6 +21,7 @@ import type {
 
 // 国际站开放平台网关(syncapi 为同步调用网关)
 const ALIBABA_GATEWAY = 'https://openapi-api.alibaba.com/rest';
+const ALIBABA_API_TIMEOUT_MS = 8000;
 
 interface AlibabaCreds {
   appKey: string;
@@ -154,7 +155,7 @@ async function callAlibaba(
       method,
       headers: method === 'POST' ? { 'Content-Type': 'application/x-www-form-urlencoded' } : undefined,
       body: method === 'POST' ? params.toString() : undefined,
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(ALIBABA_API_TIMEOUT_MS),
     }
   );
   const data = await res.json();
