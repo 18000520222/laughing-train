@@ -270,18 +270,10 @@ export class AlibabaAdapter implements ChannelAdapter {
 
   /** 主动轮询新询盘/消息(由定时任务调用 → 交给 ingest pipeline) */
   async poll(): Promise<NormalizedMessage[]> {
-    const creds = await this.creds();
-    if (!creds) return [];
-
-    // 当前阿里开放平台未给此 App 暴露站内信/询盘列表 API；已授权且官方可用的
-    // 交易同步入口是 /alibaba/order/list。后续如阿里开通消息 API，只需替换这里。
-    const data = await callAlibaba(
-      '/alibaba/order/list',
-      { role: 'seller', start_page: '0', page_size: '50' },
-      creds,
-      'POST'
-    );
-    return this.parseInbound(data);
+    // 当前阿里开放平台未给此 App 暴露站内信/询盘列表 API。
+    // 不再用订单列表伪装消息轮询，避免外部接口拖死统一 channel-poll。
+    // 阿里入站先依赖 webhook；后续拿到官方消息 API 后再恢复主动 poll。
+    return [];
   }
 }
 
