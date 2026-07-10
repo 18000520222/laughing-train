@@ -25,10 +25,14 @@ export interface IngestResult {
   skippedReason?: string;
 }
 
+export interface IngestOptions {
+  enrich?: boolean;
+}
+
 /**
  * 处理一条标准化入站消息。幂等:相同 (channel, externalId) 不重复入库。
  */
-export async function ingestInbound(msg: NormalizedMessage): Promise<IngestResult> {
+export async function ingestInbound(msg: NormalizedMessage, options: IngestOptions = {}): Promise<IngestResult> {
   // 1. 去重
   if (msg.externalId) {
     const exists = await prisma.inboxMessage.findFirst({
@@ -41,9 +45,12 @@ export async function ingestInbound(msg: NormalizedMessage): Promise<IngestResul
   const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
   const autoReplyMode = (settings?.autoReplyMode || 'DRAFT').toUpperCase(); // OFF/DRAFT/AUTO
   const businessInfo = settings?.aiBusinessInfo || undefined;
+  const enrich = options.enrich !== false;
 
   // 2. 翻译为中文
-  const { translatedText, detectedLanguage } = await translateText(msg.text, 'zh', 'auto');
+  const { translatedText, detectedLanguage } = enrich
+    ? await translateText(msg.text, 'zh', 'auto')
+    : { translatedText: msg.text, detectedLanguage: undefined };
 
   // 3. 关联已知客户(邮件按 email 匹配/自动建客户；其他渠道按电话尾号匹配)
   const company = await matchOrCreateCompany(msg);
@@ -55,7 +62,7 @@ export async function ingestInbound(msg: NormalizedMessage): Promise<IngestResul
   let aiAutoSendable = false;
   let detected = detectedLanguage;
 
-  if (autoReplyMode !== 'OFF') {
+  if (enrich && autoReplyMode !== 'OFF') {
     const history = await loadHistory(msg);
     const ai = await generateAutoReply({
       message: msg.text,

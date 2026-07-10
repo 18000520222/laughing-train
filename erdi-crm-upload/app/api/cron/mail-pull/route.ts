@@ -59,6 +59,23 @@ const SPAM_SUBJECT = [
   '询盘消息', '新消息，请及时', '账户成功入账', '出金提醒',
 ];
 
+const IMAP_COMMAND_TIMEOUT_MS = 10000;
+const MAX_MESSAGES_PER_ACCOUNT = 10;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label}_timeout_${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * 多信号垃圾/营销邮件判定。命中任一即不进 CRM。
  * 返回命中原因(用于统计/排查),null = 正常客户邮件。
@@ -103,6 +120,7 @@ export async function GET(req: Request) {
   }
   const { searchParams } = new URL(req.url);
   const lookback = Math.min(parseInt(searchParams.get('n') || '20', 10), 50);
+  const enrich = searchParams.get('enrich') === '1';
 
   const accounts = await prisma.emailAccount.findMany({ where: { isActive: true } });
   if (accounts.length === 0) {
@@ -113,27 +131,37 @@ export async function GET(req: Request) {
 
   for (const acc of accounts) {
     const stat = { account: acc.email, fetched: 0, ingested: 0, duplicate: 0, noise: 0, noiseReasons: {} as Record<string, number>, errors: [] as string[] };
+    let client: ImapFlow | null = null;
 
     try {
-      const auth = await buildEmailImapAuth(acc);
-      const client = new ImapFlow({
+      const auth = await withTimeout(buildEmailImapAuth(acc), IMAP_COMMAND_TIMEOUT_MS, `${acc.email}:auth`);
+      client = new ImapFlow({
         host: acc.imapHost,
         port: acc.imapPort,
         secure: acc.isSecure,
         auth,
         logger: false,
+        connectionTimeout: IMAP_COMMAND_TIMEOUT_MS,
+        greetingTimeout: IMAP_COMMAND_TIMEOUT_MS,
+        socketTimeout: IMAP_COMMAND_TIMEOUT_MS,
       });
-      await client.connect();
-      const lock = await client.getMailboxLock('INBOX');
+      await withTimeout(client.connect(), IMAP_COMMAND_TIMEOUT_MS, `${acc.email}:connect`);
+      const lock = await withTimeout(client.getMailboxLock('INBOX'), IMAP_COMMAND_TIMEOUT_MS, `${acc.email}:lock`);
       try {
-        const status = await client.status('INBOX', { messages: true });
+        const status = await withTimeout(client.status('INBOX', { messages: true }), IMAP_COMMAND_TIMEOUT_MS, `${acc.email}:status`);
         const total = status.messages || 0;
         if (total > 0) {
           const start = Math.max(1, total - lookback + 1);
+          let processed = 0;
           for await (const m of client.fetch(`${start}:*`, { source: true, uid: true })) {
+            if (processed >= MAX_MESSAGES_PER_ACCOUNT) {
+              stat.errors.push(`limited_to_${MAX_MESSAGES_PER_ACCOUNT}_messages`);
+              break;
+            }
+            processed++;
             stat.fetched++;
             try {
-              const parsed: any = await simpleParser(m.source as any);
+              const parsed: any = await withTimeout(simpleParser(m.source as any), IMAP_COMMAND_TIMEOUT_MS, `${acc.email}:parse`);
               const messageId = parsed.messageId || `uid-${acc.id}-${m.uid}`;
 
               // 已入库(EmailMessage 或之前 ingest 过)→ 跳过
@@ -213,7 +241,7 @@ export async function GET(req: Request) {
                 text: subject ? `主题: ${subject}\n\n${cleanedBody}` : cleanedBody,
                 sentAt: parsed.date || undefined,
               };
-              const res = await ingestInbound(msg);
+              const res = await ingestInbound(msg, { enrich });
               if (res.created) stat.ingested++; else stat.duplicate++;
             } catch (e: any) {
               stat.errors.push(String(e?.message || e));
@@ -223,9 +251,10 @@ export async function GET(req: Request) {
       } finally {
         lock.release();
       }
-      await client.logout();
+      await withTimeout(client.logout(), IMAP_COMMAND_TIMEOUT_MS, `${acc.email}:logout`);
     } catch (e: any) {
       stat.errors.push('IMAP: ' + String(e?.message || e));
+      client?.close();
     }
     report.push(stat);
   }
