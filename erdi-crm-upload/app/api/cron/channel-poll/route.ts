@@ -16,6 +16,13 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const POLL_KEY = process.env.CHANNEL_POLL_KEY;
+const CHANNEL_POLL_TIMEOUT_MS = 45000;
+
+function timeoutAfter(ms: number, channel: string): Promise<never> {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(`${channel} poll timed out after ${ms}ms`)), ms);
+  });
+}
 
 export async function GET(req: NextRequest) {
   if (!isCronAuthorized(req, [POLL_KEY], ['erdi-channel-2026'])) {
@@ -27,7 +34,10 @@ export async function GET(req: NextRequest) {
   for (const adapter of pollableAdapters()) {
     const channelReport: any = { channel: adapter.channel, fetched: 0, ingested: 0, duplicate: 0, skipped: 0, errors: 0 };
     try {
-      const messages = await adapter.poll!();
+      const messages = await Promise.race([
+        adapter.poll!(),
+        timeoutAfter(CHANNEL_POLL_TIMEOUT_MS, adapter.channel),
+      ]);
       channelReport.fetched = messages.length;
 
       for (const msg of messages) {
