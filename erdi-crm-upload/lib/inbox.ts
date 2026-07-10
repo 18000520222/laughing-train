@@ -27,6 +27,8 @@ export interface IngestResult {
 
 export interface IngestOptions {
   enrich?: boolean;
+  automations?: boolean;
+  notifications?: boolean;
 }
 
 /**
@@ -46,6 +48,8 @@ export async function ingestInbound(msg: NormalizedMessage, options: IngestOptio
   const autoReplyMode = (settings?.autoReplyMode || 'DRAFT').toUpperCase(); // OFF/DRAFT/AUTO
   const businessInfo = settings?.aiBusinessInfo || undefined;
   const enrich = options.enrich !== false;
+  const automations = options.automations !== false;
+  const notifications = options.notifications !== false;
 
   // 2. 翻译为中文
   const { translatedText, detectedLanguage } = enrich
@@ -107,12 +111,16 @@ export async function ingestInbound(msg: NormalizedMessage, options: IngestOptio
   const autoSent = autoReplyMode === 'AUTO' && aiAutoSendable && !!aiReplyCustomer;
 
   // 7. 自动化流程执行。失败不阻断入库,避免渠道消息丢失。
-  await runAutomationsForInbox(saved.id).catch((err) => {
-    console.error('[inbox] automation runner failed:', err);
-  });
+  if (automations) {
+    await runAutomationsForInbox(saved.id).catch((err) => {
+      console.error('[inbox] automation runner failed:', err);
+    });
+  }
 
   // 8. 通知业务员
-  await notify(msg, translatedText, saved.id);
+  if (notifications) {
+    await notify(msg, translatedText, saved.id);
+  }
 
   return { created: true, inboxId: saved.id, autoSent };
 }

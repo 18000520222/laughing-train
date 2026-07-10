@@ -59,8 +59,9 @@ const SPAM_SUBJECT = [
   '询盘消息', '新消息，请及时', '账户成功入账', '出金提醒',
 ];
 
-const IMAP_COMMAND_TIMEOUT_MS = 10000;
-const MAX_MESSAGES_PER_ACCOUNT = 10;
+const ACCOUNT_TIMEOUT_MS = 18000;
+const IMAP_COMMAND_TIMEOUT_MS = 6000;
+const MAX_MESSAGES_PER_ACCOUNT = 5;
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -121,6 +122,7 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const lookback = Math.min(parseInt(searchParams.get('n') || '20', 10), 50);
   const enrich = searchParams.get('enrich') === '1';
+  const automations = searchParams.get('automations') === '1';
 
   const accounts = await prisma.emailAccount.findMany({ where: { isActive: true } });
   if (accounts.length === 0) {
@@ -132,8 +134,20 @@ export async function GET(req: Request) {
   for (const acc of accounts) {
     const stat = { account: acc.email, fetched: 0, ingested: 0, duplicate: 0, noise: 0, noiseReasons: {} as Record<string, number>, errors: [] as string[] };
     let client: ImapFlow | null = null;
+    const accountStartedAt = Date.now();
+    const accountTimer = setTimeout(() => {
+      stat.errors.push(`account_timeout_${ACCOUNT_TIMEOUT_MS}ms`);
+      client?.close();
+    }, ACCOUNT_TIMEOUT_MS);
 
     try {
+      const remainingBudget = () => Math.max(1000, Math.min(IMAP_COMMAND_TIMEOUT_MS, ACCOUNT_TIMEOUT_MS - (Date.now() - accountStartedAt)));
+      const assertBudget = (label: string) => {
+        if (Date.now() - accountStartedAt >= ACCOUNT_TIMEOUT_MS) {
+          throw new Error(`${label}_account_timeout_${ACCOUNT_TIMEOUT_MS}ms`);
+        }
+      };
+
       const auth = await withTimeout(buildEmailImapAuth(acc), IMAP_COMMAND_TIMEOUT_MS, `${acc.email}:auth`);
       client = new ImapFlow({
         host: acc.imapHost,
@@ -145,15 +159,16 @@ export async function GET(req: Request) {
         greetingTimeout: IMAP_COMMAND_TIMEOUT_MS,
         socketTimeout: IMAP_COMMAND_TIMEOUT_MS,
       });
-      await withTimeout(client.connect(), IMAP_COMMAND_TIMEOUT_MS, `${acc.email}:connect`);
-      const lock = await withTimeout(client.getMailboxLock('INBOX'), IMAP_COMMAND_TIMEOUT_MS, `${acc.email}:lock`);
+      await withTimeout(client.connect(), remainingBudget(), `${acc.email}:connect`);
+      const lock = await withTimeout(client.getMailboxLock('INBOX'), remainingBudget(), `${acc.email}:lock`);
       try {
-        const status = await withTimeout(client.status('INBOX', { messages: true }), IMAP_COMMAND_TIMEOUT_MS, `${acc.email}:status`);
+        const status = await withTimeout(client.status('INBOX', { messages: true }), remainingBudget(), `${acc.email}:status`);
         const total = status.messages || 0;
         if (total > 0) {
           const start = Math.max(1, total - lookback + 1);
           let processed = 0;
           for await (const m of client.fetch(`${start}:*`, { source: true, uid: true })) {
+            assertBudget(`${acc.email}:fetch`);
             if (processed >= MAX_MESSAGES_PER_ACCOUNT) {
               stat.errors.push(`limited_to_${MAX_MESSAGES_PER_ACCOUNT}_messages`);
               break;
@@ -241,7 +256,7 @@ export async function GET(req: Request) {
                 text: subject ? `主题: ${subject}\n\n${cleanedBody}` : cleanedBody,
                 sentAt: parsed.date || undefined,
               };
-              const res = await ingestInbound(msg, { enrich });
+              const res = await ingestInbound(msg, { enrich, automations });
               if (res.created) stat.ingested++; else stat.duplicate++;
             } catch (e: any) {
               stat.errors.push(String(e?.message || e));
@@ -251,10 +266,12 @@ export async function GET(req: Request) {
       } finally {
         lock.release();
       }
-      await withTimeout(client.logout(), IMAP_COMMAND_TIMEOUT_MS, `${acc.email}:logout`);
+      await withTimeout(client.logout(), remainingBudget(), `${acc.email}:logout`);
     } catch (e: any) {
       stat.errors.push('IMAP: ' + String(e?.message || e));
       client?.close();
+    } finally {
+      clearTimeout(accountTimer);
     }
     report.push(stat);
   }
