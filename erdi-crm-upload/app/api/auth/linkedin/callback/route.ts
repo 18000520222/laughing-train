@@ -7,17 +7,18 @@ import { canonicalOrigin } from '@/lib/site-url';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
+  const origin = canonicalOrigin();
   const code = searchParams.get('code');
-  if (!code) return NextResponse.redirect(new URL('/social?error=no_code', req.url));
+  if (!code) return NextResponse.redirect(new URL('/social?error=no_code', origin));
 
   const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
   const clientId = settings?.linkedinClientId || process.env.LINKEDIN_CLIENT_ID;
   const clientSecret = settings?.linkedinClientSecret || process.env.LINKEDIN_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
-    return NextResponse.redirect(new URL('/social?error=missing_app_config', req.url));
+    return NextResponse.redirect(new URL('/social?error=missing_app_config', origin));
   }
 
-  const redirectUri = `${canonicalOrigin()}/api/auth/linkedin/callback`;
+  const redirectUri = `${origin}/api/auth/linkedin/callback`;
 
   const tokenRes = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
     method: 'POST',
@@ -33,7 +34,7 @@ export async function GET(req: Request) {
   const tokenData = await tokenRes.json();
   const accessToken = tokenData.access_token;
   if (!accessToken) {
-    return NextResponse.redirect(new URL(`/social?error=${encodeURIComponent(JSON.stringify(tokenData))}`, req.url));
+    return NextResponse.redirect(new URL(`/social?error=${encodeURIComponent(JSON.stringify(tokenData))}`, origin));
   }
 
   // 获取用户基本信息 (OIDC)
@@ -56,5 +57,5 @@ export async function GET(req: Request) {
     },
   });
 
-  return NextResponse.redirect(new URL('/social?connected=linkedin', req.url));
+  return NextResponse.redirect(new URL('/social?connected=linkedin', origin));
 }

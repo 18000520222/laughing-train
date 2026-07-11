@@ -9,19 +9,20 @@ const LWA_TOKEN_URL = 'https://api.amazon.com/auth/o2/token';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
+  const origin = canonicalOrigin();
   // SP-API 授权回调参数：spapi_oauth_code、selling_partner_id
   const code = searchParams.get('spapi_oauth_code') || searchParams.get('code');
   const sellerId = searchParams.get('selling_partner_id');
-  if (!code) return NextResponse.redirect(new URL('/settings/channels?error=no_code', req.url));
+  if (!code) return NextResponse.redirect(new URL('/settings/channels?error=no_code', origin));
 
   const s = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
   const clientId = s?.amazonLwaClientId || process.env.AMAZON_LWA_CLIENT_ID;
   const clientSecret = s?.amazonLwaClientSecret || process.env.AMAZON_LWA_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
-    return NextResponse.redirect(new URL('/settings/channels?error=missing_amazon_lwa', req.url));
+    return NextResponse.redirect(new URL('/settings/channels?error=missing_amazon_lwa', origin));
   }
 
-  const redirectUri = `${canonicalOrigin()}/api/auth/amazon/callback`;
+  const redirectUri = `${origin}/api/auth/amazon/callback`;
 
   try {
     const res = await fetch(LWA_TOKEN_URL, {
@@ -39,7 +40,7 @@ export async function GET(req: Request) {
     const data: any = await res.json();
     if (!data.refresh_token) {
       return NextResponse.redirect(
-        new URL(`/settings/channels?error=${encodeURIComponent(JSON.stringify(data).slice(0, 200))}`, req.url)
+        new URL(`/settings/channels?error=${encodeURIComponent(JSON.stringify(data).slice(0, 200))}`, origin)
       );
     }
     await prisma.systemSettings.update({
@@ -49,10 +50,10 @@ export async function GET(req: Request) {
         ...(sellerId ? { amazonSellerId: sellerId } : {}),
       },
     });
-    return NextResponse.redirect(new URL('/settings/channels?connected=amazon', req.url));
+    return NextResponse.redirect(new URL('/settings/channels?connected=amazon', origin));
   } catch (e: any) {
     return NextResponse.redirect(
-      new URL(`/settings/channels?error=${encodeURIComponent(String(e?.message || e).slice(0, 200))}`, req.url)
+      new URL(`/settings/channels?error=${encodeURIComponent(String(e?.message || e).slice(0, 200))}`, origin)
     );
   }
 }

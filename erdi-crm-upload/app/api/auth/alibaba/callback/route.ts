@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { aliSign } from '@/lib/channels/oauth-tokens';
+import { canonicalOrigin } from '@/lib/site-url';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,14 +10,15 @@ const ALIBABA_GATEWAY = 'https://openapi-api.alibaba.com/rest';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
+  const origin = canonicalOrigin();
   const code = searchParams.get('code');
-  if (!code) return NextResponse.redirect(new URL('/settings/channels?error=no_code', req.url));
+  if (!code) return NextResponse.redirect(new URL('/settings/channels?error=no_code', origin));
 
   const s = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
   const appKey = s?.alibabaAppKey || process.env.ALIBABA_APP_KEY;
   const appSecret = s?.alibabaAppSecret || process.env.ALIBABA_APP_SECRET;
   if (!appKey || !appSecret) {
-    return NextResponse.redirect(new URL('/settings/channels?error=missing_alibaba_app', req.url));
+    return NextResponse.redirect(new URL('/settings/channels?error=missing_alibaba_app', origin));
   }
 
   try {
@@ -38,7 +40,7 @@ export async function GET(req: Request) {
     const accessToken = data.access_token || data.accessToken;
     if (!accessToken) {
       return NextResponse.redirect(
-        new URL(`/settings/channels?error=${encodeURIComponent(JSON.stringify(data).slice(0, 200))}`, req.url)
+        new URL(`/settings/channels?error=${encodeURIComponent(JSON.stringify(data).slice(0, 200))}`, origin)
       );
     }
     const expiresInSec = Number(data.expires_in || data.expire_time || 86400);
@@ -50,10 +52,10 @@ export async function GET(req: Request) {
         alibabaTokenExpiresAt: new Date(Date.now() + expiresInSec * 1000),
       },
     });
-    return NextResponse.redirect(new URL('/settings/channels?connected=alibaba', req.url));
+    return NextResponse.redirect(new URL('/settings/channels?connected=alibaba', origin));
   } catch (e: any) {
     return NextResponse.redirect(
-      new URL(`/settings/channels?error=${encodeURIComponent(String(e?.message || e).slice(0, 200))}`, req.url)
+      new URL(`/settings/channels?error=${encodeURIComponent(String(e?.message || e).slice(0, 200))}`, origin)
     );
   }
 }

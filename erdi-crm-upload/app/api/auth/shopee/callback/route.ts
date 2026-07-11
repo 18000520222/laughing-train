@@ -2,22 +2,24 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import crypto from 'crypto';
+import { canonicalOrigin } from '@/lib/site-url';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
+  const origin = canonicalOrigin();
   const code = searchParams.get('code');
   const shopId = searchParams.get('shop_id');
   if (!code || !shopId) {
-    return NextResponse.redirect(new URL('/settings/channels?error=no_code_or_shop', req.url));
+    return NextResponse.redirect(new URL('/settings/channels?error=no_code_or_shop', origin));
   }
 
   const s = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
   const partnerId = s?.shopeePartnerId || process.env.SHOPEE_PARTNER_ID;
   const partnerKey = s?.shopeePartnerKey || process.env.SHOPEE_PARTNER_KEY;
   if (!partnerId || !partnerKey) {
-    return NextResponse.redirect(new URL('/settings/channels?error=missing_shopee_partner', req.url));
+    return NextResponse.redirect(new URL('/settings/channels?error=missing_shopee_partner', origin));
   }
   const base = s?.shopeeRegion || 'https://partner.shopeemobile.com';
 
@@ -36,7 +38,7 @@ export async function GET(req: Request) {
     const data: any = await res.json();
     if (!data.access_token) {
       return NextResponse.redirect(
-        new URL(`/settings/channels?error=${encodeURIComponent(JSON.stringify(data).slice(0, 200))}`, req.url)
+        new URL(`/settings/channels?error=${encodeURIComponent(JSON.stringify(data).slice(0, 200))}`, origin)
       );
     }
     const expireSec = Number(data.expire_in || 14400);
@@ -49,10 +51,10 @@ export async function GET(req: Request) {
         shopeeTokenExpiresAt: new Date(Date.now() + expireSec * 1000),
       },
     });
-    return NextResponse.redirect(new URL('/settings/channels?connected=shopee', req.url));
+    return NextResponse.redirect(new URL('/settings/channels?connected=shopee', origin));
   } catch (e: any) {
     return NextResponse.redirect(
-      new URL(`/settings/channels?error=${encodeURIComponent(String(e?.message || e).slice(0, 200))}`, req.url)
+      new URL(`/settings/channels?error=${encodeURIComponent(String(e?.message || e).slice(0, 200))}`, origin)
     );
   }
 }
