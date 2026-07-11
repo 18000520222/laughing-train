@@ -13,6 +13,10 @@ export interface SessionPayload {
 const SESSION_COOKIE = 'erdi_session';
 const MAX_AGE_SECONDS = 60 * 60 * 12; // 12h
 
+export function authCookieDomain(): string | undefined {
+  return process.env.AUTH_COOKIE_DOMAIN?.trim() || undefined;
+}
+
 function getSecret(): Uint8Array {
   const secret = process.env.AUTH_SECRET;
   if (!secret || secret.length < 16) {
@@ -42,6 +46,7 @@ export async function createSession(payload: SessionPayload): Promise<void> {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
+    domain: authCookieDomain(),
     maxAge: MAX_AGE_SECONDS,
   });
 }

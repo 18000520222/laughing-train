@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { createSession, normalizeRole } from '@/lib/auth';
+import { authCookieDomain, createSession, normalizeRole } from '@/lib/auth';
 import bcrypt from 'bcryptjs';
 
 
@@ -54,10 +54,11 @@ export default async function LoginPage(props: any) {
     // auth_role 写数据库原始值，保持与现有各页面角色判断的向后兼容
     // (历史页面对 sales/SALES、finance/FINANCE 大小写判断不一致，不可改写其值)。
     const rawRole = (user.role as string) || 'SALES';
-    cookies().set('auth_userId', user.id, { path: '/' });
-    cookies().set('auth_role', rawRole, { path: '/' });
-    cookies().set('auth_email', user.email, { path: '/' });
-    cookies().set('auth_name', user.name || '未知', { path: '/' });
+    const cookieOptions = { path: '/', domain: authCookieDomain() };
+    cookies().set('auth_userId', user.id, cookieOptions);
+    cookies().set('auth_role', rawRole, cookieOptions);
+    cookies().set('auth_email', user.email, cookieOptions);
+    cookies().set('auth_name', user.name || '未知', cookieOptions);
 
     // 财务去财务室，业务去看板
     if (rawRole.toUpperCase() === 'FINANCE') {
