@@ -31,7 +31,11 @@ export async function GET(req: Request) {
   }
 
   // 2. 拉取 user 名下所有 Page
-  const pagesRes = await fetch(`https://graph.facebook.com/v18.0/me/accounts?access_token=${userToken}`);
+  const pagesParams = new URLSearchParams({
+    fields: 'id,name,access_token,instagram_business_account{id,name,username}',
+    access_token: userToken,
+  });
+  const pagesRes = await fetch(`https://graph.facebook.com/v18.0/me/accounts?${pagesParams.toString()}`);
   const pagesData = await pagesRes.json();
 
   for (const page of pagesData.data || []) {
@@ -45,6 +49,20 @@ export async function GET(req: Request) {
         accessToken: page.access_token,
       },
     });
+
+    const instagram = page.instagram_business_account;
+    if (instagram?.id) {
+      await prisma.socialAccount.upsert({
+        where: { platform_externalId: { platform: 'INSTAGRAM', externalId: instagram.id } },
+        update: { name: instagram.username || instagram.name || instagram.id, accessToken: page.access_token },
+        create: {
+          platform: 'INSTAGRAM',
+          externalId: instagram.id,
+          name: instagram.username || instagram.name || instagram.id,
+          accessToken: page.access_token,
+        },
+      });
+    }
 
     // 3. 订阅 Page 的 messages 事件
     try {
