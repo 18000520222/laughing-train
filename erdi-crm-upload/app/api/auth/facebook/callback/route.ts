@@ -9,24 +9,25 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
+  const origin = canonicalOrigin();
   const code = searchParams.get('code');
-  if (!code) return NextResponse.redirect(new URL('/social?error=no_code', req.url));
+  if (!code) return NextResponse.redirect(new URL('/social?error=no_code', origin));
 
   const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
   const appId = settings?.fbAppId || process.env.FB_APP_ID;
   const appSecret = settings?.fbAppSecret || process.env.FB_APP_SECRET;
   if (!appId || !appSecret) {
-    return NextResponse.redirect(new URL('/social?error=missing_app_config', req.url));
+    return NextResponse.redirect(new URL('/social?error=missing_app_config', origin));
   }
 
-  const redirectUri = `${canonicalOrigin()}/api/auth/facebook/callback`;
+  const redirectUri = `${origin}/api/auth/facebook/callback`;
 
   // 1. 用 code 换 user token
   const tokenRes = await fetch(`https://graph.facebook.com/v18.0/oauth/access_token?client_id=${appId}&client_secret=${appSecret}&redirect_uri=${encodeURIComponent(redirectUri)}&code=${code}`);
   const tokenData = await tokenRes.json();
   const userToken = tokenData.access_token;
   if (!userToken) {
-    return NextResponse.redirect(new URL(`/social?error=${encodeURIComponent(JSON.stringify(tokenData))}`, req.url));
+    return NextResponse.redirect(new URL(`/social?error=${encodeURIComponent(JSON.stringify(tokenData))}`, origin));
   }
 
   // 2. 拉取 user 名下所有 Page
@@ -55,5 +56,5 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.redirect(new URL('/social?connected=facebook', req.url));
+  return NextResponse.redirect(new URL('/social?connected=facebook', origin));
 }
