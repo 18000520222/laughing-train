@@ -15,16 +15,29 @@ export async function GET(req: Request) {
   }
 
   const redirectUri = `${canonicalOrigin()}/api/auth/facebook/callback`;
-  const scope = [
-    'public_profile',
-    'email',
-    'pages_show_list',
-    'pages_messaging',
-    'pages_manage_metadata',
-    'pages_read_engagement',
-  ].join(',');
-
   const state = Math.random().toString(36).slice(2);
-  const url = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${state}&response_type=code`;
+  const params = new URLSearchParams({
+    client_id: appId,
+    redirect_uri: redirectUri,
+    state,
+    response_type: 'code',
+  });
+
+  const configId = process.env.FB_CONFIG_ID?.trim();
+  if (configId) {
+    // Facebook Login for Business defines permissions in the Meta configuration.
+    params.set('config_id', configId);
+  } else {
+    params.set('scope', [
+      'public_profile',
+      'email',
+      'pages_show_list',
+      'pages_messaging',
+      'pages_manage_metadata',
+      'pages_read_engagement',
+    ].join(','));
+  }
+
+  const url = `https://www.facebook.com/v18.0/dialog/oauth?${params.toString()}`;
   return NextResponse.redirect(url);
 }
