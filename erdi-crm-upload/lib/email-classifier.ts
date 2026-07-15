@@ -215,7 +215,7 @@ export function classifyEmail(input: { from?: string | null; subject?: string | 
   }
 
   const systemSender = automatedServiceSender(from, domain);
-  if (systemSender && !hasEmbeddedCustomerLead(text) && !hasStrongCustomerTransaction(text)) {
+  if (systemSender && !hasPlatformCustomerLead(text) && !hasStrongCustomerTransaction(text)) {
     return result('PLATFORM_ALERT', `automated-service:${systemSender}`, 94, false, false, ['平台通知', '自动归档']);
   }
 
@@ -372,10 +372,8 @@ function hasDirectBusinessIntent(text: string) {
   ].some((k) => text.includes(k));
 }
 
-function hasEmbeddedCustomerLead(text: string) {
-  const platformLead = /new (?:quote|inquiry|enquiry)|received a new quote|新询盘|新的报价请求/i.test(text);
-  const embeddedCustomer = /customer\s*(?:e-?mail|邮箱)\s*[:：]\s*[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(text);
-  return platformLead && embeddedCustomer;
+function hasPlatformCustomerLead(text: string) {
+  return /new (?:quote|inquiry|enquiry)|received a new quote|新询盘|新的报价请求/i.test(text);
 }
 
 function hasStrongCustomerTransaction(text: string) {
