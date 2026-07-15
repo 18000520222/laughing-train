@@ -21,6 +21,7 @@ const PUBLIC_PREFIXES = [
   '/api/salesmartly/webhook',
   '/api/chatwoot/webhook',
   '/api/tracking/webhook',
+  '/api/tracking/sync', // AfterShip poller (session or CRON_SECRET protected)
   '/api/cron/',        // 定时任务(自带 ?key= / Bearer 校验)
   '/api/automation/bootstrap', // 自动化蓝图运维补齐(自带 ?key= / Bearer 校验)
   '/api/automation/runs/replay', // 自动化运行重放(自带 ?key= / Bearer 校验)

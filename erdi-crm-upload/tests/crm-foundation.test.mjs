@@ -92,10 +92,12 @@ test('system service notifications cannot enter the sales lead pipeline', () => 
 
 test('AfterShip tracking uses the current versioned API and never counts HTTP errors as success', () => {
   const route = read('app/api/tracking/sync/route.ts');
+  const middleware = read('middleware.ts');
   assert.match(route, /tracking\/2026-07/);
   assert.match(route, /'as-api-key'/);
   assert.match(route, /if \(!response\.ok\)/);
   assert.match(route, /failedBatches/);
   assert.doesNotMatch(route, /api\.aftership\.com\/v4/);
   assert.doesNotMatch(route, /'aftership-api-key'/);
+  assert.match(middleware, /\/api\/tracking\/sync/);
 });
