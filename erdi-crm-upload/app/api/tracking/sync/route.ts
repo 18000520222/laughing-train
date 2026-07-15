@@ -1,5 +1,3 @@
-// app/api/tracking/sync/route.ts
-// 每日定时同步全部活跃发货的物流信息 (AfterShip)
 import { NextResponse } from 'next/server';
 import { timingSafeEqual } from 'crypto';
 import { headers } from 'next/headers';
@@ -8,9 +6,12 @@ import { getSession } from '@/lib/auth';
 import { can } from '@/lib/permissions';
 import { writeAuditLog } from '@/lib/audit';
 
+const DEFAULT_AFTERSHIP_BASE = 'https://api.aftership.com/tracking/2026-07';
+
 export async function GET() {
   return handle();
 }
+
 export async function POST() {
   return handle();
 }
@@ -43,85 +44,140 @@ async function handle() {
     where: { status: { not: 'DELIVERED' }, trackingNumber: { not: null } },
     take: 100,
   });
+  const baseUrl = (process.env.AFTERSHIP_API_BASE_URL || DEFAULT_AFTERSHIP_BASE).replace(/\/$/, '');
+  const trackingByNumber = new Map<string, AfterShipTracking>();
+  const errors: Array<{ batch: number; status: number; message: string }> = [];
+  const trackingNumbers = shipments.map((shipment) => shipment.trackingNumber).filter((value): value is string => Boolean(value));
+  const batches = trackingNumbers.length ? chunk(trackingNumbers, 50) : [[]];
 
-  let updated = 0;
-  for (const s of shipments) {
-    if (!s.trackingNumber) continue;
+  for (let index = 0; index < batches.length; index++) {
+    const url = new URL(`${baseUrl}/trackings`);
+    url.searchParams.set('limit', '200');
+    if (batches[index].length) url.searchParams.set('tracking_numbers', batches[index].join(','));
     try {
-      const carrierSlug = mapCarrier(s.carrier);
-      const res = await fetch(`https://api.aftership.com/v4/trackings/${carrierSlug}/${s.trackingNumber}`, {
-        headers: { 'aftership-api-key': apiKey },
+      const response = await fetch(url, {
+        headers: { 'as-api-key': apiKey, accept: 'application/json' },
+        signal: AbortSignal.timeout(15_000),
       });
-      const data = await res.json();
-      const checkpoints = data?.data?.tracking?.checkpoints || [];
-      const tag = data?.data?.tracking?.tag; // Pending / InTransit / Delivered ...
-
-      for (const cp of checkpoints) {
-        await prisma.trackingEvent.upsert({
-          where: {
-            id: `${s.id}-${cp.created_at}`.slice(0, 60),
-          },
-          update: {},
-          create: {
-            id: `${s.id}-${cp.created_at}`.slice(0, 60),
-            shipmentId: s.id,
-            status: cp.tag || cp.subtag || 'INFO',
-            location: cp.location || cp.city || null,
-            description: cp.message || '',
-            occurredAt: cp.checkpoint_time ? new Date(cp.checkpoint_time) : new Date(),
-          },
-        });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        errors.push({ batch: index + 1, status: response.status, message: safeAfterShipError(payload, response.statusText) });
+        continue;
       }
-
-      if (tag === 'Delivered' && s.status !== 'DELIVERED') {
-        await prisma.shipment.update({ where: { id: s.id }, data: { status: 'DELIVERED' } });
-        await notifyShipmentUpdate(s.id, '已签收');
+      for (const tracking of payload?.data?.trackings || []) {
+        if (tracking?.tracking_number) trackingByNumber.set(String(tracking.tracking_number), tracking);
       }
-      updated++;
-    } catch (e) {
-      console.error('[tracking-sync]', s.id, e);
+    } catch (error) {
+      errors.push({ batch: index + 1, status: 0, message: error instanceof Error ? error.message.slice(0, 300) : 'AfterShip request failed' });
     }
   }
 
+  let updated = 0;
+  let missing = 0;
+  if (errors.length === 0) {
+    for (const shipment of shipments) {
+      if (!shipment.trackingNumber) continue;
+      const tracking = trackingByNumber.get(shipment.trackingNumber);
+      if (!tracking) {
+        missing++;
+        continue;
+      }
+      for (const checkpoint of tracking.checkpoints || []) {
+        const occurredAt = parseCheckpointDate(checkpoint.checkpoint_time);
+        const checkpointKey = checkpoint.id || checkpoint.checkpoint_time || `${checkpoint.tag || checkpoint.subtag || 'INFO'}-${checkpoint.message || ''}`;
+        await prisma.trackingEvent.upsert({
+          where: { id: `${shipment.id}-${checkpointKey}`.slice(0, 60) },
+          update: {
+            status: checkpoint.tag || checkpoint.subtag || 'INFO',
+            location: checkpoint.location || checkpoint.city || null,
+            description: checkpoint.message || '',
+            occurredAt,
+          },
+          create: {
+            id: `${shipment.id}-${checkpointKey}`.slice(0, 60),
+            shipmentId: shipment.id,
+            status: checkpoint.tag || checkpoint.subtag || 'INFO',
+            location: checkpoint.location || checkpoint.city || null,
+            description: checkpoint.message || '',
+            occurredAt,
+          },
+        });
+      }
+      if (tracking.tag === 'Delivered' && shipment.status !== 'DELIVERED') {
+        await prisma.shipment.update({ where: { id: shipment.id }, data: { status: 'DELIVERED' } });
+        await notifyShipmentUpdate(shipment.id, '已签收');
+      }
+      updated++;
+    }
+  }
+
+  const failed = errors.length > 0;
+  await prisma.systemSettings.update({
+    where: { id: 'default' },
+    data: failed
+      ? { aftershipLastError: errors.map((item) => `HTTP ${item.status || 'NETWORK'}: ${item.message}`).join('\n').slice(0, 2000) }
+      : { aftershipLastSuccessAt: new Date(), aftershipLastError: null },
+  });
   await writeAuditLog(session, {
     action: 'shipment.tracking_sync',
     entityType: 'Shipment',
-    summary: `同步 ${updated} 个活跃运单`,
-    metadata: { updated, source: cronAuthorized ? 'CRON' : 'MANUAL' },
+    summary: failed ? `AfterShip 同步失败 ${errors.length} 批` : `同步 ${updated} 个活跃运单，AfterShip 未匹配 ${missing} 个`,
+    metadata: { updated, missing, failedBatches: errors.length, source: cronAuthorized ? 'CRON' : 'MANUAL' },
   });
 
-  return NextResponse.json({ ok: true, updated });
+  return NextResponse.json(
+    { ok: !failed, updated, missing, failedBatches: errors.length, errors },
+    { status: failed ? 502 : 200 },
+  );
 }
 
-function mapCarrier(c: string): string {
-  const m: Record<string, string> = {
-    DHL: 'dhl',
-    UPS: 'ups',
-    FEDEX: 'fedex',
-    EMS: 'china-ems',
-    SF: 'sf-express',
-  };
-  return m[c.toUpperCase()] || c.toLowerCase();
+type AfterShipTracking = {
+  tracking_number?: string;
+  tag?: string;
+  checkpoints?: Array<{
+    id?: string;
+    tag?: string;
+    subtag?: string;
+    location?: string;
+    city?: string;
+    message?: string;
+    checkpoint_time?: string;
+  }>;
+};
+
+function chunk<T>(items: T[], size: number) {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size));
+  return result;
+}
+
+function safeAfterShipError(payload: any, fallback: string) {
+  return String(payload?.meta?.message || payload?.message || fallback || 'AfterShip request failed').slice(0, 300);
+}
+
+function parseCheckpointDate(value?: string) {
+  if (!value) return new Date();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 }
 
 async function notifyShipmentUpdate(shipmentId: string, status: string) {
-  const ship = await prisma.shipment.findUnique({
+  const shipment = await prisma.shipment.findUnique({
     where: { id: shipmentId },
     include: { opportunity: { include: { owner: true } } },
   });
-  if (!ship) return;
+  if (!shipment) return;
   const targets = await prisma.user.findMany({
     where: { role: { in: ['SUPER_ADMIN', 'OPERATIONS', 'DOCUMENT'] }, isActive: true },
   });
-  const userIds = new Set([ship.opportunity?.owner?.id, ...targets.map(t => t.id)].filter(Boolean) as string[]);
-
-  for (const uid of Array.from(userIds)) {
+  const userIds = new Set([shipment.opportunity?.owner?.id, ...targets.map((target) => target.id)].filter(Boolean) as string[]);
+  for (const userId of Array.from(userIds)) {
     await prisma.notification.create({
       data: {
-        userId: uid,
+        userId,
         type: 'SHIPMENT',
         title: `运单状态更新: ${status}`,
-        body: `${ship.carrier} ${ship.trackingNumber}`,
+        body: `${shipment.carrier} ${shipment.trackingNumber}`,
         link: '/shipments',
       },
     });

@@ -31,6 +31,8 @@ export default async function ReadinessPage() {
   const gmailAuthorized = emailAccounts.some((account) => configured(account.oauthRefreshToken) || configured(account.password));
   const facebookAuthorized = socialAccounts.some((account) => ['FACEBOOK', 'INSTAGRAM'].includes(account.platform) && (!account.expiresAt || account.expiresAt > now));
   const linkedinAuthorized = socialAccounts.some((account) => account.platform === 'LINKEDIN' && (!account.expiresAt || account.expiresAt > now));
+  const aftershipConfigured = configured(settings?.aftershipApiKey || process.env.AFTERSHIP_API_KEY);
+  const aftershipReady = aftershipConfigured && Boolean(settings?.aftershipLastSuccessAt) && !configured(settings?.aftershipLastError);
   const checks: Check[] = [
     check('核心会话安全', configured(process.env.AUTH_SECRET, 32), 'CONFIG_REQUIRED', 'AUTH_SECRET 已达到 32 位且会话会实时校验账号状态', '配置服务器环境变量', '/users'),
     check('Gmail 自动同步', gmailAuthorized, configured(settings?.googleClientId || process.env.GOOGLE_CLIENT_ID) ? 'AUTH_REQUIRED' : 'CONFIG_REQUIRED', gmailAuthorized ? `${emailAccounts.length} 个启用邮箱已授权` : '需要 Google OAuth 授权或邮箱应用密码', '连接 Gmail', '/settings/channels'),
@@ -42,7 +44,14 @@ export default async function ReadinessPage() {
     check('WhatsApp', configured(settings?.whatsapp360ApiKey) || configured(settings?.whatsappToken), 'AUTH_REQUIRED', '360dialog 或 Meta Cloud API', '连接 WhatsApp', '/settings/channels'),
     check('Facebook / Instagram', facebookAuthorized, configured(settings?.fbAppId) && configured(settings?.fbAppSecret) ? 'AUTH_REQUIRED' : 'CONFIG_REQUIRED', 'Meta Page / Instagram Business', '授权 Meta', '/settings/channels'),
     check('LinkedIn', linkedinAuthorized, configured(settings?.linkedinClientId) && configured(settings?.linkedinClientSecret) ? 'AUTH_REQUIRED' : 'CONFIG_REQUIRED', '账号与 Lead Gen Forms', '授权 LinkedIn', '/settings/channels'),
-    check('AfterShip', configured(settings?.aftershipApiKey || process.env.AFTERSHIP_API_KEY), 'AUTH_REQUIRED', '物流查询与状态回传', '配置 AfterShip API', '/settings/channels'),
+    check(
+      'AfterShip',
+      aftershipReady,
+      aftershipConfigured ? 'AUTH_REQUIRED' : 'CONFIG_REQUIRED',
+      aftershipReady ? `API 最近验证成功: ${settings?.aftershipLastSuccessAt?.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}` : aftershipConfigured ? 'API Key 已配置，但最近同步未通过；检查套餐权限和 Key Scope' : '尚未配置 API Key',
+      '配置/验证 AfterShip',
+      '/settings/channels',
+    ),
     check('网站询盘 Webhook', configured(process.env.WEBHOOK_TOKEN, 32), 'CONFIG_REQUIRED', '网站表单自动进入统一收件箱和询盘客户', '配置 Webhook Token', '/readiness'),
     check('SHOPLINE 订单', configured(process.env.SHOPLINE_APP_SECRET, 16), 'CONFIG_REQUIRED', '已付款订单签名校验后自动建成交客户、订单明细和发货草稿', '配置 SHOPLINE Secret', '/readiness'),
     check('渠道 Webhook 安全', configured(process.env.CHANNEL_WEBHOOK_TOKEN, 32) || (configured(process.env.ALIBABA_WEBHOOK_TOKEN, 32) && configured(process.env.SHOPEE_WEBHOOK_TOKEN, 32) && configured(process.env.AFTERSHIP_WEBHOOK_TOKEN, 32)), 'CONFIG_REQUIRED', 'Alibaba、Shopee、AfterShip 回调必须使用独立或统一长密钥', '配置 Webhook 密钥', '/readiness'),

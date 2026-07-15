@@ -76,6 +76,9 @@ ALTER TABLE "Shipment" ADD COLUMN IF NOT EXISTS "originCountry" TEXT;
 ALTER TABLE "Shipment" ADD COLUMN IF NOT EXISTS "shippingAddress" JSONB;
 ALTER TABLE "Shipment" ADD COLUMN IF NOT EXISTS "notes" TEXT;
 
+ALTER TABLE "SystemSettings" ADD COLUMN IF NOT EXISTS "aftershipLastSuccessAt" TIMESTAMP(3);
+ALTER TABLE "SystemSettings" ADD COLUMN IF NOT EXISTS "aftershipLastError" TEXT;
+
 ALTER TABLE "PurchaseOrder" ADD COLUMN IF NOT EXISTS "opportunityId" TEXT;
 ALTER TABLE "PurchaseOrder" ADD COLUMN IF NOT EXISTS "paymentTerms" TEXT;
 ALTER TABLE "PurchaseOrder" ADD COLUMN IF NOT EXISTS "expectedAt" TIMESTAMP(3);

@@ -147,7 +147,9 @@ model SystemSettings {
   shopeeRegion         String?   @default("https://partner.shopeemobile.com") // API base
 
   // AfterShip
-  aftershipApiKey String?
+  aftershipApiKey        String?
+  aftershipLastSuccessAt DateTime?
+  aftershipLastError     String?   @db.Text
 
   // SaleSmartly unified chat platform
   salesmartlyWebhookKey String?
