@@ -168,6 +168,8 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
         take: 12,
         include: { changedBy: { select: { name: true, email: true } } },
       },
+      lineItems: { orderBy: { createdAt: 'asc' }, include: { product: true } },
+      payments: { orderBy: { createdAt: 'desc' }, include: { bankAccount: true } },
     },
   });
 
@@ -254,6 +256,39 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
                   )}
                 </div>
               </div>
+
+              {(opp.lineItems.length > 0 || opp.payments.length > 0) && (
+                <div className="mb-4 rounded-xl border border-emerald-100 bg-emerald-50/40 p-4">
+                  <h3 className="text-sm font-black text-gray-800">结构化订单与付款</h3>
+                  {opp.lineItems.length > 0 && (
+                    <div className="mt-3 overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead><tr className="text-left text-gray-500"><th className="pb-2">产品</th><th className="pb-2 text-right">单价</th><th className="pb-2 text-right">数量</th><th className="pb-2 text-right">小计</th></tr></thead>
+                        <tbody>
+                          {opp.lineItems.map((item) => (
+                            <tr key={item.id} className="border-t border-emerald-100">
+                              <td className="py-2 font-semibold text-gray-800">{item.productName}{item.sku ? ` · ${item.sku}` : ''}</td>
+                              <td className="py-2 text-right">{item.currency} {(item.unitPrice || 0).toLocaleString()}</td>
+                              <td className="py-2 text-right">{item.quantity}</td>
+                              <td className="py-2 text-right font-bold">{item.currency} {(item.totalAmount || 0).toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <div className="mt-3 space-y-2">
+                    {opp.payments.map((payment) => (
+                      <div key={payment.id} className="rounded-lg border border-emerald-100 bg-white px-3 py-2 text-xs text-gray-700">
+                        <span className="font-black text-emerald-700">{payment.status === 'CONFIRMED' ? '已确认收款' : payment.status}</span>
+                        <span className="ml-2">{payment.currency} {(payment.amount || 0).toLocaleString()}</span>
+                        <span className="ml-2">{payment.method || '方式未注明'} · {payment.bankAccount?.label || '账户未指定'}{payment.bankAccount?.accountNo ? ` · ****${payment.bankAccount.accountNo.replace(/\s+/g, '').slice(-4)}` : ''}</span>
+                      </div>
+                    ))}
+                    {opp.payments.length === 0 && <div className="text-xs font-semibold text-amber-600">尚未登记付款</div>}
+                  </div>
+                </div>
+              )}
               
               {/* 正文与智能翻译阅读区 */}
               {translatedDesc ? (

@@ -17,6 +17,7 @@ import { translateText } from '@/lib/translate';
 import { generateAutoReply } from '@/lib/autoreply';
 import { runAutomationsForInbox } from '@/lib/automation-runner';
 import type { NormalizedMessage, ChannelType } from '@/lib/channels/types';
+import { ensureCustomerCode } from '@/lib/customer-code';
 
 export interface IngestResult {
   created: boolean;
@@ -136,8 +137,13 @@ async function matchOrCreateCompany(msg: NormalizedMessage) {
   if (msg.channel === 'EMAIL' && msg.senderId.includes('@')) {
     const email = msg.senderId.toLowerCase().trim();
 
-    const contact = await prisma.contact.findUnique({
-      where: { email },
+    const contact = await prisma.contact.findFirst({
+      where: {
+        OR: [
+          { emailNormalized: email },
+          { email: { equals: email, mode: 'insensitive' } },
+        ],
+      },
       include: { company: true },
     });
     if (contact?.company) return contact.company;
@@ -147,7 +153,18 @@ async function matchOrCreateCompany(msg: NormalizedMessage) {
     const { firstName, lastName } = splitName(msg.senderName, email);
     const companyName = guessCompanyName(domain, msg.senderName);
 
-    let company = await prisma.company.findFirst({ where: { name: companyName } });
+    const isFreeMail = FREE_MAIL_DOMAINS.includes(domain);
+    let company = await prisma.company.findFirst({
+      where: isFreeMail
+        ? { name: { equals: companyName, mode: 'insensitive' } }
+        : {
+            OR: [
+              { domainNormalized: domain },
+              { website: { contains: domain, mode: 'insensitive' } },
+              { name: { equals: companyName, mode: 'insensitive' } },
+            ],
+          },
+    });
     if (!company) {
       const admin = await prisma.user.findFirst({
         where: { role: 'SUPER_ADMIN', isActive: true },
@@ -155,7 +172,9 @@ async function matchOrCreateCompany(msg: NormalizedMessage) {
       });
       company = await prisma.company.create({
         data: {
+          customerCode: await ensureCustomerCode(),
           name: companyName,
+          domainNormalized: isFreeMail ? null : domain,
           source: 'EMAIL',
           type: 'INQUIRY',
           isPublic: false,
@@ -169,7 +188,7 @@ async function matchOrCreateCompany(msg: NormalizedMessage) {
       await prisma.contact.update({ where: { id: contact.id }, data: { companyId: company.id } });
     } else if (!contact) {
       await prisma.contact.create({
-        data: { firstName, lastName: lastName ?? undefined, email, companyId: company.id },
+        data: { firstName, lastName: lastName ?? undefined, email, emailNormalized: email, companyId: company.id },
       });
     }
     return company;
@@ -201,6 +220,7 @@ async function matchOrCreateCompany(msg: NormalizedMessage) {
   });
   const company = await prisma.company.create({
     data: {
+      customerCode: await ensureCustomerCode(),
       name: displayName,
       source: channelSource,
       type: 'INQUIRY',
@@ -235,14 +255,18 @@ function splitName(displayName: string | undefined, email: string): { firstName:
 
 /** 公司名:个人邮箱用显示名兜底,企业邮箱用域名首段 */
 function guessCompanyName(domain: string, displayName?: string): string {
-  const freeMail = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'qq.com', '163.com', '126.com', 'icloud.com', 'mail.ru', 'gmx.com', 'aol.com', 'protonmail.com'];
-  if (freeMail.includes(domain.toLowerCase())) {
+  if (FREE_MAIL_DOMAINS.includes(domain.toLowerCase())) {
     const dn = (displayName || '').trim();
     return dn && !dn.includes('@') ? dn : domain;
   }
   const first = domain.split('.')[0];
   return first.charAt(0).toUpperCase() + first.slice(1);
 }
+
+const FREE_MAIL_DOMAINS = [
+  'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'qq.com', '163.com',
+  '126.com', 'icloud.com', 'mail.ru', 'gmx.com', 'aol.com', 'protonmail.com',
+];
 
 /** 取该会话最近历史(给 AI 上下文) */
 async function loadHistory(msg: NormalizedMessage): Promise<string[]> {

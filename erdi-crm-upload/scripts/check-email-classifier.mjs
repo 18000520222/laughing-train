@@ -5,6 +5,13 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 
 const require = createRequire(import.meta.url);
+const contentPath = path.join(process.cwd(), 'lib/email-content.ts');
+const contentCompiled = ts.transpileModule(fs.readFileSync(contentPath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
+});
+const contentExported = {};
+const contentSandbox = { exports: contentExported, module: { exports: contentExported }, require };
+vm.runInNewContext(contentCompiled.outputText, contentSandbox, { filename: contentPath });
 const sourcePath = path.join(process.cwd(), 'lib/email-classifier.ts');
 const source = fs.readFileSync(sourcePath, 'utf8');
 const compiled = ts.transpileModule(source, {
@@ -19,7 +26,7 @@ const exported = {};
 const sandbox = {
   exports: exported,
   module: { exports: exported },
-  require,
+  require: (specifier) => specifier === '@/lib/email-content' ? contentSandbox.module.exports : require(specifier),
 };
 vm.runInNewContext(compiled.outputText, sandbox, { filename: sourcePath });
 const { classifyEmail } = sandbox.module.exports;

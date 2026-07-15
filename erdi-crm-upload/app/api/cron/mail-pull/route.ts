@@ -1,314 +1,33 @@
 import { NextResponse } from 'next/server';
-import { ImapFlow } from 'imapflow';
-import { simpleParser } from 'mailparser';
-import { prisma } from '@/lib/prisma';
-import { ingestInbound } from '@/lib/inbox';
-import type { NormalizedMessage } from '@/lib/channels/types';
-import { classifyEmail } from '@/lib/email-classifier';
-import { buildEmailImapAuth } from '@/lib/google-gmail-oauth';
 import { isCronAuthorized } from '@/lib/cron-auth';
+import { syncAllEmailAccounts } from '@/lib/email-sync';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// 自己的域名:这些发件人是我方,不当客户入库
-const OWN_DOMAINS = ['erdicn.com', 'erdimail.com', 'erditechs.com', 'erdicrm.com'];
-
-// 发件人本地段(@前)噪音关键词 — 系统/群发/营销
-const LOCAL_NOISE = [
-  'noreply', 'no-reply', 'donotreply', 'do-not-reply', 'mailer-daemon', 'postmaster',
-  'notification', 'notifications', 'newsletter', 'news@', 'mailer', 'bounce', 'bounces',
-  'automated', 'auto-confirm', 'updates', 'update@', 'digest', 'marketing', 'promo',
-  'promotions', 'campaign', 'mailing', 'noticed', 'alerts', 'alert@', 'feedback',
-  'invite', 'invitation', 'webinar', 'events@', 'community',
-];
-
-// 营销/SaaS/群发平台域名(及其子域)黑名单 — 这些发来的一律不进 CRM
-const SPAM_DOMAINS = [
-  'aftership.com', 'mailchimp.com', 'mailchimpapp.net', 'sendgrid.net', 'sendgrid.com',
-  'sendinblue.com', 'brevo.com', 'hubspot.com', 'hubspotemail.net', 'mailgun.org',
-  'amazonses.com', 'sparkpostmail.com', 'mandrillapp.com', 'constantcontact.com',
-  'cmail19.com', 'cmail20.com', 'createsend.com', 'rsgsv.net', 'mcsv.net',
-  'klaviyomail.com', 'klaviyo.com', 'salesforce.com', 'exacttarget.com', 'pardot.com',
-  'intercom.io', 'intercom-mail.com', 'zendesk.com', 'mixmax.com', 'mailjet.com',
-  'getresponse.com', 'activecampaign.com', 'drip.com', 'customer.io', 'mailerlite.com',
-  'substack.com', 'medium.com', 'linkedin.com', 'facebookmail.com', 'twitter.com',
-  'x.com', 'quora.com', 'pinterest.com', 'reddit.com', 'glassdoor.com', 'indeed.com',
-  'google.com', 'googlemail.com', 'accounts.google.com', 'youtube.com', 'microsoft.com',
-  'office365.com', 'onedrive.com', 'dropbox.com', 'slack.com', 'notion.so', 'canva.com',
-  'trustpilot.com', 'g2.com', 'capterra.com', 'producthunt.com',
-  // 账单/订阅/SaaS 续费 与 SEO/外链 营销
-  'jetpack.com', 'wordpress.com', 'automattic.com', 'godaddy.com', 'namecheap.com',
-  'pingpongx.com', 'pingpongx.com.cn', 'made-in-china.com', 'myshopline.com',
-  'metamail.com', 'redwebraising.com', 'slipstream.co.site', 'stripe.com',
-  'paypal.com', 'shopify.com', 'wix.com', 'squarespace.com', 'cloudflare.com',
-];
-
-// 主题/正文里的推广话术(命中即视为营销)
-const SPAM_SUBJECT = [
-  'unsubscribe', 'newsletter', 'webinar', 'free trial', 'limited time', 'act now',
-  'click here', 'special offer', 'discount', '% off', 'sale ends', 'buy now',
-  'backlink', 'guest post', 'seo service', 'rank higher', 'increase traffic',
-  'link building', 'collaboration opportunity', 'sponsored', 'affiliate',
-  'boost your', 'grow your business', 'digital marketing', 'lead generation',
-  'verify your', 'confirm your subscription', 'you have been selected',
-  'congratulations', 'winner', 'claim your', 'gift card', 'crypto', 'investment opportunity',
-  'seo work', 'seo report', 'seo service', 'seo weekly', 'monthly payment for seo',
-  'dofollow', 'do-follow', 'high dr', 'high da', 'domain authority', 'web traffic',
-  'subscription will renew', '即将续订', 'your subscription', 'renewal notice',
-  '询盘消息', '新消息，请及时', '账户成功入账', '出金提醒',
-];
-
-const ACCOUNT_TIMEOUT_MS = 18000;
-const IMAP_COMMAND_TIMEOUT_MS = 6000;
-const MAX_MESSAGES_PER_ACCOUNT = 5;
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label}_timeout_${timeoutMs}ms`)), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-/**
- * 多信号垃圾/营销邮件判定。命中任一即不进 CRM。
- * 返回命中原因(用于统计/排查),null = 正常客户邮件。
- */
-function spamReason(parsed: any): string | null {
-  const fromAddr: string = (parsed.from?.value?.[0]?.address || '').toLowerCase();
-  if (!fromAddr || !fromAddr.includes('@')) return 'no-from';
-
-  const domain = fromAddr.split('@')[1] || '';
-  const local = fromAddr.split('@')[0] || '';
-
-  // 1. 自己域名
-  if (OWN_DOMAINS.some((d) => domain === d || domain.endsWith('.' + d))) return 'own-domain';
-
-  // 2. 营销/群发平台域名(精确或子域)
-  if (SPAM_DOMAINS.some((d) => domain === d || domain.endsWith('.' + d))) return 'spam-domain';
-
-  // 3. 发件人本地段噪音关键词
-  if (LOCAL_NOISE.some((n) => local.includes(n.replace('@', '')))) return 'noise-sender';
-
-  // 4. 群发邮件头信号(营销邮件几乎必带其一)
-  const h = parsed.headers as Map<string, any> | undefined;
-  if (h) {
-    if (h.has('list-unsubscribe') || h.has('list-id') || h.has('list-post')) return 'list-header';
-    const precedence = String(h.get('precedence') || '').toLowerCase();
-    if (precedence === 'bulk' || precedence === 'list' || precedence === 'junk') return 'precedence-bulk';
-    if (h.has('x-campaign') || h.has('x-mailer-id') || h.has('feedback-id') || h.has('x-csa-complaints')) return 'campaign-header';
-    const autoSubmitted = String(h.get('auto-submitted') || '').toLowerCase();
-    if (autoSubmitted && autoSubmitted !== 'no') return 'auto-submitted';
-  }
-
-  // 5. 主题推广话术
-  const subject = String(parsed.subject || '').toLowerCase();
-  if (SPAM_SUBJECT.some((k) => subject.includes(k))) return 'spam-subject';
-
-  return null;
-}
-
 export async function GET(req: Request) {
-  if (!isCronAuthorized(req, [process.env.MAIL_CRON_KEY], ['erdi-mail-2026'])) {
+  if (!isCronAuthorized(req, [process.env.MAIL_CRON_KEY])) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
-  const { searchParams } = new URL(req.url);
-  const lookback = Math.min(parseInt(searchParams.get('n') || '20', 10), 50);
-  const enrich = searchParams.get('enrich') === '1';
-  const automations = searchParams.get('automations') === '1';
 
-  const accounts = await prisma.emailAccount.findMany({ where: { isActive: true } });
-  if (accounts.length === 0) {
-    return NextResponse.json({ ok: false, error: '未配置任何邮箱账号(EmailAccount 表为空)' });
-  }
+  const params = new URL(req.url).searchParams;
+  const result = await syncAllEmailAccounts({
+    lookback: numberParam(params.get('lookback'), 200, 10, 1000),
+    maxFetchPerAccount: numberParam(params.get('max'), 200, 1, 1000),
+    historyBatch: numberParam(params.get('history'), 50, 0, 500),
+    backlogLimit: numberParam(params.get('backlog'), 50, 1, 500),
+    enrich: params.get('enrich') === '1',
+    automations: params.get('automations') === '1',
+    notifications: params.get('notifications') !== '0',
+  });
 
-  const report: any[] = [];
-
-  for (const acc of accounts) {
-    const stat = { account: acc.email, fetched: 0, ingested: 0, duplicate: 0, noise: 0, noiseReasons: {} as Record<string, number>, errors: [] as string[] };
-    let client: ImapFlow | null = null;
-    const accountStartedAt = Date.now();
-    const accountTimer = setTimeout(() => {
-      stat.errors.push(`account_timeout_${ACCOUNT_TIMEOUT_MS}ms`);
-      client?.close();
-    }, ACCOUNT_TIMEOUT_MS);
-
-    try {
-      const remainingBudget = () => Math.max(1000, Math.min(IMAP_COMMAND_TIMEOUT_MS, ACCOUNT_TIMEOUT_MS - (Date.now() - accountStartedAt)));
-      const assertBudget = (label: string) => {
-        if (Date.now() - accountStartedAt >= ACCOUNT_TIMEOUT_MS) {
-          throw new Error(`${label}_account_timeout_${ACCOUNT_TIMEOUT_MS}ms`);
-        }
-      };
-
-      const auth = await withTimeout(buildEmailImapAuth(acc), IMAP_COMMAND_TIMEOUT_MS, `${acc.email}:auth`);
-      client = new ImapFlow({
-        host: acc.imapHost,
-        port: acc.imapPort,
-        secure: acc.isSecure,
-        auth,
-        logger: false,
-        connectionTimeout: IMAP_COMMAND_TIMEOUT_MS,
-        greetingTimeout: IMAP_COMMAND_TIMEOUT_MS,
-        socketTimeout: IMAP_COMMAND_TIMEOUT_MS,
-      });
-      await withTimeout(client.connect(), remainingBudget(), `${acc.email}:connect`);
-      const lock = await withTimeout(client.getMailboxLock('INBOX'), remainingBudget(), `${acc.email}:lock`);
-      try {
-        const status = await withTimeout(client.status('INBOX', { messages: true }), remainingBudget(), `${acc.email}:status`);
-        const total = status.messages || 0;
-        if (total > 0) {
-          const start = Math.max(1, total - lookback + 1);
-          let processed = 0;
-          for await (const m of client.fetch(`${start}:*`, { source: true, uid: true })) {
-            assertBudget(`${acc.email}:fetch`);
-            if (processed >= MAX_MESSAGES_PER_ACCOUNT) {
-              stat.errors.push(`limited_to_${MAX_MESSAGES_PER_ACCOUNT}_messages`);
-              break;
-            }
-            processed++;
-            stat.fetched++;
-            try {
-              const parsed: any = await withTimeout(simpleParser(m.source as any), IMAP_COMMAND_TIMEOUT_MS, `${acc.email}:parse`);
-              const messageId = parsed.messageId || `uid-${acc.id}-${m.uid}`;
-
-              // 已入库(EmailMessage 或之前 ingest 过)→ 跳过
-              const dup = await prisma.emailMessage.findUnique({ where: { messageId }, select: { id: true } });
-              if (dup) { stat.duplicate++; continue; }
-
-              const fromAddr: string = parsed.from?.value?.[0]?.address?.toLowerCase?.() || '';
-              const fromName: string = parsed.from?.value?.[0]?.name || parsed.from?.text || fromAddr;
-              const subject: string = parsed.subject || '(无主题)';
-              const body: string = (parsed.text || '').trim() || subject;
-              const classification = classifyEmail({
-                from: parsed.from?.text || fromAddr,
-                subject,
-                textBody: parsed.text || '',
-                htmlBody: parsed.html || '',
-              });
-
-              // 垃圾/营销邮件:不存档、不进 CRM、不建客户。只记 messageId 防下次重复判定。
-              const reason = spamReason(parsed);
-              if (reason) {
-                await prisma.emailMessage.create({
-                  data: {
-                    accountId: acc.id,
-                    messageId,
-                    subject,
-                    from: parsed.from?.text || fromAddr,
-                    to: parsed.to?.text || acc.email,
-                    date: parsed.date || new Date(),
-                    textBody: '', // 垃圾邮件不留正文,只占位去重
-                    htmlBody: '',
-                    category: reason === 'spam-subject' ? 'SEO_SPAM' : classification.category,
-                    categoryReason: reason,
-                    classificationScore: Math.min(classification.classificationScore, 20),
-                    actionRequired: false,
-                    isLead: false,
-                    classifiedAt: new Date(),
-                    classificationTags: ['噪音邮件', ...classification.classificationTags],
-                  },
-                });
-                stat.noise++;
-                stat.noiseReasons[reason] = (stat.noiseReasons[reason] || 0) + 1;
-                continue;
-              }
-
-              // 正常客户邮件:原始存档到 EmailMessage(同时作为去重锚点)
-              await prisma.emailMessage.create({
-                data: {
-                  accountId: acc.id,
-                  messageId,
-                  subject,
-                  from: parsed.from?.text || fromAddr,
-                  to: parsed.to?.text || acc.email,
-                  date: parsed.date || new Date(),
-                  textBody: parsed.text || '',
-                  htmlBody: parsed.html || '',
-                  isLead: classification.isLead,
-                  category: classification.category,
-                  categoryReason: classification.categoryReason,
-                  classificationScore: classification.classificationScore,
-                  actionRequired: classification.actionRequired,
-                  classifiedAt: new Date(),
-                  classificationTags: classification.classificationTags,
-                },
-              });
-
-              // 正常客户邮件:对正文进行智能去燥切割,提取最新单条邮件内容
-              const cleanedBody = cleanEmailBody(body);
-
-              // 进统一收件箱(翻译 + AI 草稿 + 自动建/匹配客户 + 通知)
-              const msg: NormalizedMessage = {
-                channel: 'EMAIL',
-                direction: 'IN',
-                externalId: messageId,
-                threadId: fromAddr, // 同一发件人归并为一个会话
-                senderId: fromAddr,
-                senderName: fromName,
-                text: subject ? `主题: ${subject}\n\n${cleanedBody}` : cleanedBody,
-                sentAt: parsed.date || undefined,
-              };
-              const res = await ingestInbound(msg, { enrich, automations });
-              if (res.created) stat.ingested++; else stat.duplicate++;
-            } catch (e: any) {
-              stat.errors.push(String(e?.message || e));
-            }
-          }
-        }
-      } finally {
-        lock.release();
-      }
-      await withTimeout(client.logout(), remainingBudget(), `${acc.email}:logout`);
-    } catch (e: any) {
-      stat.errors.push('IMAP: ' + String(e?.message || e));
-      client?.close();
-    } finally {
-      clearTimeout(accountTimer);
-    }
-    report.push(stat);
-  }
-
-  return NextResponse.json({ ok: true, report });
+  const failed = result.accounts.some((account) => account.errors.length > 0 || account.folders.some((folder) => folder.errors.length > 0)) || result.backlog.failed > 0;
+  return NextResponse.json({ ok: !failed, ...result }, { status: failed ? 207 : 200 });
 }
 
-/**
- * 智能去燥切割: 剥离 Gmail/Outlook 历史邮件引用,只留下本次发送的最新内容。
- * 解决长会话导致翻译/AI 生成超时、废 tokens 的痛点。
- */
-function cleanEmailBody(body: string): string {
-  if (!body) return '';
-
-  const splitMarkers = [
-    /^-+Original Message-+[\r\t ]*$/im,               // Outlook Standard original message
-    /^[> \t]*On .+,.* at .+,.*wrote:[\r\t ]*$/im,      // Outlook/Gmail style "On ... wrote:"
-    /^[> \t]*On .+,.*wrote:[\r\t ]*$/im,              // Gmail style "On ... wrote:"
-    /^[> \t]*在.+,.*写道:[\r\t ]*$/im,                // Chinese "在 ... 写道:"
-    /^[> \t]*-+ 原始邮件 -+[\r\t ]*$/im,               // Tencent/Aliyun style 原始邮件
-    /^[> \t]*From: [a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/im, // From: email
-    /^[> \t]*________________________________/m, // Outlook line divider
-  ];
-
-  let cleaned = body;
-  for (const marker of splitMarkers) {
-    const match = cleaned.search(marker);
-    if (match !== -1) {
-      cleaned = cleaned.substring(0, match);
-    }
-  }
-
-  // 去除移动端自带小尾巴
-  cleaned = cleaned.replace(/Sent from my iPhone[\s\S]*/i, '');
-  cleaned = cleaned.replace(/Sent from my Mail[\s\S]*/i, '');
-  cleaned = cleaned.replace(/发送自我的 iPhone[\s\S]*/i, '');
-  cleaned = cleaned.replace(/发送自我的手机[\s\S]*/i, '');
-
-  return cleaned.trim();
+function numberParam(value: string | null, fallback: number, min: number, max: number) {
+  if (value === null || value.trim() === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(parsed)));
 }

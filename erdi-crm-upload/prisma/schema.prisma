@@ -138,15 +138,16 @@ model SystemSettings {
 // --- 模块三：客户资源 ---
 
 model Company {
-  id           String       @id @default(cuid())
-  customerCode String?      @unique
-  name         String
-  website      String?
-  country      String?
-  industry     String?
-  type         CustomerType @default(INQUIRY)
-  source       String       @default("EMAIL")
-  isPublic     Boolean      @default(false)
+  id               String       @id @default(cuid())
+  customerCode     String?      @unique
+  name             String
+  domainNormalized String?
+  website          String?
+  country          String?
+  industry         String?
+  type             CustomerType @default(INQUIRY)
+  source           String       @default("EMAIL")
+  isPublic         Boolean      @default(false)
 
   priorityScore   Int       @default(0)
   mainProducts    String?   @db.Text
@@ -167,9 +168,12 @@ model Company {
   socialMessages   SocialMessage[]
   inboxMessages    InboxMessage[]
   salesTasks       SalesTask[]
+  payments         PaymentRecord[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([domainNormalized])
 }
 
 enum CustomerType {
@@ -185,13 +189,14 @@ enum CustomerType {
 }
 
 model Contact {
-  id         String  @id @default(cuid())
-  firstName  String
-  lastName   String?
-  email      String? @unique
-  phone      String?
-  title      String?
-  externalId String? @unique
+  id              String  @id @default(cuid())
+  firstName       String
+  lastName        String?
+  email           String? @unique
+  emailNormalized String? @unique
+  phone           String?
+  title           String?
+  externalId      String? @unique
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -227,6 +232,7 @@ model Product {
   isActive Boolean @default(true)
 
   opportunities Opportunity[]
+  lineItems     OpportunityLineItem[]
 }
 
 // --- 模块四：商商机 ---
@@ -262,11 +268,90 @@ model Opportunity {
   shipments      Shipment[]
   salesTasks     SalesTask[]
   stageHistory   OpportunityStageHistory[]
+  lineItems      OpportunityLineItem[]
+  payments       PaymentRecord[]
   carrier        String?
   trackingNumber String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model OpportunityLineItem {
+  id            String      @id @default(cuid())
+  opportunityId String
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  productId     String?
+  product       Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName   String
+  sku           String?
+  quantity      Float       @default(1)
+  unitPrice     Float?
+  currency      String      @default("USD")
+  totalAmount   Float?
+  source        String      @default("MANUAL")
+  sourceRef     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([opportunityId])
+  @@index([source, sourceRef])
+}
+
+enum PaymentRecordStatus {
+  PENDING
+  CONFIRMED
+  REFUNDED
+  FAILED
+}
+
+model BankAccount {
+  id          String  @id @default(cuid())
+  label       String
+  bankName    String
+  currency    String  @default("USD")
+  accountNo   String?
+  swift       String?
+  beneficiary String?
+  bankAddress String?
+  isActive    Boolean @default(true)
+  isDefault   Boolean @default(false)
+
+  payments PaymentRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, isDefault])
+}
+
+model PaymentRecord {
+  id             String              @id @default(cuid())
+  companyId      String
+  company        Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  opportunityId  String?
+  opportunity    Opportunity?        @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  emailMessageId String?
+  emailMessage   EmailMessage?       @relation(fields: [emailMessageId], references: [id], onDelete: SetNull)
+  bankAccountId  String?
+  bankAccount    BankAccount?        @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  amount         Float?
+  currency       String              @default("USD")
+  status         PaymentRecordStatus @default(PENDING)
+  method         String?
+  reference      String?
+  paidAt         DateTime?
+  source         String              @default("MANUAL")
+  sourceRef      String?             @unique
+  note           String?             @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, createdAt])
+  @@index([opportunityId])
+  @@index([status, paidAt])
 }
 
 enum OppStage {
@@ -349,10 +434,42 @@ model EmailAccount {
   oauthAccessToken    String?   @db.Text
   oauthTokenExpiresAt DateTime?
 
-  messages EmailMessage[]
+  lastAttemptAt DateTime?
+  lastSuccessAt DateTime?
+  lastError     String?   @db.Text
+
+  messages      EmailMessage[]
+  folderCursors EmailFolderCursor[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model EmailFolderCursor {
+  id              String       @id @default(cuid())
+  accountId       String
+  account         EmailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  mailbox         String
+  direction       String       @default("IN")
+  uidValidity     String?
+  lastUid         String?
+  oldestUid       String?
+  historyComplete Boolean      @default(false)
+  lastSuccessAt   DateTime?
+  lastError       String?      @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([accountId, mailbox])
+  @@index([accountId, direction])
+}
+
+enum EmailProcessingState {
+  RAW
+  IGNORED
+  INGESTED
+  FAILED
 }
 
 model EmailMessage {
@@ -361,6 +478,9 @@ model EmailMessage {
   account   EmailAccount @relation(fields: [accountId], references: [id])
 
   messageId String   @unique
+  imapUid   String?
+  mailbox   String   @default("INBOX")
+  direction String   @default("IN")
   subject   String?
   from      String
   to        String
@@ -377,10 +497,20 @@ model EmailMessage {
   classifiedAt        DateTime?
   classificationTags  String[]  @default([])
 
+  processingState  EmailProcessingState @default(RAW)
+  retryCount       Int                  @default(0)
+  lastError        String?              @db.Text
+  nextRetryAt      DateTime?
+  ingestedAt       DateTime?
+  salesProcessedAt DateTime?
+  payments         PaymentRecord[]
+
   createdAt DateTime @default(now())
 
+  @@unique([accountId, mailbox, imapUid])
   @@index([category, date])
   @@index([actionRequired, date])
+  @@index([processingState, nextRetryAt, date])
 }
 
 model FollowUp {

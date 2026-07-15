@@ -1,3 +1,5 @@
+import { stripQuotedHistory } from '@/lib/email-content';
+
 export type EmailCategory =
   | 'INQUIRY'
   | 'QUOTE_PI'
@@ -161,7 +163,7 @@ const CATEGORY_RULES: Array<{
 export function classifyEmail(input: { from?: string | null; subject?: string | null; textBody?: string | null; htmlBody?: string | null }): EmailClassification {
   const from = String(input.from || '').toLowerCase();
   const subject = String(input.subject || '');
-  const body = String(input.textBody || input.htmlBody || '');
+  const body = stripQuotedHistory(String(input.textBody || input.htmlBody || ''));
   const text = `${from}\n${subject}\n${body}`.toLowerCase().replace(/\s+/g, ' ');
   const domain = extractDomain(from);
 

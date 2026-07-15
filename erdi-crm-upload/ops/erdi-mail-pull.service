@@ -1,0 +1,12 @@
+[Unit]
+Description=ERDI CRM Gmail import and sales automation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/erdi-crm
+EnvironmentFile=/opt/erdi-crm/.env
+ExecStart=/usr/bin/node /opt/erdi-crm/ops/run-mail-pull.mjs
+UMask=0077

@@ -55,6 +55,12 @@ function fmtDate(d: Date | null | undefined): string {
   return new Date(d).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 }
 
+function maskAccount(value: string | null) {
+  if (!value) return '账号未填写';
+  const compact = value.replace(/\s+/g, '');
+  return `****${compact.slice(-4)}`;
+}
+
 async function updateCustomer(formData: FormData) {
   'use server';
   const role = (cookies().get('auth_role')?.value || '').toUpperCase();
@@ -120,6 +126,108 @@ async function addFollowUp(formData: FormData) {
     }
   });
 
+  redirect(`/customers/${companyId}`);
+}
+
+async function createCustomerOrder(formData: FormData) {
+  'use server';
+  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
+  if (!['SALES', 'SUPER_ADMIN', 'ADMIN'].includes(role)) return;
+
+  const companyId = String(formData.get('companyId') || '');
+  const productName = String(formData.get('productName') || '').trim();
+  const quantity = Number(formData.get('quantity'));
+  const unitPrice = Number(formData.get('unitPrice'));
+  const currency = String(formData.get('currency') || 'USD').toUpperCase();
+  const salesStage = String(formData.get('salesStage') || 'QUOTED') as 'QUOTED' | 'CONTRACT_SENT' | 'DEAL_WON';
+  const bankAccountId = String(formData.get('bankAccountId') || '') || null;
+  const paymentMethod = String(formData.get('paymentMethod') || '') || null;
+  const paymentReference = String(formData.get('paymentReference') || '').trim() || null;
+  const note = String(formData.get('note') || '').trim() || null;
+  if (!companyId || !productName || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) return;
+  if (!['USD', 'CNY', 'EUR'].includes(currency) || !['QUOTED', 'CONTRACT_SENT', 'DEAL_WON'].includes(salesStage)) return;
+
+  const company = await prisma.company.findUnique({ where: { id: companyId } });
+  if (!company) return;
+  const { ensureCustomerCode } = await import('@/lib/customer-code');
+  const customerCode = company.customerCode || await ensureCustomerCode();
+  const total = Math.round((quantity * unitPrice + Number.EPSILON) * 100) / 100;
+  const opportunityCode = `MAN-${Date.now().toString(36).toUpperCase()}`;
+  const oppStage = salesStage === 'DEAL_WON' ? 'CLOSED_WON' : salesStage === 'CONTRACT_SENT' ? 'SPEC_CONFIRMING' : 'QUOTING';
+  const currentRank = { INQUIRY: 1, NEW: 1, PROSPECT: 1, QUOTED: 2, CONTRACT_SENT: 3, DEAL_WON: 4, EXISTING: 4, KEY_ACCOUNT: 4, LOST: 99 }[company.type] || 0;
+  const desiredRank = { QUOTED: 2, CONTRACT_SENT: 3, DEAL_WON: 4 }[salesStage];
+  const companyType = desiredRank > currentRank ? salesStage : company.type;
+  const product = await prisma.product.findFirst({
+    where: {
+      OR: [
+        { sku: { equals: productName, mode: 'insensitive' } },
+        { name: { equals: productName, mode: 'insensitive' } },
+        { enName: { equals: productName, mode: 'insensitive' } },
+      ],
+    },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    const opportunity = await tx.opportunity.create({
+      data: {
+        opportunityCode,
+        title: `${productName} - ${company.name}`,
+        description: note,
+        companyId,
+        ownerId: company.ownerId,
+        productId: product?.id,
+        amountUSD: currency === 'USD' ? total : null,
+        amountCNY: currency === 'CNY' ? total : null,
+        stage: oppStage,
+        stageChangedAt: new Date(),
+        nextStep: salesStage === 'DEAL_WON' ? '核对收款并安排备货出运' : salesStage === 'CONTRACT_SENT' ? '跟进合同和付款' : '跟进报价反馈',
+        lineItems: {
+          create: {
+            productId: product?.id,
+            productName,
+            sku: product?.sku,
+            quantity,
+            unitPrice,
+            currency,
+            totalAmount: total,
+            source: 'MANUAL',
+          },
+        },
+      },
+    });
+    await tx.opportunityStageHistory.create({
+      data: { opportunityId: opportunity.id, toStage: oppStage, amountUSD: currency === 'USD' ? total : null, note: '客户页手工录入订单' },
+    });
+    if (salesStage === 'DEAL_WON') {
+      await tx.paymentRecord.create({
+        data: {
+          companyId,
+          opportunityId: opportunity.id,
+          bankAccountId,
+          amount: total,
+          currency,
+          status: 'CONFIRMED',
+          method: paymentMethod,
+          reference: paymentReference,
+          paidAt: new Date(),
+          source: 'MANUAL',
+          note,
+        },
+      });
+    }
+    await tx.company.update({
+      where: { id: companyId },
+      data: {
+        customerCode,
+        type: companyType,
+        mainProducts: !company.mainProducts
+          ? productName
+          : company.mainProducts.toLowerCase().includes(productName.toLowerCase())
+            ? company.mainProducts
+            : `${company.mainProducts}\n${productName}`,
+      },
+    });
+  });
   redirect(`/customers/${companyId}`);
 }
 
@@ -341,7 +449,7 @@ export default async function CustomerDetailPage(props: any) {
     include: {
       owner: true,
       contacts: { orderBy: { createdAt: 'asc' } },
-      opportunities: { orderBy: { updatedAt: 'desc' }, include: { product: true } },
+      opportunities: { orderBy: { updatedAt: 'desc' }, include: { product: true, lineItems: true, payments: true } },
       followUps: { orderBy: { createdAt: 'desc' }, take: 20, include: { user: true } },
       inboxMessages: { orderBy: { createdAt: 'desc' }, take: 15 },
       salesTasks: {
@@ -358,6 +466,10 @@ export default async function CustomerDetailPage(props: any) {
     where: { role: { in: ['SUPER_ADMIN', 'ADMIN', 'SALES'] as any }, isActive: true },
     orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
     select: { id: true, email: true, name: true },
+  });
+  const bankAccounts = await prisma.bankAccount.findMany({
+    where: { isActive: true },
+    orderBy: [{ isDefault: 'desc' }, { label: 'asc' }],
   });
 
   const aiInsights = await getAICustomerInsights(company);
@@ -856,6 +968,64 @@ export default async function CustomerDetailPage(props: any) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* 左列：联系人 + 商机 */}
         <div className="lg:col-span-2 space-y-6">
+          <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100">
+              <h2 className="font-bold text-gray-800">🧾 快速录入报价 / 合同 / 成交订单</h2>
+              <p className="text-xs text-gray-400 mt-1">输入产品、单价和数量，系统自动计算金额、建商机并更新客户阶段；成交时同时登记收款。</p>
+            </div>
+            <form action={createCustomerOrder} data-testid="quick-order-form" className="p-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+              <input type="hidden" name="companyId" value={company.id} />
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-gray-500 mb-1">产品名称 / SKU *</label>
+                <input name="productName" data-testid="quick-order-product" required placeholder="可直接输入或使用系统语音输入" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">单价 *</label>
+                <input name="unitPrice" data-testid="quick-order-unit-price" type="number" min="0" step="0.01" required className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">数量 *</label>
+                <input name="quantity" data-testid="quick-order-quantity" type="number" min="0.01" step="0.01" defaultValue="1" required className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">币种</label>
+                <select name="currency" data-testid="quick-order-currency" defaultValue="USD" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                  <option value="USD">USD 美元</option><option value="CNY">CNY 人民币</option><option value="EUR">EUR 欧元</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">业务阶段</label>
+                <select name="salesStage" data-testid="quick-order-stage" defaultValue="QUOTED" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                  <option value="QUOTED">已提交报价</option><option value="CONTRACT_SENT">已签/已发合同</option><option value="DEAL_WON">已成交并确认付款</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">收款银行账号</label>
+                <select name="bankAccountId" data-testid="quick-order-bank" defaultValue={bankAccounts.find((item) => item.isDefault)?.id || ''} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                  <option value="">未指定</option>
+                  {bankAccounts.map((item) => <option key={item.id} value={item.id}>{item.label} · {item.currency} · {maskAccount(item.accountNo)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">付款方式</label>
+                <select name="paymentMethod" data-testid="quick-order-payment-method" defaultValue="BANK_TRANSFER" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                  <option value="BANK_TRANSFER">银行转账</option><option value="PAYPAL">PayPal</option><option value="CARD">银行卡</option><option value="LETTER_OF_CREDIT">信用证</option>
+                </select>
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-gray-500 mb-1">付款参考号</label>
+                <input name="paymentReference" data-testid="quick-order-payment-reference" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-gray-500 mb-1">备注</label>
+                <input name="note" data-testid="quick-order-note" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div className="md:col-span-4">
+                <button data-testid="quick-order-submit" className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-2.5 rounded-lg">保存并自动更新客户阶段</button>
+              </div>
+            </form>
+          </section>
+
           {/* 联系人 */}
           <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             <h2 className="px-6 py-4 font-bold text-gray-800 border-b border-gray-100">
@@ -906,7 +1076,7 @@ export default async function CustomerDetailPage(props: any) {
                     <div className="min-w-0">
                       <div className="font-semibold text-gray-800 truncate">{op.title}</div>
                       <div className="text-xs text-gray-400 mt-1">
-                        {op.opportunityCode || op.id.slice(0, 8)} · {op.product?.name || '未关联产品'} · 更新 {fmtDate(op.updatedAt)}
+                        {op.opportunityCode || op.id.slice(0, 8)} · {op.lineItems[0]?.productName || op.product?.name || '未关联产品'} · {op.lineItems.length || 0} 个明细 · {op.payments.length ? '已登记付款' : '未登记付款'} · 更新 {fmtDate(op.updatedAt)}
                       </div>
                     </div>
                     <div className="flex items-center gap-3 shrink-0 ml-4">

@@ -370,7 +370,10 @@ function buildDhlDraft(order: NormalizedShoplineOrder): Prisma.InputJsonObject {
 async function findCompanyForOrder(order: NormalizedShoplineOrder) {
   const externalId = order.customerId ? `SHOPLINE-${order.customerId}` : '';
   const contactFilters: Prisma.ContactWhereInput[] = [];
-  if (order.email) contactFilters.push({ email: { equals: order.email, mode: 'insensitive' } });
+  if (order.email) {
+    contactFilters.push({ emailNormalized: order.email });
+    contactFilters.push({ email: { equals: order.email, mode: 'insensitive' } });
+  }
   if (externalId) contactFilters.push({ externalId });
   const contact = contactFilters.length
     ? await prisma.contact.findFirst({ where: { OR: contactFilters }, include: { company: true } })
@@ -407,12 +410,44 @@ export async function importShoplineOrder(payload: unknown): Promise<ShoplineImp
   const opportunityCode = `SHOPLINE-${cleanOrderNumber(order.orderNumber)}`;
   const existing = await prisma.opportunity.findUnique({
     where: { opportunityCode },
-    select: { id: true, companyId: true },
+    select: { id: true, companyId: true, _count: { select: { lineItems: true } } },
   });
   if (existing) {
-    await prisma.company.update({
-      where: { id: existing.companyId },
-      data: { type: 'DEAL_WON', nextAction: `Prepare DHL shipment for ${order.orderNumber}` },
+    await prisma.$transaction(async (tx) => {
+      await tx.company.update({
+        where: { id: existing.companyId },
+        data: { type: 'DEAL_WON', nextAction: `Prepare DHL shipment for ${order.orderNumber}` },
+      });
+      if (existing._count.lineItems === 0) {
+        await tx.opportunityLineItem.createMany({
+          data: order.items.map((item) => ({
+            opportunityId: existing.id,
+            productName: item.title,
+            sku: item.sku || null,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            currency: order.currency,
+            totalAmount: item.amount,
+            source: 'SHOPLINE',
+            sourceRef: `${order.externalId}:${item.externalId}`,
+          })),
+        });
+      }
+      await tx.paymentRecord.upsert({
+        where: { sourceRef: `shopline:${order.externalId}` },
+        update: { amount: order.totalAmount, currency: order.currency, status: 'CONFIRMED', method: order.paymentMethod || null },
+        create: {
+          companyId: existing.companyId,
+          opportunityId: existing.id,
+          amount: order.totalAmount,
+          currency: order.currency,
+          status: 'CONFIRMED',
+          method: order.paymentMethod || null,
+          paidAt: asDate(order.orderDate) || new Date(),
+          source: 'SHOPLINE',
+          sourceRef: `shopline:${order.externalId}`,
+        },
+      });
     });
     return { status: 'duplicate', orderNumber: order.orderNumber, opportunityId: existing.id, piPath: `/pi/${existing.id}` };
   }
@@ -470,6 +505,7 @@ export async function importShoplineOrder(payload: unknown): Promise<ShoplineImp
         firstName: name.firstName,
         lastName: name.lastName,
         email: order.email || null,
+        emailNormalized: order.email || null,
         phone: order.phone || null,
         externalId: match.externalId || null,
         companyId: company.id,
@@ -512,6 +548,31 @@ export async function importShoplineOrder(payload: unknown): Promise<ShoplineImp
         create: {
           carrier: 'DHL Express',
           status: 'PENDING',
+        },
+      },
+      lineItems: {
+        create: order.items.map((item) => ({
+          productId: item.sku ? productBySku.get(item.sku)?.id || null : null,
+          productName: item.title,
+          sku: item.sku || null,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          currency: order.currency,
+          totalAmount: item.amount,
+          source: 'SHOPLINE',
+          sourceRef: `${order.externalId}:${item.externalId}`,
+        })),
+      },
+      payments: {
+        create: {
+          companyId: company.id,
+          amount: order.totalAmount,
+          currency: order.currency,
+          status: 'CONFIRMED',
+          method: order.paymentMethod || null,
+          paidAt: orderCreatedAt || new Date(),
+          source: 'SHOPLINE',
+          sourceRef: `shopline:${order.externalId}`,
         },
       },
     },

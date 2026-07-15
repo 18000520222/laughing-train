@@ -23,7 +23,7 @@ const SECRET_FIELDS = new Set([
 ]);
 
 
-export default async function SettingsPage() {
+export default async function SettingsPage(props: any) {
   const role = cookies().get('auth_role')?.value;
   if (role !== 'SUPER_ADMIN' && role !== 'ADMIN' && role !== 'SALES') {
     redirect('/');
@@ -36,6 +36,9 @@ export default async function SettingsPage() {
 
   const emailAccounts = await prisma.emailAccount.findMany();
   const socialAccounts = await prisma.socialAccount.findMany();
+  const bankAccounts = await prisma.bankAccount.findMany({ orderBy: [{ isDefault: 'desc' }, { label: 'asc' }] });
+  const mailTest = String(props?.searchParams?.mailTest || '');
+  const mailTestInfo = String(props?.searchParams?.mailTestInfo || '');
 
   async function saveSettings(formData: FormData) {
     'use server';
@@ -56,6 +59,21 @@ export default async function SettingsPage() {
         update: { usdToCnyRate: rate, companyName: companyName, ...bankFields },
         create: { id: 'default', usdToCnyRate: rate, companyName: companyName, ...bankFields }
       });
+      if (bankFields.bankName) {
+        const currentDefault = await prisma.bankAccount.findFirst({ where: { isDefault: true } });
+        const data = {
+          label: bankFields.bankName,
+          bankName: bankFields.bankName,
+          accountNo: bankFields.bankAccountNo,
+          swift: bankFields.bankSwift,
+          beneficiary: bankFields.bankBeneficiary,
+          bankAddress: bankFields.bankAddress,
+          isActive: true,
+          isDefault: true,
+        };
+        if (currentDefault) await prisma.bankAccount.update({ where: { id: currentDefault.id }, data });
+        else await prisma.bankAccount.create({ data });
+      }
     }
     redirect('/settings');
   }
@@ -117,21 +135,65 @@ export default async function SettingsPage() {
     const id = formData.get('id') as string;
     const pwd = String(formData.get('password') || '').trim();
     const host = formData.get('imapHost') as string;
-    if (id && pwd && host) {
-      await prisma.emailAccount.update({
-        where: { id },
-        data: {
-          password: pwd,
-          imapHost: host,
-          authType: 'APP_PASSWORD',
-          oauthProvider: null,
-          oauthRefreshToken: null,
-          oauthAccessToken: null,
-          oauthTokenExpiresAt: null,
-        },
+    if (id && host) {
+      await prisma.$transaction(async (tx) => {
+        await tx.emailAccount.update({
+          where: { id },
+          data: {
+            imapHost: host,
+            ...(pwd ? {
+              password: pwd,
+              authType: 'APP_PASSWORD',
+              oauthProvider: null,
+              oauthRefreshToken: null,
+              oauthAccessToken: null,
+              oauthTokenExpiresAt: null,
+            } : {}),
+          },
+        });
+        await tx.emailFolderCursor.deleteMany({ where: { accountId: id } });
       });
     }
     redirect('/settings');
+  }
+
+  async function addBankAccount(formData: FormData) {
+    'use server';
+    const r = cookies().get('auth_role')?.value;
+    if (r !== 'SUPER_ADMIN' && r !== 'ADMIN') return;
+    const label = String(formData.get('label') || '').trim();
+    const bankName = String(formData.get('bankName') || '').trim();
+    if (!label || !bankName) return;
+    const isDefault = formData.get('isDefault') === '1';
+    await prisma.$transaction(async (tx) => {
+      if (isDefault) await tx.bankAccount.updateMany({ data: { isDefault: false } });
+      await tx.bankAccount.create({
+        data: {
+          label,
+          bankName,
+          currency: String(formData.get('currency') || 'USD').toUpperCase(),
+          accountNo: String(formData.get('accountNo') || '').trim() || null,
+          swift: String(formData.get('swift') || '').trim() || null,
+          beneficiary: String(formData.get('beneficiary') || '').trim() || null,
+          bankAddress: String(formData.get('bankAddress') || '').trim() || null,
+          isDefault,
+        },
+      });
+    });
+    redirect('/settings');
+  }
+
+  async function testEmailConnection(formData: FormData) {
+    'use server';
+    const r = cookies().get('auth_role')?.value;
+    if (r !== 'SUPER_ADMIN' && r !== 'ADMIN') return;
+    const id = String(formData.get('id') || '');
+    const { testEmailAccountConnection } = await import('@/lib/email-sync');
+    const result = await testEmailAccountConnection(id);
+    const info = result.ok
+      ? `${result.latencyMs}ms; Sent=${result.sentMailbox || '未找到'}`
+      : String(result.error || '连接失败').slice(0, 160);
+    redirect(`/settings?mailTest=${result.ok ? 'ok' : 'fail'}&mailTestInfo=${encodeURIComponent(info)}`);
   }
 
   return (
@@ -182,6 +244,35 @@ export default async function SettingsPage() {
             </div>
             <button type="submit" className="bg-gray-900 text-white px-6 py-3 rounded-lg font-bold hover:bg-gray-800">保存系统设置</button>
           </form>
+        </div>
+
+        <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-200">
+          <div className="mb-6 pb-4 border-b border-gray-100">
+            <h2 className="text-xl font-bold text-gray-800">🏦 多收款账户</h2>
+            <p className="text-sm text-gray-500 mt-1">订单付款可选择具体收款账户；列表仅显示账号尾号。</p>
+          </div>
+          <div className="space-y-2 mb-6">
+            {bankAccounts.map((account) => (
+              <div key={account.id} className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-3 text-sm">
+                <span className="font-semibold text-gray-800">{account.label} {account.isDefault ? '· 默认' : ''}</span>
+                <span className="text-gray-500">{account.currency} · {account.bankName} · {maskBankAccount(account.accountNo)}</span>
+              </div>
+            ))}
+            {bankAccounts.length === 0 && <p className="text-sm text-gray-400">尚未建立结构化收款账户；保存上方银行信息后会自动建立默认账户。</p>}
+          </div>
+          {(role === 'SUPER_ADMIN' || role === 'ADMIN') && (
+            <form action={addBankAccount} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field name="label" label="账户简称 *" />
+              <Field name="bankName" label="银行名称 *" />
+              <div><label className="block text-xs font-semibold text-gray-700 mb-1">币种</label><select name="currency" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white"><option>USD</option><option>CNY</option><option>EUR</option></select></div>
+              <Field name="accountNo" label="收款账号" />
+              <Field name="swift" label="SWIFT / BIC" />
+              <Field name="beneficiary" label="收款人" def="ERDI TECH LTD" />
+              <div className="md:col-span-2"><Field name="bankAddress" label="银行地址" /></div>
+              <label className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" name="isDefault" value="1" />设为默认账户</label>
+              <div className="md:col-span-3"><button className="bg-gray-900 text-white px-5 py-2.5 rounded-lg font-bold">新增收款账户</button></div>
+            </form>
+          )}
         </div>
 
         {/* 第三方集成 */}
@@ -328,34 +419,55 @@ export default async function SettingsPage() {
             <h2 className="text-xl font-bold text-gray-800">🔐 聚合邮箱安全配置 (IMAP)</h2>
             <p className="text-sm text-gray-500 mt-1">填入应用专用密码 / IMAP 授权码（非登录密码）。</p>
           </div>
+          {mailTest && (
+            <div className={`mb-5 rounded-lg border px-4 py-3 text-sm ${mailTest === 'ok' ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+              {mailTest === 'ok' ? 'IMAP 连接测试成功' : 'IMAP 连接测试失败'} · {mailTestInfo}
+            </div>
+          )}
           <div className="space-y-6">
             {emailAccounts.map(acc => (
-              <form key={acc.id} action={updateEmailConfig} className="bg-gray-50 p-6 rounded-lg border border-gray-100">
-                <input type="hidden" name="id" value={acc.id} />
+              <div key={acc.id} className="bg-gray-50 p-6 rounded-lg border border-gray-100">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-bold text-gray-800 text-lg">{acc.email}</h3>
                   <span className={`text-xs px-2 py-1 rounded ${acc.password || acc.oauthRefreshToken ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                     {acc.oauthRefreshToken ? '✅ Google OAuth' : acc.password ? '✅ IMAP 已配置' : '❌ 未配置'}
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div className="mb-4 text-xs text-gray-500">
+                  最近成功：{acc.lastSuccessAt ? new Date(acc.lastSuccessAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '从未成功'}
+                  {acc.lastError ? <span className="ml-3 text-red-600">最近错误：{acc.lastError.slice(0, 180)}</span> : null}
+                </div>
+                <form action={updateEmailConfig} className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <input type="hidden" name="id" value={acc.id} />
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 mb-1">IMAP 服务器</label>
                     <input type="text" name="imapHost" defaultValue={acc.imapHost} required className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 mb-1">授权码</label>
-                    <input type="password" name="password" placeholder={acc.password ? "******** (覆盖)" : "请输入"} required className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                    <input type="password" name="password" placeholder={acc.password ? "******** (留空保持)" : "请输入"} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
                   </div>
-                </div>
-                <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium text-sm hover:bg-blue-700">更新</button>
-              </form>
+                  <div className="md:col-span-2"><button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium text-sm hover:bg-blue-700">更新配置</button></div>
+                </form>
+                {(role === 'SUPER_ADMIN' || role === 'ADMIN') && (
+                  <form action={testEmailConnection}>
+                    <input type="hidden" name="id" value={acc.id} />
+                    <button className="border border-gray-300 bg-white px-4 py-2 rounded-lg font-medium text-sm hover:bg-gray-100">立即测试 IMAP 与已发送文件夹</button>
+                  </form>
+                )}
+              </div>
             ))}
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+function maskBankAccount(value: string | null) {
+  if (!value) return '未填写账号';
+  const compact = value.replace(/\s+/g, '');
+  return compact.length <= 4 ? `****${compact}` : `****${compact.slice(-4)}`;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
