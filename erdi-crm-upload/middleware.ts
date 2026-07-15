@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { jwtVerify } from 'jose';
+import { jwtVerify } from 'jose/jwt/verify';
 
 const SESSION_COOKIE = 'erdi_session';
 
@@ -35,15 +35,15 @@ function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
-async function valid(token: string | undefined): Promise<boolean> {
-  if (!token) return false;
+async function valid(token: string | undefined): Promise<{ mustChangePassword: boolean } | null> {
+  if (!token) return null;
   const secret = process.env.AUTH_SECRET;
-  if (!secret) return false;
+  if (!secret) return null;
   try {
-    await jwtVerify(token, new TextEncoder().encode(secret));
-    return true;
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
+    return { mustChangePassword: Boolean(payload.mustChangePassword) };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -51,8 +51,16 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (isPublic(pathname)) return NextResponse.next();
 
-  const ok = await valid(req.cookies.get(SESSION_COOKIE)?.value);
-  if (ok) return NextResponse.next();
+  const session = await valid(req.cookies.get(SESSION_COOKIE)?.value);
+  if (session) {
+    if (session.mustChangePassword && pathname !== '/account/password' && pathname !== '/api/auth/logout') {
+      const url = req.nextUrl.clone();
+      url.pathname = '/account/password';
+      url.search = '';
+      return NextResponse.redirect(url);
+    }
+    return NextResponse.next();
+  }
 
   // Unauthenticated: APIs get 401 JSON, pages get redirected to login.
   if (pathname.startsWith('/api/')) {

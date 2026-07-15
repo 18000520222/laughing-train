@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { requirePermission } from '@/lib/permissions';
+import { opportunityAccessWhere } from '@/lib/data-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,41 +24,38 @@ const STAGE_COLOR: Record<string, string> = {
   QUOTING: 'bg-amber-50 text-amber-700',
 };
 
-function DocLink({ href, label, locked }: { href: string; label: string; locked: boolean }) {
+function DocLink({ href, label, version }: { href: string; label: string; version?: number }) {
   return (
     <Link
       href={href}
       className={`px-2 py-1 rounded text-xs font-bold transition-colors ${
-        locked
+        version
           ? 'bg-indigo-600 text-white hover:bg-indigo-500'
           : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
       }`}
-      title={locked ? '已冻结快照' : '未成交（预览）'}
+      title={version ? `当前正式版 V${version}` : '实时草稿预览'}
     >
-      {label}
+      {label}{version ? ` V${version}` : ''}
     </Link>
   );
 }
 
-export default async function DocumentsPage(props: any) {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN' && role !== 'FINANCE') {
-    redirect('/');
-  }
+export default async function DocumentsPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
+  const session = await requirePermission('documents.read');
 
-  const sp = props.searchParams || {};
+  const sp = searchParams ? await searchParams : {};
   const q = String(sp.q || '').trim();
   const onlyWon = String(sp.won || '') === '1';
   const page = Math.max(1, parseInt(String(sp.page || '1'), 10) || 1);
 
-  const where: any = {};
+  const where: any = opportunityAccessWhere(session);
   if (onlyWon) where.stage = 'CLOSED_WON';
   if (q) {
-    where.OR = [
+    where.AND = [{ OR: [
       { title: { contains: q, mode: 'insensitive' } },
       { opportunityCode: { contains: q, mode: 'insensitive' } },
       { company: { name: { contains: q, mode: 'insensitive' } } },
-    ];
+    ] }];
   }
 
   const [total, opps] = await Promise.all([
@@ -66,7 +63,10 @@ export default async function DocumentsPage(props: any) {
     prisma.opportunity.findMany({
       where,
       orderBy: { updatedAt: 'desc' },
-      include: { company: true },
+      include: {
+        company: true,
+        tradeDocuments: { where: { status: 'ISSUED' }, select: { type: true, version: true } },
+      },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
@@ -123,11 +123,7 @@ export default async function DocumentsPage(props: any) {
           </thead>
           <tbody>
             {opps.map((op) => {
-              const piLocked = !!op.lockedPiData;
-              const ciLocked = !!op.lockedCiData;
-              const plLocked = !!op.lockedPlData;
-              const ctLocked = !!op.lockedContract;
-              const csLocked = !!op.customsData;
+              const versions = new Map(op.tradeDocuments.map((document) => [document.type, document.version]));
               return (
                 <tr key={op.id} className="border-b border-gray-50 hover:bg-gray-50/50">
                   <td className="p-4">
@@ -149,11 +145,11 @@ export default async function DocumentsPage(props: any) {
                   </td>
                   <td className="p-4">
                     <div className="flex flex-wrap gap-1.5">
-                      <DocLink href={`/pi/${op.id}`} label="PI" locked={piLocked} />
-                      <DocLink href={`/ci/${op.id}`} label="CI" locked={ciLocked} />
-                      <DocLink href={`/pl/${op.id}`} label="PL" locked={plLocked} />
-                      <DocLink href={`/contract/${op.id}`} label="合同" locked={ctLocked} />
-                      <DocLink href={`/customs/${op.id}`} label="报关" locked={csLocked} />
+                      <DocLink href={`/pi/${op.id}`} label="PI" version={versions.get('PI')} />
+                      <DocLink href={`/ci/${op.id}`} label="CI" version={versions.get('CI')} />
+                      <DocLink href={`/pl/${op.id}`} label="PL" version={versions.get('PL')} />
+                      <DocLink href={`/contract/${op.id}`} label="合同" version={versions.get('CONTRACT')} />
+                      <DocLink href={`/customs/${op.id}`} label="报关" version={versions.get('CUSTOMS')} />
                     </div>
                   </td>
                 </tr>
@@ -185,7 +181,7 @@ export default async function DocumentsPage(props: any) {
       )}
 
       <p className="mt-4 text-xs text-gray-400 text-center">
-        蓝色单据 = 已成交冻结的不可篡改快照；灰色 = 未成交的实时预览。
+        蓝色单据 = 当前正式签发版本；灰色 = 实时草稿预览。正式版只能新增版本或作废，不能覆盖修改。
       </p>
     </div>
   );

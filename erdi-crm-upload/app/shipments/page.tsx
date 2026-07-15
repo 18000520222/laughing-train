@@ -1,8 +1,9 @@
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { requirePermission } from '@/lib/permissions';
+import { opportunityAccessWhere } from '@/lib/data-access';
+import { writeAuditLog } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,30 +12,68 @@ function optionalDate(value: FormDataEntryValue | null) {
   return raw ? new Date(`${raw}T00:00:00`) : null;
 }
 
+function optionalPositiveNumber(value: FormDataEntryValue | null) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function shipmentAddress(formData: FormData) {
+  const address = {
+    name: String(formData.get('shipToName') || '').trim(),
+    address1: String(formData.get('shipToAddress') || '').trim(),
+    city: String(formData.get('shipToCity') || '').trim(),
+    postalCode: String(formData.get('shipToPostalCode') || '').trim(),
+    country: String(formData.get('shipToCountry') || '').trim(),
+    phone: String(formData.get('shipToPhone') || '').trim(),
+  };
+  return Object.values(address).some(Boolean) ? address : undefined;
+}
+
 async function createShipment(formData: FormData) {
   'use server';
-  const session = await getSession();
-  if (!session) redirect('/');
+  const session = await requirePermission('logistics.manage');
 
   const opportunityId = String(formData.get('opportunityId') || '');
   const carrier = String(formData.get('carrier') || '').trim();
   const trackingNumber = String(formData.get('trackingNumber') || '').trim();
-  const freightCost = Number(formData.get('freightCost') || 0);
+  const freightCost = optionalPositiveNumber(formData.get('freightCost'));
   const shippedAt = optionalDate(formData.get('shippedAt'));
   const estimatedArrival = optionalDate(formData.get('estimatedArrival'));
 
   if (!opportunityId || !carrier) return;
 
-  await prisma.shipment.create({
+  const opportunity = await prisma.opportunity.findFirst({
+    where: { id: opportunityId, AND: [opportunityAccessWhere(session)] },
+    select: { id: true },
+  });
+  if (!opportunity) return;
+
+  const shipment = await prisma.shipment.create({
     data: {
       opportunityId,
       carrier,
       trackingNumber: trackingNumber || null,
-      freightCost: freightCost > 0 ? freightCost : null,
+      freightCost,
       status: shippedAt ? 'SHIPPED' : 'PENDING',
       shippedAt,
       estimatedArrival,
+      packages: optionalPositiveNumber(formData.get('packages')) ? Math.trunc(Number(formData.get('packages'))) : null,
+      grossWeightKg: optionalPositiveNumber(formData.get('grossWeightKg')),
+      netWeightKg: optionalPositiveNumber(formData.get('netWeightKg')),
+      lengthCm: optionalPositiveNumber(formData.get('lengthCm')),
+      widthCm: optionalPositiveNumber(formData.get('widthCm')),
+      heightCm: optionalPositiveNumber(formData.get('heightCm')),
+      incoterm: String(formData.get('incoterm') || '').trim() || null,
+      originCountry: String(formData.get('originCountry') || '').trim() || null,
+      shippingAddress: shipmentAddress(formData),
+      notes: String(formData.get('notes') || '').trim() || null,
     },
+  });
+  await writeAuditLog(session, {
+    action: 'shipment.create',
+    entityType: 'Shipment',
+    entityId: shipment.id,
+    summary: `创建发货 ${carrier} ${trackingNumber || ''}`.trim(),
   });
   revalidatePath('/shipments');
   revalidatePath('/logistics');
@@ -42,12 +81,17 @@ async function createShipment(formData: FormData) {
 
 async function updateShipmentStatus(formData: FormData) {
   'use server';
-  const session = await getSession();
-  if (!session) redirect('/');
+  const session = await requirePermission('logistics.manage');
 
   const id = String(formData.get('id') || '');
   const status = String(formData.get('status') || 'PENDING') as 'PENDING' | 'SHIPPED' | 'DELIVERED';
   if (!id) return;
+
+  const shipment = await prisma.shipment.findFirst({
+    where: { id, opportunity: opportunityAccessWhere(session) },
+    select: { id: true, status: true },
+  });
+  if (!shipment) return;
 
   await prisma.shipment.update({
     where: { id },
@@ -56,20 +100,31 @@ async function updateShipmentStatus(formData: FormData) {
       shippedAt: status === 'SHIPPED' ? new Date() : undefined,
     },
   });
+  await writeAuditLog(session, {
+    action: 'shipment.status_update',
+    entityType: 'Shipment',
+    entityId: id,
+    summary: `${shipment.status} -> ${status}`,
+  });
   revalidatePath('/shipments');
   revalidatePath('/logistics');
 }
 
 async function addTrackingEvent(formData: FormData) {
   'use server';
-  const session = await getSession();
-  if (!session) redirect('/');
+  const session = await requirePermission('logistics.manage');
 
   const shipmentId = String(formData.get('shipmentId') || '');
   const status = String(formData.get('eventStatus') || 'INFO').trim();
   const location = String(formData.get('location') || '').trim();
   const description = String(formData.get('description') || '').trim();
   if (!shipmentId || !description) return;
+
+  const shipment = await prisma.shipment.findFirst({
+    where: { id: shipmentId, opportunity: opportunityAccessWhere(session) },
+    select: { id: true },
+  });
+  if (!shipment) return;
 
   await prisma.trackingEvent.create({
     data: {
@@ -79,6 +134,12 @@ async function addTrackingEvent(formData: FormData) {
       description,
       occurredAt: new Date(),
     },
+  });
+  await writeAuditLog(session, {
+    action: 'shipment.tracking_event_add',
+    entityType: 'Shipment',
+    entityId: shipmentId,
+    summary: description,
   });
   revalidatePath('/shipments');
 }
@@ -96,11 +157,12 @@ function statusClass(status: string) {
 }
 
 export default async function ShipmentsPage() {
-  const session = await getSession();
-  if (!session) redirect('/');
+  const session = await requirePermission('logistics.manage');
+  const opportunityWhere = opportunityAccessWhere(session);
 
   const [shipments, opportunities, settings] = await Promise.all([
     prisma.shipment.findMany({
+      where: { opportunity: opportunityWhere },
       include: {
         opportunity: { include: { company: true, owner: true } },
         trackingEvents: { orderBy: { occurredAt: 'desc' }, take: 3 },
@@ -109,6 +171,7 @@ export default async function ShipmentsPage() {
       take: 100,
     }),
     prisma.opportunity.findMany({
+      where: opportunityWhere,
       include: { company: true },
       orderBy: { updatedAt: 'desc' },
       take: 120,
@@ -154,6 +217,50 @@ export default async function ShipmentsPage() {
                 {opportunities.map(o => <option key={o.id} value={o.id}>{o.title} / {o.company.name}</option>)}
               </select>
             </label>
+            <div className="grid grid-cols-3 gap-3">
+              <label className="block text-sm font-medium text-slate-700">
+                箱数
+                <input name="packages" type="number" min="1" step="1" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" />
+              </label>
+              <label className="block text-sm font-medium text-slate-700">
+                毛重 kg
+                <input name="grossWeightKg" type="number" min="0" step="0.001" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" />
+              </label>
+              <label className="block text-sm font-medium text-slate-700">
+                净重 kg
+                <input name="netWeightKg" type="number" min="0" step="0.001" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" />
+              </label>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              {(['lengthCm', 'widthCm', 'heightCm'] as const).map((name, index) => (
+                <label key={name} className="block text-sm font-medium text-slate-700">
+                  {['长 cm', '宽 cm', '高 cm'][index]}
+                  <input name={name} type="number" min="0" step="0.1" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" />
+                </label>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-sm font-medium text-slate-700">
+                贸易术语
+                <input name="incoterm" placeholder="EXW / FOB / CIF / DDP" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" />
+              </label>
+              <label className="block text-sm font-medium text-slate-700">
+                原产国
+                <input name="originCountry" defaultValue="China" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" />
+              </label>
+            </div>
+            <details className="rounded-lg border border-slate-200 p-3">
+              <summary className="cursor-pointer text-sm font-bold text-slate-700">收货地址与备注</summary>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <input name="shipToName" placeholder="收件人" className="rounded-lg border border-slate-300 px-3 py-2" />
+                <input name="shipToPhone" placeholder="电话" className="rounded-lg border border-slate-300 px-3 py-2" />
+                <input name="shipToAddress" placeholder="详细地址" className="col-span-2 rounded-lg border border-slate-300 px-3 py-2" />
+                <input name="shipToCity" placeholder="城市" className="rounded-lg border border-slate-300 px-3 py-2" />
+                <input name="shipToPostalCode" placeholder="邮编" className="rounded-lg border border-slate-300 px-3 py-2" />
+                <input name="shipToCountry" placeholder="国家" className="col-span-2 rounded-lg border border-slate-300 px-3 py-2" />
+                <textarea name="notes" placeholder="包装、唛头或特殊要求" className="col-span-2 rounded-lg border border-slate-300 px-3 py-2" />
+              </div>
+            </details>
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm font-medium text-slate-700">
                 承运商
@@ -198,6 +305,11 @@ export default async function ShipmentsPage() {
                     </p>
                     <p className="mt-1 text-xs text-slate-400">
                       发货 {s.shippedAt ? s.shippedAt.toLocaleDateString('zh-CN') : '-'} · 预计到达 {s.estimatedArrival ? s.estimatedArrival.toLocaleDateString('zh-CN') : '-'}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      包装 {s.packages || '-'} 箱 · 毛重 {s.grossWeightKg || '-'} kg · 净重 {s.netWeightKg || '-'} kg
+                      {s.lengthCm && s.widthCm && s.heightCm ? ` · ${s.lengthCm}×${s.widthCm}×${s.heightCm} cm` : ''}
+                      {s.incoterm ? ` · ${s.incoterm}` : ''}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2 lg:justify-end">

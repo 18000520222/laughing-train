@@ -12,7 +12,7 @@ const AUTOMATION_HEALTH_KEY =
   process.env.MAIL_CRON_KEY;
 
 export async function GET(req: NextRequest) {
-  if (!isCronAuthorized(req, [AUTOMATION_HEALTH_KEY], ['erdi-mail-2026'])) {
+  if (!isCronAuthorized(req, [AUTOMATION_HEALTH_KEY])) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

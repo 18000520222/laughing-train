@@ -1,8 +1,11 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { parseCsv, rowsToObjects } from '@/lib/csv';
 import { ensureCustomerCode } from '@/lib/customer-code';
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
+import { companyIsAccessible } from '@/lib/data-access';
+import { writeAuditLog } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,10 +24,8 @@ function pick(o: Record<string, string>, ...keys: string[]): string {
 }
 
 export async function POST(req: Request) {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  const session = await getSession();
+  if (!session || !can(session.role, 'customers.write')) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const form = await req.formData();
   const file = form.get('file') as File | null;
@@ -67,6 +68,10 @@ export async function POST(req: Request) {
       let existing = null as any;
       if (codeIn) existing = await prisma.company.findUnique({ where: { customerCode: codeIn } });
       if (!existing) existing = await prisma.company.findFirst({ where: { name } });
+      if (existing && !companyIsAccessible(session, existing)) {
+        errors.push({ row: rowNo, reason: '同名客户属于其他负责人，无权更新' });
+        continue;
+      }
 
       let companyId: string;
       if (existing) {
@@ -111,6 +116,7 @@ export async function POST(req: Request) {
             competitors: competitors || null,
             nextAction: nextAction || null,
             lastProfiledAt: mainProducts || customerProfile || painPoints || competitors || nextAction ? new Date() : null,
+            ownerId: session.role === 'SALES' ? session.userId : null,
           },
         });
         companyId = c.id;
@@ -130,6 +136,11 @@ export async function POST(req: Request) {
       errors.push({ row: rowNo, reason: String(e?.message || e).slice(0, 120) });
     }
   }
+
+  await writeAuditLog(session, {
+    action: 'CUSTOMERS_IMPORTED', entityType: 'Company', summary: '批量导入客户',
+    metadata: { total: objs.length, created, updated, skipped, errorCount: errors.length },
+  });
 
   return NextResponse.json({ ok: true, total: objs.length, created, updated, skipped, errorCount: errors.length, errors });
 }

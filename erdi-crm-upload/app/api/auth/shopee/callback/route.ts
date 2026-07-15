@@ -3,12 +3,15 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import crypto from 'crypto';
 import { canonicalOrigin } from '@/lib/site-url';
+import { consumeOAuthState } from '@/lib/oauth-state';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const origin = canonicalOrigin();
+  const oauthState = await consumeOAuthState('SHOPEE', searchParams.get('state'));
+  if (!oauthState) return NextResponse.redirect(new URL('/settings/channels?error=invalid_oauth_state', origin));
   const code = searchParams.get('code');
   const shopId = searchParams.get('shop_id');
   if (!code || !shopId) {
@@ -51,6 +54,7 @@ export async function GET(req: Request) {
         shopeeTokenExpiresAt: new Date(Date.now() + expireSec * 1000),
       },
     });
+    await prisma.auditLog.create({ data: { actorId: oauthState.userId, action: 'channel.oauth_connect', entityType: 'Channel', entityId: 'SHOPEE', summary: 'Shopee OAuth 授权完成' } });
     return NextResponse.redirect(new URL('/settings/channels?connected=shopee', origin));
   } catch (e: any) {
     return NextResponse.redirect(

@@ -133,8 +133,8 @@ export async function ingestInbound(msg: NormalizedMessage, options: IngestOptio
  * - 其他渠道:按电话尾 8 位匹配已有联系人。
  */
 async function matchOrCreateCompany(msg: NormalizedMessage) {
-  // 邮件渠道:email 匹配 + 自动建客户
-  if (msg.channel === 'EMAIL' && msg.senderId.includes('@')) {
+  // 任何渠道只要提供邮箱，都按邮箱去重并自动建档。
+  if (msg.senderId.includes('@')) {
     const email = msg.senderId.toLowerCase().trim();
 
     const contact = await prisma.contact.findFirst({
@@ -175,7 +175,7 @@ async function matchOrCreateCompany(msg: NormalizedMessage) {
           customerCode: await ensureCustomerCode(),
           name: companyName,
           domainNormalized: isFreeMail ? null : domain,
-          source: 'EMAIL',
+          source: channelLabel(msg.channel),
           type: 'INQUIRY',
           isPublic: false,
           ownerId: admin?.id ?? undefined,

@@ -1,10 +1,12 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { chat, isLLMAvailable } from '@/lib/llm';
 import { buildSalesRadar } from '@/lib/sales-radar';
 import { buildCustomerHealthRow } from '@/lib/customer-health';
+import { can, requirePermission } from '@/lib/permissions';
+import { companyIsAccessible } from '@/lib/data-access';
+import { writeAuditLog } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,11 +65,12 @@ function maskAccount(value: string | null) {
 
 async function updateCustomer(formData: FormData) {
   'use server';
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
+  const session = await requirePermission('customers.write');
 
   const id = String(formData.get('id') || '');
   if (!id) return;
+  const existing = await prisma.company.findUnique({ where: { id }, select: { ownerId: true, isPublic: true } });
+  if (!existing || !companyIsAccessible(session, existing)) redirect('/customers?error=forbidden');
   const s = (k: string) => {
     const v = formData.get(k);
     const str = v === null ? '' : String(v).trim();
@@ -85,7 +88,7 @@ async function updateCustomer(formData: FormData) {
       country: s('country'),
       industry: s('industry'),
       website: s('website'),
-      ownerId: s('ownerId'),
+      ownerId: session.role === 'SALES' ? existing.ownerId || session.userId : s('ownerId'),
       priorityScore: Math.max(0, Math.min(100, parseInt(String(formData.get('priorityScore') || '0'), 10) || 0)),
       mainProducts: s('mainProducts'),
       customerProfile: s('customerProfile'),
@@ -100,8 +103,7 @@ async function updateCustomer(formData: FormData) {
 
 async function addFollowUp(formData: FormData) {
   'use server';
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
+  const session = await requirePermission('customers.write');
 
   const companyId = String(formData.get('companyId') || '');
   const content = String(formData.get('content') || '').trim();
@@ -109,20 +111,15 @@ async function addFollowUp(formData: FormData) {
   
   if (!companyId || !content) return;
 
-  const authEmail = cookies().get('auth_email')?.value;
-  if (!authEmail) return;
-
-  const user = await prisma.user.findUnique({
-    where: { email: authEmail }
-  });
-  if (!user) return;
+  const company = await prisma.company.findUnique({ where: { id: companyId }, select: { ownerId: true, isPublic: true } });
+  if (!company || !companyIsAccessible(session, company)) redirect('/customers?error=forbidden');
 
   await prisma.followUp.create({
     data: {
       content,
       type,
       companyId,
-      userId: user.id
+      userId: session.userId
     }
   });
 
@@ -131,8 +128,7 @@ async function addFollowUp(formData: FormData) {
 
 async function createCustomerOrder(formData: FormData) {
   'use server';
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (!['SALES', 'SUPER_ADMIN', 'ADMIN'].includes(role)) return;
+  const session = await requirePermission('sales.manage');
 
   const companyId = String(formData.get('companyId') || '');
   const productName = String(formData.get('productName') || '').trim();
@@ -148,7 +144,7 @@ async function createCustomerOrder(formData: FormData) {
   if (!['USD', 'CNY', 'EUR'].includes(currency) || !['QUOTED', 'CONTRACT_SENT', 'DEAL_WON'].includes(salesStage)) return;
 
   const company = await prisma.company.findUnique({ where: { id: companyId } });
-  if (!company) return;
+  if (!company || !companyIsAccessible(session, company)) redirect('/customers?error=forbidden');
   const { ensureCustomerCode } = await import('@/lib/customer-code');
   const customerCode = company.customerCode || await ensureCustomerCode();
   const total = Math.round((quantity * unitPrice + Number.EPSILON) * 100) / 100;
@@ -174,7 +170,7 @@ async function createCustomerOrder(formData: FormData) {
         title: `${productName} - ${company.name}`,
         description: note,
         companyId,
-        ownerId: company.ownerId,
+        ownerId: company.ownerId || session.userId,
         productId: product?.id,
         amountUSD: currency === 'USD' ? total : null,
         amountCNY: currency === 'CNY' ? total : null,
@@ -196,7 +192,7 @@ async function createCustomerOrder(formData: FormData) {
       },
     });
     await tx.opportunityStageHistory.create({
-      data: { opportunityId: opportunity.id, toStage: oppStage, amountUSD: currency === 'USD' ? total : null, note: '客户页手工录入订单' },
+      data: { opportunityId: opportunity.id, toStage: oppStage, amountUSD: currency === 'USD' ? total : null, note: '客户页手工录入订单', changedById: session.userId },
     });
     if (salesStage === 'DEAL_WON') {
       await tx.paymentRecord.create({
@@ -206,7 +202,7 @@ async function createCustomerOrder(formData: FormData) {
           bankAccountId,
           amount: total,
           currency,
-          status: 'CONFIRMED',
+          status: can(session.role, 'finance.manage') ? 'CONFIRMED' : 'PENDING',
           method: paymentMethod,
           reference: paymentReference,
           paidAt: new Date(),
@@ -228,25 +224,23 @@ async function createCustomerOrder(formData: FormData) {
       },
     });
   });
+  await writeAuditLog(session, {
+    action: 'CUSTOMER_ORDER_CREATED', entityType: 'Company', entityId: companyId,
+    summary: `录入客户订单 ${productName}`, metadata: { quantity, unitPrice, currency, total, salesStage },
+  });
   redirect(`/customers/${companyId}`);
 }
 
 async function createCustomerRadarTask(formData: FormData) {
   'use server';
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
-
-  const authEmail = cookies().get('auth_email')?.value;
-  if (!authEmail) return;
-  const user = await prisma.user.findUnique({ where: { email: authEmail } });
-  if (!user) return;
+  const session = await requirePermission('sales.manage');
 
   const companyId = String(formData.get('companyId') || '');
   if (!companyId) return;
   const company = await prisma.company.findUnique({ where: { id: companyId } });
-  if (!company) return;
+  if (!company || !companyIsAccessible(session, company)) redirect('/customers?error=forbidden');
 
-  const ownerId = company.ownerId || user.id;
+  const ownerId = company.ownerId || session.userId;
   const sourceRef = `RADAR:${companyId}`;
   const exists = await prisma.salesTask.findFirst({
     where: { companyId, status: 'TODO', source: 'SALES_RADAR', sourceRef },
@@ -268,7 +262,7 @@ async function createCustomerRadarTask(formData: FormData) {
       priority,
       dueAt,
       ownerId,
-      createdById: user.id,
+      createdById: session.userId,
       companyId,
       source: 'SALES_RADAR',
       sourceRef,
@@ -289,20 +283,14 @@ async function createCustomerRadarTask(formData: FormData) {
 
 async function createCustomerHealthTask(formData: FormData) {
   'use server';
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
-
-  const authEmail = cookies().get('auth_email')?.value;
-  if (!authEmail) return;
-  const user = await prisma.user.findUnique({ where: { email: authEmail } });
-  if (!user) return;
+  const session = await requirePermission('sales.manage');
 
   const companyId = String(formData.get('companyId') || '');
   if (!companyId) return;
   const company = await prisma.company.findUnique({ where: { id: companyId } });
-  if (!company) return;
+  if (!company || !companyIsAccessible(session, company)) redirect('/customers?error=forbidden');
 
-  const ownerId = company.ownerId || user.id;
+  const ownerId = company.ownerId || session.userId;
   const sourceRef = `CUSTOMER_HEALTH:${companyId}`;
   const exists = await prisma.salesTask.findFirst({
     where: { companyId, status: 'TODO', source: 'CUSTOMER_HEALTH', sourceRef },
@@ -324,7 +312,7 @@ async function createCustomerHealthTask(formData: FormData) {
       priority,
       dueAt,
       ownerId,
-      createdById: user.id,
+      createdById: session.userId,
       companyId,
       source: 'CUSTOMER_HEALTH',
       sourceRef,
@@ -345,25 +333,19 @@ async function createCustomerHealthTask(formData: FormData) {
 
 async function completeCustomerSalesTask(formData: FormData) {
   'use server';
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
-
-  const authEmail = cookies().get('auth_email')?.value;
-  if (!authEmail) return;
-  const user = await prisma.user.findUnique({ where: { email: authEmail } });
-  if (!user) return;
+  const session = await requirePermission('sales.manage');
 
   const id = String(formData.get('id') || '');
   if (!id) return;
   const task = await prisma.salesTask.findUnique({ where: { id } });
   if (!task) return;
-  if (role === 'SALES' && task.ownerId !== user.id) return;
+  if (session.role === 'SALES' && task.ownerId !== session.userId) return;
 
   await prisma.salesTask.update({ where: { id }, data: { status: 'DONE', completedAt: new Date() } });
   await prisma.followUp.create({
     data: {
       companyId: task.companyId,
-      userId: user.id,
+      userId: session.userId,
       type: 'TASK',
       content: `完成销售任务: ${task.title}`,
     },
@@ -434,10 +416,8 @@ ${JSON.stringify(recentFollowUps, null, 2)}
 }
 
 export default async function CustomerDetailPage(props: any) {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
-    redirect('/');
-  }
+  const session = await requirePermission('customers.read');
+  const role = session.role;
 
   const id = props.params.id as string;
   const searchParams = props.searchParams || {};
@@ -461,6 +441,7 @@ export default async function CustomerDetailPage(props: any) {
   });
 
   if (!company) notFound();
+  if (!companyIsAccessible(session, company)) redirect('/customers?error=forbidden');
 
   const salesUsers = await prisma.user.findMany({
     where: { role: { in: ['SUPER_ADMIN', 'ADMIN', 'SALES'] as any }, isActive: true },

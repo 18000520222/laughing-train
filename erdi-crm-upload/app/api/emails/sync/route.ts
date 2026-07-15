@@ -1,15 +1,14 @@
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { syncAllEmailAccounts } from '@/lib/email-sync';
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function POST() {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (!['SUPER_ADMIN', 'ADMIN', 'SALES'].includes(role)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const session = await getSession();
+  if (!session || !can(session.role, 'inbox.manage')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   try {
     const result = await syncAllEmailAccounts({ lookback: 200, maxFetchPerAccount: 200, historyBatch: 100, backlogLimit: 100 });

@@ -1,16 +1,16 @@
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
-import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { requirePermission } from '@/lib/permissions';
+import { opportunityAccessWhere } from '@/lib/data-access';
 
 export const dynamic = 'force-dynamic';
 
 export default async function LogisticsPage() {
-  const session = await getSession();
-  if (!session) redirect('/');
+  const session = await requirePermission('logistics.manage');
 
   const [shipments, settings] = await Promise.all([
     prisma.shipment.findMany({
+      where: { opportunity: opportunityAccessWhere(session) },
       include: { opportunity: { include: { company: true } }, trackingEvents: { orderBy: { occurredAt: 'desc' }, take: 1 } },
       orderBy: { updatedAt: 'desc' },
       take: 80,

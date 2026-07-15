@@ -8,7 +8,7 @@ export const maxDuration = 60;
 const TASK_REMINDER_KEY = process.env.TASK_REMINDER_KEY || process.env.MAIL_CRON_KEY;
 
 export async function GET(req: NextRequest) {
-  if (!isCronAuthorized(req, [TASK_REMINDER_KEY], ['erdi-mail-2026'])) {
+  if (!isCronAuthorized(req, [TASK_REMINDER_KEY])) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

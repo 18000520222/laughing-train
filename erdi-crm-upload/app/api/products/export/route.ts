@@ -1,12 +1,13 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
 import { toCsv } from '@/lib/csv';
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (!role) return new Response('unauthorized', { status: 401 });
+  const session = await getSession();
+  if (!session || !can(session.role, 'products.read')) return new Response('forbidden', { status: 403 });
 
   const products = await prisma.product.findMany({ orderBy: { id: 'desc' } });
 

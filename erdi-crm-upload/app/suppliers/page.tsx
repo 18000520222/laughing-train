@@ -1,22 +1,22 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import Link from 'next/link';
+import { requirePermission } from '@/lib/permissions';
+import { writeAuditLog } from '@/lib/audit';
+import { randomBytes } from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SuppliersPage(props: any) {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
-    redirect('/');
-  }
+  await requirePermission('suppliers.manage');
 
   async function addSupplier(formData: FormData) {
     'use server';
+    const actor = await requirePermission('suppliers.manage');
     const name = String(formData.get('name') || '').trim();
     if (!name) return;
-    await prisma.supplier.create({
+    const supplier = await prisma.supplier.create({
       data: {
         name,
         category: String(formData.get('category') || '').trim() || null,
@@ -27,13 +27,106 @@ export default async function SuppliersPage(props: any) {
         paymentTerms: String(formData.get('paymentTerms') || '').trim() || null,
       },
     });
+    await writeAuditLog(actor, { action: 'supplier.create', entityType: 'Supplier', entityId: supplier.id, summary: supplier.name });
     revalidatePath('/suppliers');
   }
 
-  const suppliers = await prisma.supplier.findMany({
-    orderBy: { createdAt: 'desc' },
-    include: { _count: { select: { purchaseOrders: true } } },
-  });
+  async function createPurchaseOrder(formData: FormData) {
+    'use server';
+    const actor = await requirePermission('suppliers.manage');
+    const supplierId = String(formData.get('supplierId') || '');
+    const opportunityId = String(formData.get('opportunityId') || '') || null;
+    const productName = String(formData.get('productName') || '').trim();
+    const sku = String(formData.get('sku') || '').trim();
+    const quantity = Number(formData.get('quantity') || 0);
+    const unitPriceCNY = Number(formData.get('unitPriceCNY') || 0);
+    if (!supplierId || !productName || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPriceCNY) || unitPriceCNY < 0) return;
+    const [supplier, product, opportunity] = await Promise.all([
+      prisma.supplier.findUnique({ where: { id: supplierId }, select: { id: true } }),
+      sku ? prisma.product.findUnique({ where: { sku }, select: { id: true } }) : null,
+      opportunityId ? prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { id: true } }) : null,
+    ]);
+    if (!supplier || (opportunityId && !opportunity)) return;
+    const totalAmountCNY = Math.round(quantity * unitPriceCNY * 100) / 100;
+    const date = new Date().toISOString().slice(0, 10).replaceAll('-', '');
+    const poNumber = `PO-${date}-${randomBytes(3).toString('hex').toUpperCase()}`;
+    const purchaseOrder = await prisma.purchaseOrder.create({
+      data: {
+        poNumber,
+        supplierId,
+        opportunityId,
+        totalAmountCNY,
+        status: 'PENDING',
+        paymentTerms: String(formData.get('paymentTerms') || '').trim() || null,
+        expectedAt: formData.get('expectedAt') ? new Date(`${String(formData.get('expectedAt'))}T00:00:00`) : null,
+        createdById: actor.userId,
+        orderDetails: { schemaVersion: 1, itemCount: 1 },
+        lineItems: {
+          create: {
+            productId: product?.id || null,
+            productName,
+            sku: sku || null,
+            quantity,
+            unitPriceCNY,
+            totalAmountCNY,
+            note: String(formData.get('note') || '').trim() || null,
+          },
+        },
+      },
+    });
+    await writeAuditLog(actor, {
+      action: 'purchase_order.create',
+      entityType: 'PurchaseOrder',
+      entityId: purchaseOrder.id,
+      summary: `${poNumber} · CNY ${totalAmountCNY}`,
+      metadata: { supplierId, opportunityId },
+    });
+    revalidatePath('/suppliers');
+    revalidatePath('/finance');
+  }
+
+  async function updatePurchaseOrderStatus(formData: FormData) {
+    'use server';
+    const actor = await requirePermission('suppliers.manage');
+    const id = String(formData.get('id') || '');
+    const status = String(formData.get('status') || '');
+    const order = await prisma.purchaseOrder.findUnique({ where: { id }, select: { id: true, status: true, poNumber: true } });
+    if (!order) return;
+    const allowed: Record<string, string[]> = {
+      PENDING: ['CANCELLED'],
+      APPROVED: ['ORDERED', 'CANCELLED'],
+      ORDERED: ['RECEIVED'],
+    };
+    if (!(allowed[order.status] || []).includes(status)) return;
+    await prisma.purchaseOrder.update({ where: { id }, data: { status } });
+    await writeAuditLog(actor, { action: 'purchase_order.status_update', entityType: 'PurchaseOrder', entityId: id, summary: `${order.poNumber}: ${order.status} -> ${status}` });
+    revalidatePath('/suppliers');
+    revalidatePath('/finance');
+  }
+
+  const [suppliers, purchaseOrders, opportunities] = await Promise.all([
+    prisma.supplier.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { _count: { select: { purchaseOrders: true } } },
+    }),
+    prisma.purchaseOrder.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        supplier: true,
+        opportunity: { include: { company: true } },
+        lineItems: true,
+        createdBy: { select: { name: true, email: true } },
+        approvedBy: { select: { name: true, email: true } },
+      },
+      take: 100,
+    }),
+    prisma.opportunity.findMany({
+      where: { stage: { not: 'CLOSED_LOST' } },
+      include: { company: true },
+      orderBy: { updatedAt: 'desc' },
+      take: 150,
+    }),
+  ]);
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-8">
@@ -90,6 +183,44 @@ export default async function SuppliersPage(props: any) {
           </form>
         </details>
 
+        <details className="mb-6 overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+          <summary className="cursor-pointer px-6 py-4 font-bold text-gray-800 hover:bg-gray-50">➕ 新建采购单</summary>
+          <form action={createPurchaseOrder} className="grid grid-cols-1 gap-4 p-6 pt-0 md:grid-cols-3">
+            <FieldSelect name="supplierId" label="供应商 *" required options={suppliers.map((item) => ({ value: item.id, label: item.name }))} />
+            <FieldSelect name="opportunityId" label="关联客户订单" options={opportunities.map((item) => ({ value: item.id, label: `${item.company.name} · ${item.title}` }))} />
+            <FieldInput name="productName" label="产品名称 *" required />
+            <FieldInput name="sku" label="SKU（可匹配产品库）" />
+            <FieldInput name="quantity" label="数量 *" type="number" required step="0.01" />
+            <FieldInput name="unitPriceCNY" label="采购单价 CNY *" type="number" required step="0.01" />
+            <FieldInput name="paymentTerms" label="付款条件" />
+            <FieldInput name="expectedAt" label="预计到货" type="date" />
+            <FieldInput name="note" label="规格 / 备注" />
+            <div className="md:col-span-3"><button className="rounded-lg bg-indigo-600 px-6 py-2.5 font-bold text-white hover:bg-indigo-500">提交采购审批</button></div>
+          </form>
+        </details>
+
+        <section className="mb-6 overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+          <div className="border-b border-gray-100 p-5"><h2 className="text-lg font-black text-gray-900">采购单执行</h2><p className="text-sm text-gray-500">待审批由财务中心复核；审批后采购可下单并登记收货。</p></div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-gray-50 text-gray-600"><tr><th className="p-4">采购单</th><th className="p-4">供应商 / 客户订单</th><th className="p-4">产品</th><th className="p-4 text-right">金额</th><th className="p-4">状态</th><th className="p-4 text-right">操作</th></tr></thead>
+              <tbody>
+                {purchaseOrders.map((order) => (
+                  <tr key={order.id} className="border-t border-gray-100">
+                    <td className="p-4"><p className="font-mono font-bold">{order.poNumber}</p><p className="text-xs text-gray-400">{order.createdBy?.name || order.createdBy?.email || '-'}</p></td>
+                    <td className="p-4"><p className="font-bold">{order.supplier.name}</p><p className="text-xs text-gray-500">{order.opportunity ? `${order.opportunity.company.name} · ${order.opportunity.title}` : '未关联销售订单'}</p></td>
+                    <td className="p-4">{order.lineItems.map((item) => <p key={item.id}>{item.productName} × {item.quantity}</p>)}</td>
+                    <td className="p-4 text-right font-black">¥{order.totalAmountCNY.toLocaleString()}</td>
+                    <td className="p-4"><span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-bold">{purchaseStatus(order.status)}</span></td>
+                    <td className="p-4"><div className="flex justify-end gap-2">{order.status === 'PENDING' && <OrderStatusButton action={updatePurchaseOrderStatus} id={order.id} status="CANCELLED" label="撤销" />}{order.status === 'APPROVED' && <OrderStatusButton action={updatePurchaseOrderStatus} id={order.id} status="ORDERED" label="已下单" />}{order.status === 'ORDERED' && <OrderStatusButton action={updatePurchaseOrderStatus} id={order.id} status="RECEIVED" label="已收货" />}</div></td>
+                  </tr>
+                ))}
+                {purchaseOrders.length === 0 && <tr><td colSpan={6} className="p-10 text-center text-gray-400">暂无采购单</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         {/* 列表 */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <table className="w-full text-left border-collapse">
@@ -134,4 +265,20 @@ export default async function SuppliersPage(props: any) {
       </div>
     </div>
   );
+}
+
+function FieldInput({ name, label, type = 'text', required = false, step }: { name: string; label: string; type?: string; required?: boolean; step?: string }) {
+  return <label className="block text-xs font-bold text-gray-500">{label}<input name={name} type={type} required={required} min={type === 'number' ? '0' : undefined} step={step} className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" /></label>;
+}
+
+function FieldSelect({ name, label, options, required = false }: { name: string; label: string; options: Array<{ value: string; label: string }>; required?: boolean }) {
+  return <label className="block text-xs font-bold text-gray-500">{label}<select name={name} required={required} className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 text-sm"><option value="">请选择</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
+}
+
+function OrderStatusButton({ action, id, status, label }: { action: (formData: FormData) => Promise<void>; id: string; status: string; label: string }) {
+  return <form action={action}><input type="hidden" name="id" value={id} /><input type="hidden" name="status" value={status} /><button className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-bold hover:bg-gray-50">{label}</button></form>;
+}
+
+function purchaseStatus(status: string) {
+  return ({ PENDING: '待审批', APPROVED: '已审批', ORDERED: '已下单', RECEIVED: '已收货', CANCELLED: '已取消' } as Record<string, string>)[status] || status;
 }

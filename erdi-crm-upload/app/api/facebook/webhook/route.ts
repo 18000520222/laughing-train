@@ -3,15 +3,16 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { translateText } from '@/lib/translate';
 import { ingestInbound } from '@/lib/inbox';
+import { verifyMetaWebhookSignature } from '@/lib/meta-webhook';
 
 
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
-  const expected = settings?.fbVerifyToken || process.env.FB_VERIFY_TOKEN || 'erdi-fb-verify';
+  const expected = settings?.fbVerifyToken || process.env.FB_VERIFY_TOKEN || '';
 
-  if (searchParams.get('hub.mode') === 'subscribe' && searchParams.get('hub.verify_token') === expected) {
+  if (expected && searchParams.get('hub.mode') === 'subscribe' && searchParams.get('hub.verify_token') === expected) {
     return new Response(searchParams.get('hub.challenge') || '', { status: 200 });
   }
   return new Response('forbidden', { status: 403 });
@@ -19,7 +20,11 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const payload = await req.json();
+    const rawBody = await req.text();
+    if (!(await verifyMetaWebhookSignature(rawBody, req.headers.get('x-hub-signature-256')))) {
+      return NextResponse.json({ error: 'Invalid Meta webhook signature' }, { status: 401 });
+    }
+    const payload = JSON.parse(rawBody);
     const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
     const libreUrl = settings?.libretranslateUrl || 'https://libretranslate.com';
 

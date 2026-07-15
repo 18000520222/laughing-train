@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { ingestInbound } from '@/lib/inbox';
 import { whatsappAdapter } from '@/lib/channels/whatsapp';
 import type { ChannelType, NormalizedMessage } from '@/lib/channels/types';
+import { verifySha256Webhook } from '@/lib/webhook-auth';
 
 export async function expectedMetaVerifyToken() {
   const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
@@ -11,14 +12,20 @@ export async function expectedMetaVerifyToken() {
     settings?.whatsappVerifyToken ||
     process.env.FB_VERIFY_TOKEN ||
     process.env.WHATSAPP_VERIFY_TOKEN ||
-    'ERDI_META_CRM_2026'
+    ''
   );
+}
+
+export async function verifyMetaWebhookSignature(rawBody: string, signature: string | null) {
+  const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
+  const appSecret = process.env.META_APP_SECRET || settings?.fbAppSecret || process.env.FB_APP_SECRET || '';
+  return verifySha256Webhook(rawBody, signature, appSecret);
 }
 
 export async function verifyMetaWebhook(req: Request) {
   const { searchParams } = new URL(req.url);
   const expected = await expectedMetaVerifyToken();
-  if (searchParams.get('hub.mode') === 'subscribe' && searchParams.get('hub.verify_token') === expected) {
+  if (expected && searchParams.get('hub.mode') === 'subscribe' && searchParams.get('hub.verify_token') === expected) {
     return new Response(searchParams.get('hub.challenge') || '', { status: 200 });
   }
   return new Response('forbidden', { status: 403 });

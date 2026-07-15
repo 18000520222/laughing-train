@@ -2,12 +2,15 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { canonicalOrigin } from '@/lib/site-url';
+import { consumeOAuthState } from '@/lib/oauth-state';
 
 
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const origin = canonicalOrigin();
+  const oauthState = await consumeOAuthState('LINKEDIN', searchParams.get('state'));
+  if (!oauthState) return NextResponse.redirect(new URL('/social?error=invalid_oauth_state', origin));
   const code = searchParams.get('code');
   if (!code) return NextResponse.redirect(new URL('/social?error=no_code', origin));
 
@@ -56,6 +59,7 @@ export async function GET(req: Request) {
       expiresAt,
     },
   });
+  await prisma.auditLog.create({ data: { actorId: oauthState.userId, action: 'channel.oauth_connect', entityType: 'Channel', entityId: 'LINKEDIN', summary: 'LinkedIn OAuth 授权完成' } });
 
   return NextResponse.redirect(new URL('/social?connected=linkedin', origin));
 }

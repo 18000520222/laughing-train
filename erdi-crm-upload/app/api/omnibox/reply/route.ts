@@ -11,6 +11,10 @@ import { shopeeAdapter } from '@/lib/channels/shopee';
 import { salesmartlyAdapter } from '@/lib/channels/salesmartly';
 import { chatwootAdapter } from '@/lib/channels/chatwoot';
 import type { ChannelAdapter } from '@/lib/channels/types';
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
+import { inboxAccessWhere } from '@/lib/data-access';
+import { writeAuditLog } from '@/lib/audit';
 
 // 渠道 → 适配器注册表(全渠道统一回复入口)
 const ADAPTERS: Partial<Record<string, ChannelAdapter>> = {
@@ -24,12 +28,14 @@ const ADAPTERS: Partial<Record<string, ChannelAdapter>> = {
 
 export async function POST(req: Request) {
   try {
+    const session = await getSession();
+    if (!session || !can(session.role, 'inbox.manage')) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const { inboxId, replyZh } = await req.json();
     if (!inboxId || !replyZh) {
       return NextResponse.json({ error: 'inboxId & replyZh required' }, { status: 400 });
     }
 
-    const inbox = await prisma.inboxMessage.findUnique({ where: { id: inboxId } });
+    const inbox = await prisma.inboxMessage.findFirst({ where: { id: inboxId, AND: [inboxAccessWhere(session)] } });
     if (!inbox) return NextResponse.json({ error: '消息不存在' }, { status: 404 });
 
     const adapter = ADAPTERS[inbox.channel];
@@ -54,6 +60,12 @@ export async function POST(req: Request) {
     }
 
     await markReplied(inboxId, finalText, replyZh);
+    await writeAuditLog(session, {
+      action: 'inbox.reply_send',
+      entityType: 'InboxMessage',
+      entityId: inboxId,
+      summary: `通过 ${inbox.channel} 回复客户`,
+    });
 
     return NextResponse.json({ ok: true, sentText: finalText });
   } catch (err: any) {

@@ -1,7 +1,8 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { can, requirePermission } from '@/lib/permissions';
+import { writeAuditLog } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,33 +20,38 @@ function str(formData: FormData, k: string): string | null {
 
 async function addProduct(formData: FormData) {
   'use server';
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (!role) return;
-  const sku = str(formData, 'sku');
+  const actor = await requirePermission('products.write');
+  const sku = str(formData, 'sku')?.toUpperCase();
   const name = str(formData, 'name');
   const category = str(formData, 'category');
   if (!sku || !name || !category) return;
-  await prisma.product.create({
+  const product = await prisma.product.create({
     data: {
       sku,
       name,
       enName: str(formData, 'enName'),
       category,
       basePriceUSD: num(formData, 'basePriceUSD'),
+      basePriceCNY: num(formData, 'basePriceCNY'),
       hsCode: str(formData, 'hsCode'),
       specifications: str(formData, 'specifications'),
+      material: str(formData, 'material'),
+      usage: str(formData, 'usage'),
+      origin: str(formData, 'origin'),
+      unit: str(formData, 'unit'),
+      customsCondition: str(formData, 'customsCondition'),
     },
   });
+  await writeAuditLog(actor, { action: 'product.create', entityType: 'Product', entityId: product.id, summary: `${sku} · ${name}` });
   redirect('/products');
 }
 
 async function updateProduct(formData: FormData) {
   'use server';
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (!role) return;
+  const actor = await requirePermission('products.write');
   const id = String(formData.get('id') || '');
   if (!id) return;
-  const sku = str(formData, 'sku');
+  const sku = str(formData, 'sku')?.toUpperCase();
   const name = str(formData, 'name');
   const category = str(formData, 'category');
   if (!sku || !name || !category) return;
@@ -57,33 +63,36 @@ async function updateProduct(formData: FormData) {
       enName: str(formData, 'enName'),
       category,
       basePriceUSD: num(formData, 'basePriceUSD'),
+      basePriceCNY: num(formData, 'basePriceCNY'),
       hsCode: str(formData, 'hsCode'),
       specifications: str(formData, 'specifications'),
+      material: str(formData, 'material'),
+      usage: str(formData, 'usage'),
+      origin: str(formData, 'origin'),
+      unit: str(formData, 'unit'),
+      customsCondition: str(formData, 'customsCondition'),
+      isActive: true,
     },
   });
+  await writeAuditLog(actor, { action: 'product.update', entityType: 'Product', entityId: id, summary: `${sku} · ${name}` });
   redirect('/products');
 }
 
 async function deleteProduct(formData: FormData) {
   'use server';
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
+  const session = await requirePermission('products.write');
+  if (session.role !== 'SUPER_ADMIN' && session.role !== 'ADMIN') return;
   const id = String(formData.get('id') || '');
   if (!id) return;
-  // 有关联商机的产品不物理删除，改为停用，避免破坏单据
-  const linked = await prisma.opportunity.count({ where: { productId: id } });
-  if (linked > 0) {
-    await prisma.product.update({ where: { id }, data: { isActive: false } });
-  } else {
-    await prisma.product.delete({ where: { id } });
-  }
+  const product = await prisma.product.update({ where: { id }, data: { isActive: false } });
+  await writeAuditLog(session, { action: 'product.deactivate', entityType: 'Product', entityId: id, summary: `${product.sku} · ${product.name}` });
   redirect('/products');
 }
 
 export default async function ProductsPage() {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (!role) redirect('/');
-  const canDelete = role === 'SUPER_ADMIN' || role === 'ADMIN';
+  const session = await requirePermission('products.read');
+  const canWrite = can(session.role, 'products.write');
+  const canDelete = session.role === 'SUPER_ADMIN' || session.role === 'ADMIN';
 
   const products = await prisma.product.findMany({ orderBy: { id: 'desc' } });
 
@@ -124,7 +133,7 @@ export default async function ProductsPage() {
                       <td className="p-4 text-gray-600">{p.hsCode || '-'}</td>
                       <td className="p-4 text-right font-bold text-green-600">{p.basePriceUSD != null ? `$${p.basePriceUSD}` : '-'}</td>
                       <td className="p-4 text-right whitespace-nowrap">
-                        <details className="inline-block text-left">
+                        {canWrite && <details className="inline-block text-left">
                           <summary className="cursor-pointer list-none text-blue-600 hover:underline text-xs font-medium inline">✏️ 编辑</summary>
                           <div className="absolute z-10 mt-2 right-8 w-80 bg-white border border-gray-200 rounded-xl shadow-lg p-4">
                             <form action={updateProduct} className="space-y-2">
@@ -133,13 +142,15 @@ export default async function ProductsPage() {
                               <input name="name" defaultValue={p.name} placeholder="中文品名" required className="w-full border p-2 rounded text-sm" />
                               <input name="enName" defaultValue={p.enName || ''} placeholder="英文品名" className="w-full border p-2 rounded text-sm" />
                               <input name="category" defaultValue={p.category} placeholder="分类" required className="w-full border p-2 rounded text-sm" />
-                              <input name="basePriceUSD" type="number" step="0.01" defaultValue={p.basePriceUSD ?? ''} placeholder="售价 USD" className="w-full border p-2 rounded text-sm" />
+                              <div className="grid grid-cols-2 gap-2"><input name="basePriceUSD" type="number" step="0.01" defaultValue={p.basePriceUSD ?? ''} placeholder="售价 USD" className="w-full border p-2 rounded text-sm" /><input name="basePriceCNY" type="number" step="0.01" defaultValue={p.basePriceCNY ?? ''} placeholder="售价 CNY" className="w-full border p-2 rounded text-sm" /></div>
                               <input name="hsCode" defaultValue={p.hsCode || ''} placeholder="HS 编码" className="w-full border p-2 rounded text-sm" />
                               <textarea name="specifications" defaultValue={p.specifications || ''} placeholder="规格型号" rows={2} className="w-full border p-2 rounded text-sm resize-none" />
+                              <div className="grid grid-cols-2 gap-2"><input name="material" defaultValue={p.material || ''} placeholder="材质" className="w-full border p-2 rounded text-sm" /><input name="usage" defaultValue={p.usage || ''} placeholder="用途" className="w-full border p-2 rounded text-sm" /><input name="origin" defaultValue={p.origin || ''} placeholder="原产国" className="w-full border p-2 rounded text-sm" /><input name="unit" defaultValue={p.unit || ''} placeholder="单位" className="w-full border p-2 rounded text-sm" /></div>
+                              <input name="customsCondition" defaultValue={p.customsCondition || ''} placeholder="报关要素" className="w-full border p-2 rounded text-sm" />
                               <button type="submit" className="w-full bg-blue-600 text-white font-bold py-2 rounded text-sm hover:bg-blue-700">保存修改</button>
                             </form>
                           </div>
-                        </details>
+                        </details>}
                         {canDelete && (
                           <form action={deleteProduct} className="inline-block ml-3">
                             <input type="hidden" name="id" value={p.id} />
@@ -153,7 +164,7 @@ export default async function ProductsPage() {
             </table>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 h-fit sticky top-8">
+          {canWrite && <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 h-fit sticky top-8">
             <h2 className="text-lg font-bold text-gray-800 mb-6">➕ 新增产品档案</h2>
             <form action={addProduct} className="space-y-4">
               <input type="text" name="sku" placeholder="SKU 编号 (如: ERDI-L1)" required className="w-full border p-3 rounded-lg text-sm" />
@@ -161,13 +172,16 @@ export default async function ProductsPage() {
               <input type="text" name="enName" placeholder="英文品名 (用于外贸单据)" className="w-full border p-3 rounded-lg text-sm" />
               <input type="text" name="category" placeholder="产品分类 (如: 测距模块)" required className="w-full border p-3 rounded-lg text-sm" />
               <input type="number" step="0.01" name="basePriceUSD" placeholder="基础售价 (USD)" className="w-full border p-3 rounded-lg text-sm" />
+              <input type="number" step="0.01" name="basePriceCNY" placeholder="基础售价 (CNY)" className="w-full border p-3 rounded-lg text-sm" />
               <input type="text" name="hsCode" placeholder="海关 HS 编码 (报关用)" className="w-full border p-3 rounded-lg text-sm" />
               <textarea name="specifications" placeholder="规格型号 (用于 PI/CI)" rows={3} className="w-full border p-3 rounded-lg text-sm resize-none"></textarea>
+              <div className="grid grid-cols-2 gap-2"><input name="material" placeholder="材质" className="w-full border p-3 rounded-lg text-sm" /><input name="usage" placeholder="用途" className="w-full border p-3 rounded-lg text-sm" /><input name="origin" defaultValue="China" placeholder="原产国" className="w-full border p-3 rounded-lg text-sm" /><input name="unit" placeholder="单位，如 pcs" className="w-full border p-3 rounded-lg text-sm" /></div>
+              <input name="customsCondition" placeholder="报关申报要素" className="w-full border p-3 rounded-lg text-sm" />
               <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition-colors">
                 保存入库
               </button>
             </form>
-          </div>
+          </div>}
         </div>
       </div>
     </div>

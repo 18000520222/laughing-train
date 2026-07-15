@@ -1,11 +1,11 @@
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import type { InboxStatus, SalesTaskPriority } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 
-const ALLOWED_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SALES']);
 const PENDING_STATUSES: InboxStatus[] = ['NEW', 'AI_DRAFTED'];
 const LOW_VALUE_INTENTS = new Set(['SPAM', 'GREETING', 'OTHER']);
 
@@ -35,19 +35,9 @@ export async function POST(req: Request) {
 }
 
 async function requireOmniboxUser() {
-  const cookieStore = cookies();
-  const role = (cookieStore.get('auth_role')?.value || '').toUpperCase();
-  const email = cookieStore.get('auth_email')?.value || '';
-  const userId = cookieStore.get('auth_userId')?.value || '';
-  if (!ALLOWED_ROLES.has(role)) return null;
-
-  const user = userId
-    ? await prisma.user.findUnique({ where: { id: userId } })
-    : email
-    ? await prisma.user.findUnique({ where: { email } })
-    : null;
-  if (!user || !user.isActive) return null;
-  return { user, role };
+  const session = await getSession();
+  if (!session || !can(session.role, 'inbox.manage')) return null;
+  return { user: { id: session.userId, email: session.email, name: session.name }, role: session.role };
 }
 
 async function createTasksFromInbox(ids: string[], createdById: string) {

@@ -1,11 +1,12 @@
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import type { SalesTaskPriority, SalesTaskType } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
+import { opportunityAccessWhere } from '@/lib/data-access';
 
 export const dynamic = 'force-dynamic';
 
-const ALLOWED_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SALES']);
 const OPEN_STAGES = ['UNPROCESSED', 'REPLIED', 'QUOTING', 'NEGOTIATING', 'SPEC_CONFIRMING'];
 const SOURCE = 'OPPORTUNITY_RESCUE_BULK';
 
@@ -28,29 +29,19 @@ export async function POST(req: Request) {
   const ids = parseIds(form.get('ids'));
   if (ids.length === 0) return redirectBack(req, 'empty', 0);
 
-  const result = await rescueOpportunities(ids, auth.user.id, action);
+  const result = await rescueOpportunities(ids, auth.user.id, action, auth.session);
   return redirectBack(req, action === 'rescue_priority' ? 'priority' : 'rescued', result.created, result.updated, result.skipped);
 }
 
 async function requireOpportunityRescueUser() {
-  const cookieStore = cookies();
-  const role = (cookieStore.get('auth_role')?.value || '').toUpperCase();
-  const email = cookieStore.get('auth_email')?.value || '';
-  const userId = cookieStore.get('auth_userId')?.value || '';
-  if (!ALLOWED_ROLES.has(role)) return null;
-
-  const user = userId
-    ? await prisma.user.findUnique({ where: { id: userId } })
-    : email
-    ? await prisma.user.findUnique({ where: { email } })
-    : null;
-  if (!user || !user.isActive) return null;
-  return { user, role };
+  const session = await getSession();
+  if (!session || !can(session.role, 'sales.manage')) return null;
+  return { user: { id: session.userId, email: session.email, name: session.name }, role: session.role, session };
 }
 
-async function rescueOpportunities(ids: string[], currentUserId: string, action: string) {
+async function rescueOpportunities(ids: string[], currentUserId: string, action: string, session: NonNullable<Awaited<ReturnType<typeof getSession>>>) {
   const opportunities = await prisma.opportunity.findMany({
-    where: { id: { in: ids }, stage: { in: OPEN_STAGES as any } },
+    where: { ...opportunityAccessWhere(session), id: { in: ids }, stage: { in: OPEN_STAGES as any } },
     include: {
       company: { include: { owner: true, contacts: { take: 2, orderBy: { createdAt: 'asc' } } } },
       owner: true,

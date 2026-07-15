@@ -1,12 +1,11 @@
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { sendMorningBriefingNotifications } from '@/lib/sales-morning-briefing-watch';
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'];
-const ALLOWED_ROLES = new Set(ADMIN_ROLES);
 
 export async function POST(req: Request) {
   const auth = await requireAdminUser();
@@ -22,19 +21,9 @@ export async function POST(req: Request) {
 }
 
 async function requireAdminUser() {
-  const cookieStore = cookies();
-  const role = (cookieStore.get('auth_role')?.value || '').toUpperCase();
-  const email = cookieStore.get('auth_email')?.value || '';
-  const userId = cookieStore.get('auth_userId')?.value || '';
-  if (!ALLOWED_ROLES.has(role)) return null;
-
-  const user = userId
-    ? await prisma.user.findUnique({ where: { id: userId } })
-    : email
-    ? await prisma.user.findUnique({ where: { email } })
-    : null;
-  if (!user || !user.isActive) return null;
-  return { user, role };
+  const session = await getSession();
+  if (!session || !ADMIN_ROLES.includes(session.role)) return null;
+  return { user: { id: session.userId, email: session.email, name: session.name }, role: session.role };
 }
 
 function parsePriorityItemIds(form: FormData) {

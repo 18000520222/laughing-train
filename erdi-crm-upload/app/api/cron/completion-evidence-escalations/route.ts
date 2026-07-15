@@ -9,7 +9,7 @@ const COMPLETION_EVIDENCE_ESCALATION_KEY =
   process.env.COMPLETION_EVIDENCE_ESCALATION_KEY || process.env.COMPLETION_EVIDENCE_KEY || process.env.TASK_ESCALATION_KEY || process.env.TASK_REMINDER_KEY || process.env.MAIL_CRON_KEY;
 
 export async function GET(req: NextRequest) {
-  if (!isCronAuthorized(req, [COMPLETION_EVIDENCE_ESCALATION_KEY], ['erdi-mail-2026'])) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (!isCronAuthorized(req, [COMPLETION_EVIDENCE_ESCALATION_KEY])) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
   const limit = intParam(req, 'limit', 50);
   const thresholdHours = intParam(req, 'thresholdHours', 12);

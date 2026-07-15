@@ -1,175 +1,197 @@
-import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
+import bcrypt from 'bcryptjs';
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
-import bcrypt from 'bcryptjs';
+import { redirect } from 'next/navigation';
+import { prisma } from '@/lib/prisma';
+import { ROLES, normalizeRole, type Role } from '@/lib/auth';
+import { requirePermission } from '@/lib/permissions';
+import { writeAuditLog } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
 
+const ROLE_LABEL: Record<Role, string> = {
+  SUPER_ADMIN: '超级管理员',
+  ADMIN: '管理员',
+  SALES: '业务员',
+  PURCHASING: '采购',
+  FINANCE: '财务',
+  DOCUMENT: '单证',
+  OPERATIONS: '运营',
+};
 
-export default async function UsersPage() {
-  const cookieStore = cookies();
-  const role = cookieStore.get('auth_role')?.value;
-  const currentTitle = cookieStore.get('auth_title')?.value || '人员管理';
+function passwordIsValid(value: string) {
+  return value.length >= 12 && /[A-Za-z]/.test(value) && /\d/.test(value);
+}
 
-  if (!role || (role !== 'SUPER_ADMIN' && role !== 'ADMIN')) {
-    redirect('/dashboard?error=unauthorized');
-  }
-
-  const users = await prisma.user.findMany({
-    orderBy: { createdAt: 'desc' }
-  });
-
-  const roleMap: Record<string, string> = {
-    'SUPER_ADMIN': '超级管理员',
-    'ADMIN': '管理员',
-    'SALES': '业务员',
-    'FINANCE': '财务',
-    'PURCHASING': '采购',
-    'DOCUMENT': '单证',
-    'OPERATIONS': '运营'
-  };
+export default async function UsersPage({ searchParams }: { searchParams?: Promise<{ error?: string; ok?: string }> }) {
+  const session = await requirePermission('users.manage');
+  const query = searchParams ? await searchParams : {};
+  const users = await prisma.user.findMany({ orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }] });
 
   async function addUser(formData: FormData) {
     'use server';
-    const email = formData.get('email') as string;
-    const name = formData.get('name') as string;
-    const pwd = formData.get('password') as string;
-    const r = formData.get('role') as any;
+    const actor = await requirePermission('users.manage');
+    const email = String(formData.get('email') || '').trim().toLowerCase();
+    const name = String(formData.get('name') || '').trim();
+    const password = String(formData.get('password') || '');
+    const role = normalizeRole(String(formData.get('role') || 'SALES'));
+    if (!email || !name || !passwordIsValid(password)) redirect('/users?error=password');
+    if (role === 'SUPER_ADMIN' && actor.role !== 'SUPER_ADMIN') redirect('/users?error=forbidden');
 
-    if (email && name && pwd) {
-      const hash = await bcrypt.hash(pwd, 10);
-      await prisma.user.create({
-        data: { email, name, password: hash, role: r }
+    const hash = await bcrypt.hash(password, 12);
+    try {
+      const user = await prisma.user.create({
+        data: { email, name, password: hash, role, mustChangePassword: true },
       });
-      revalidatePath('/users');
+      await writeAuditLog(actor, {
+        action: 'USER_CREATED', entityType: 'User', entityId: user.id,
+        summary: `创建员工账号 ${email}`, metadata: { role },
+      });
+    } catch {
+      redirect('/users?error=duplicate');
     }
+    revalidatePath('/users');
+    redirect('/users?ok=created');
   }
 
-  async function toggleStatus(formData: FormData) {
+  async function updateUser(formData: FormData) {
     'use server';
-    const id = formData.get('id') as string;
-    const currentStatus = formData.get('isActive') === 'true';
-    if (id) {
-      await prisma.user.update({
-        where: { id },
-        data: { isActive: !currentStatus }
-      });
-      revalidatePath('/users');
-    }
+    const actor = await requirePermission('users.manage');
+    const id = String(formData.get('id') || '');
+    const target = await prisma.user.findUnique({ where: { id } });
+    if (!target) redirect('/users?error=missing');
+
+    const nextRole = normalizeRole(String(formData.get('role') || target.role));
+    const nextActive = formData.get('isActive') === 'true';
+    const protectedTarget = target.role === 'SUPER_ADMIN' && actor.role !== 'SUPER_ADMIN';
+    if (protectedTarget || (target.id === actor.userId && !nextActive)) redirect('/users?error=forbidden');
+    if (nextRole === 'SUPER_ADMIN' && actor.role !== 'SUPER_ADMIN') redirect('/users?error=forbidden');
+
+    await prisma.user.update({
+      where: { id },
+      data: {
+        role: nextRole,
+        isActive: nextActive,
+        sessionVersion: { increment: 1 },
+      },
+    });
+    await writeAuditLog(actor, {
+      action: 'USER_UPDATED', entityType: 'User', entityId: id,
+      summary: `更新员工 ${target.email} 的角色或状态`,
+      metadata: { previousRole: target.role, role: nextRole, previousActive: target.isActive, isActive: nextActive },
+    });
+    revalidatePath('/users');
+    redirect('/users?ok=updated');
   }
+
+  async function resetPassword(formData: FormData) {
+    'use server';
+    const actor = await requirePermission('users.manage');
+    const id = String(formData.get('id') || '');
+    const password = String(formData.get('password') || '');
+    if (!passwordIsValid(password)) redirect('/users?error=password');
+    const target = await prisma.user.findUnique({ where: { id } });
+    if (!target || (target.role === 'SUPER_ADMIN' && actor.role !== 'SUPER_ADMIN')) redirect('/users?error=forbidden');
+
+    await prisma.user.update({
+      where: { id },
+      data: {
+        password: await bcrypt.hash(password, 12),
+        mustChangePassword: true,
+        passwordChangedAt: new Date(),
+        failedLoginCount: 0,
+        lockedUntil: null,
+        sessionVersion: { increment: 1 },
+      },
+    });
+    await writeAuditLog(actor, {
+      action: 'USER_PASSWORD_RESET', entityType: 'User', entityId: id,
+      summary: `管理员重置员工 ${target.email} 的密码并注销旧会话`,
+    });
+    revalidatePath('/users');
+    redirect('/users?ok=password');
+  }
+
+  const errorMessage = {
+    password: '密码至少 12 位，并同时包含字母和数字。',
+    duplicate: '该邮箱已存在。',
+    forbidden: '不允许修改该账号或执行该操作。',
+    missing: '员工账号不存在。',
+  }[query.error || ''];
 
   return (
-    <div className="min-h-screen bg-slate-50 p-8 font-sans">
-      <header className="mb-8 flex justify-between items-center bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+    <div className="min-h-screen bg-slate-50 p-6 md:p-8">
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800 tracking-tight">ERDI 员工账号与权限管理</h1>
-          <p className="text-sm text-gray-500 mt-1">当前登录: {currentTitle} | 仅超级管理员和管理员可见</p>
+          <h1 className="text-2xl font-black text-slate-900">员工账号与权限</h1>
+          <p className="mt-1 text-sm text-slate-500">角色决定菜单和数据操作权限；停用、改角色、重置密码会立即注销旧会话。</p>
         </div>
-        <div className="flex gap-4">
-          <Link href="/dashboard" className="px-5 py-2.5 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors">
-            返回看板
-          </Link>
-        </div>
+        <Link href="/account/password" className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700">修改我的密码</Link>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-6 border-b border-gray-100 bg-gray-50/50">
-            <h2 className="text-lg font-bold text-gray-800">员工名册 ({users.length})</h2>
-          </div>
+      {errorMessage && <div className="mb-5 rounded-xl bg-rose-50 p-4 text-sm font-bold text-rose-700">{errorMessage}</div>}
+      {query.ok && <div className="mb-5 rounded-xl bg-emerald-50 p-4 text-sm font-bold text-emerald-700">操作已完成。</div>}
+
+      <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-6 py-4 font-black text-slate-800">员工名册（{users.length}）</div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-gray-50 text-gray-500 text-sm border-b border-gray-100">
-                  <th className="p-4 font-medium">姓名 / 邮箱</th>
-                  <th className="p-4 font-medium">角色权限</th>
-                  <th className="p-4 font-medium">状态</th>
-                  <th className="p-4 font-medium">加入时间</th>
-                  <th className="p-4 font-medium text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {users.map(u => (
-                  <tr key={u.id} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="p-4">
-                      <div className="font-bold text-gray-800">{u.name}</div>
-                      <div className="text-sm text-gray-500">{u.email}</div>
-                    </td>
-                    <td className="p-4">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-indigo-50 text-indigo-700">
-                        {roleMap[u.role] || u.role}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      {u.isActive ? (
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700 ring-1 ring-inset ring-green-600/20">
-                          在职 / 激活
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 ring-1 ring-inset ring-red-600/20">
-                          已离职 / 停用
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-4 text-sm text-gray-500">
-                      {u.createdAt.toLocaleDateString()}
-                    </td>
-                    <td className="p-4 text-right">
-                      <form action={toggleStatus}>
-                        <input type="hidden" name="id" value={u.id} />
-                        <input type="hidden" name="isActive" value={u.isActive.toString()} />
-                        <button type="submit" className={'text-sm font-medium ' + (u.isActive ? 'text-red-600 hover:text-red-800' : 'text-green-600 hover:text-green-800')}>
-                          {u.isActive ? '停用账号' : '恢复激活'}
-                        </button>
-                      </form>
-                    </td>
-                  </tr>
-                ))}
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-xs font-bold text-slate-500"><tr><th className="p-4">员工</th><th className="p-4">权限与状态</th><th className="p-4">最近登录</th><th className="p-4">管理</th></tr></thead>
+              <tbody className="divide-y divide-slate-100">
+                {users.map((user) => {
+                  const locked = Boolean(user.lockedUntil && user.lockedUntil > new Date());
+                  const canManageTarget = session.role === 'SUPER_ADMIN' || user.role !== 'SUPER_ADMIN';
+                  return (
+                    <tr key={user.id} className="align-top">
+                      <td className="p-4"><div className="font-black text-slate-900">{user.name || '未命名'}</div><div className="text-xs text-slate-500">{user.email}</div></td>
+                      <td className="p-4"><div className="font-semibold text-indigo-700">{ROLE_LABEL[normalizeRole(user.role)]}</div><div className={`mt-1 text-xs font-bold ${user.isActive ? 'text-emerald-600' : 'text-rose-600'}`}>{user.isActive ? '在职 / 激活' : '停用'}{locked ? ' · 登录锁定' : ''}{user.mustChangePassword ? ' · 待改密码' : ''}</div></td>
+                      <td className="p-4 text-xs text-slate-500">{user.lastLoginAt ? user.lastLoginAt.toLocaleString('zh-CN') : '尚未登录'}</td>
+                      <td className="p-4">
+                        {canManageTarget ? <div className="space-y-3">
+                          <form action={updateUser} className="flex flex-wrap gap-2">
+                            <input type="hidden" name="id" value={user.id} />
+                            <select name="role" defaultValue={user.role} className="rounded border border-slate-200 px-2 py-1.5 text-xs">
+                              {ROLES.filter((role) => session.role === 'SUPER_ADMIN' || role !== 'SUPER_ADMIN').map((role) => <option key={role} value={role}>{ROLE_LABEL[role]}</option>)}
+                            </select>
+                            <select name="isActive" defaultValue={String(user.isActive)} className="rounded border border-slate-200 px-2 py-1.5 text-xs"><option value="true">激活</option><option value="false">停用</option></select>
+                            <button className="rounded bg-slate-900 px-3 py-1.5 text-xs font-bold text-white">保存</button>
+                          </form>
+                          <form action={resetPassword} className="flex flex-wrap gap-2">
+                            <input type="hidden" name="id" value={user.id} />
+                            <input name="password" type="password" required minLength={12} placeholder="临时密码（至少12位）" className="w-44 rounded border border-slate-200 px-2 py-1.5 text-xs" />
+                            <button className="rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700">重置密码</button>
+                          </form>
+                        </div> : <span className="text-xs text-slate-400">仅超级管理员可操作</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-fit sticky top-8">
-          <h2 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
-            <span className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">👤</span>
-            新增员工账号
-          </h2>
-          <form action={addUser} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">员工姓名</label>
-              <input type="text" name="name" required className="w-full border border-gray-200 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="例如：张三" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">登录邮箱</label>
-              <input type="email" name="email" required className="w-full border border-gray-200 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="例如：zhangsan@erdicn.com" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">初始密码</label>
-              <input type="password" name="password" required className="w-full border border-gray-200 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="设置初始密码" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">账号角色 (决定权限)</label>
-              <select name="role" required className="w-full border border-gray-200 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none transition-all bg-white">
-                <option value="SALES">业务员 (仅看自己数据)</option>
-                <option value="PURCHASING">采购专员 (管理供应商)</option>
-                <option value="DOCUMENT">单证员 (管理报关与物流)</option>
-                <option value="FINANCE">财务专员 (看全局数据)</option>
-                <option value="ADMIN">管理员 (可管人)</option>
-                <option value="SUPER_ADMIN">超级管理员 (最高权限)</option>
+        <div className="h-fit rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-black text-slate-900">新增员工</h2>
+          <p className="mt-1 text-xs text-slate-500">员工首次登录必须修改临时密码。</p>
+          <form action={addUser} className="mt-5 space-y-4">
+            <Field name="name" label="员工姓名" />
+            <Field name="email" label="登录邮箱" type="email" />
+            <Field name="password" label="临时密码" type="password" minLength={12} />
+            <label className="block text-sm font-semibold text-slate-700">角色
+              <select name="role" defaultValue="SALES" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5">
+                {ROLES.filter((role) => session.role === 'SUPER_ADMIN' || role !== 'SUPER_ADMIN').map((role) => <option key={role} value={role}>{ROLE_LABEL[role]}</option>)}
               </select>
-            </div>
-            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-colors shadow-sm mt-2">
-              + 创建账号
-            </button>
-            <p className="text-xs text-gray-500 mt-4 leading-relaxed">
-              * 员工离职后，请点击左侧列表的「停用账号」，这会保留其名下客户数据，但禁止其登录系统。
-            </p>
+            </label>
+            <button className="w-full rounded-lg bg-indigo-600 px-4 py-3 font-black text-white hover:bg-indigo-500">创建员工账号</button>
           </form>
         </div>
       </div>
     </div>
   );
+}
+
+function Field({ name, label, type = 'text', minLength }: { name: string; label: string; type?: string; minLength?: number }) {
+  return <label className="block text-sm font-semibold text-slate-700">{label}<input name={name} type={type} minLength={minLength} required className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5" /></label>;
 }

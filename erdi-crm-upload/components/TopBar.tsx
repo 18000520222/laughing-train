@@ -14,7 +14,7 @@ interface Notif {
   createdAt: string;
 }
 
-export default function TopBar() {
+export default function TopBar({ userName, role }: { userName: string; role: string }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [results, setResults] = useState<any[]>([]);
@@ -72,6 +72,7 @@ export default function TopBar() {
   return (
     <>
       <div className="fixed top-3 right-4 z-40 flex items-center gap-2">
+        <span className="hidden lg:block rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-500 shadow-sm border" title={role}>{userName}</span>
         <button
           onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 50); }}
           className="flex items-center gap-2 px-3 py-1.5 bg-white border rounded-lg text-sm text-gray-500 hover:text-gray-800 shadow-sm"

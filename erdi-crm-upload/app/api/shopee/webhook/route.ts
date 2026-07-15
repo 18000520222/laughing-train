@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { shopeeAdapter } from '@/lib/channels/shopee';
 import { ingestInbound, markReplied } from '@/lib/inbox';
+import { isWebhookTokenAuthorized } from '@/lib/webhook-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +17,9 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    if (!isWebhookTokenAuthorized(req, [process.env.SHOPEE_WEBHOOK_TOKEN, process.env.CHANNEL_WEBHOOK_TOKEN])) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const payload = await req.json().catch(() => ({}));
 
     const messages = await shopeeAdapter.parseInbound(payload);

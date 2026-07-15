@@ -1,19 +1,19 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { reclassifyEmailMessages } from '@/lib/email-audit';
 import { isCronAuthorized } from '@/lib/cron-auth';
+import { getSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-function authorized(req: Request): boolean {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (role === 'SUPER_ADMIN' || role === 'ADMIN') return true;
-  return isCronAuthorized(req, [process.env.MAIL_CRON_KEY], ['erdi-mail-2026']);
+async function authorized(req: Request): Promise<boolean> {
+  const session = await getSession();
+  if (session?.role === 'SUPER_ADMIN' || session?.role === 'ADMIN') return true;
+  return isCronAuthorized(req, [process.env.MAIL_CRON_KEY]);
 }
 
 export async function GET(req: Request) {
-  if (!authorized(req)) {
+  if (!(await authorized(req))) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
 

@@ -10,7 +10,7 @@ import { extractEmailAddress, stripQuotedHistory } from '@/lib/email-content';
 import { processEmailSalesAutomation } from '@/lib/email-sales-automation';
 
 const OWN_DOMAINS = ['erdicn.com', 'erdimail.com', 'erditechs.com', 'erdicrm.com'];
-const NOISE_CATEGORIES = new Set(['SEO_SPAM', 'MARKETING_NEWSLETTER', 'INTERNAL']);
+const NOISE_CATEGORIES = new Set(['SEO_SPAM', 'MARKETING_NEWSLETTER', 'PLATFORM_ALERT', 'INTERNAL']);
 const BUSINESS_CATEGORIES = new Set(['INQUIRY', 'QUOTE_PI', 'ORDER_PO', 'PAYMENT_FINANCE', 'TECH_SUPPORT', 'CUSTOMS_COMPLIANCE', 'MEETING_FOLLOWUP']);
 const PLATFORM_DOMAINS = ['myshopline.com', 'made-in-china.com', 'alibaba.com'];
 

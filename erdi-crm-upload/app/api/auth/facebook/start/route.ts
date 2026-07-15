@@ -2,12 +2,17 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { canonicalOrigin } from '@/lib/site-url';
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
+import { createOAuthState } from '@/lib/oauth-state';
 
 
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
+  const session = await getSession();
+  if (!session || !can(session.role, 'channels.configure')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
   const appId = settings?.fbAppId || process.env.FB_APP_ID;
   if (!appId) {
@@ -15,7 +20,7 @@ export async function GET(req: Request) {
   }
 
   const redirectUri = `${canonicalOrigin()}/api/auth/facebook/callback`;
-  const state = Math.random().toString(36).slice(2);
+  const state = await createOAuthState('FACEBOOK', session);
   const params = new URLSearchParams({
     client_id: appId,
     redirect_uri: redirectUri,

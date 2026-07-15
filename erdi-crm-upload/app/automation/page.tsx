@@ -1,4 +1,3 @@
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -37,6 +36,8 @@ import {
   compactJson,
   getTemplate,
 } from '@/lib/automation';
+import { getSession } from '@/lib/auth';
+import { can, requirePermission } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,14 +59,6 @@ const NODE_STYLE: Record<string, string> = {
   action: 'border-indigo-200 bg-indigo-50 text-indigo-900',
 };
 
-function canAccess(role: string) {
-  return ['SUPER_ADMIN', 'ADMIN', 'SALES'].includes(role);
-}
-
-function getRole() {
-  return (cookies().get('auth_role')?.value || '').toUpperCase();
-}
-
 function nextFlowCode() {
   const suffix = Math.random().toString(36).slice(2, 7).toUpperCase();
   return `AUTO-${Date.now().toString(36).toUpperCase()}-${suffix}`;
@@ -73,8 +66,7 @@ function nextFlowCode() {
 
 async function createFromTemplate(formData: FormData) {
   'use server';
-  const role = getRole();
-  if (!canAccess(role)) return;
+  await requirePermission('automation.manage');
 
   const key = String(formData.get('templateKey') || '');
   const template = getTemplate(key);
@@ -107,8 +99,7 @@ async function createFromTemplate(formData: FormData) {
 
 async function createBlueprintPack(formData: FormData) {
   'use server';
-  const role = getRole();
-  if (!canAccess(role)) return;
+  await requirePermission('automation.manage');
 
   const requestedKeys = String(formData.get('templateKeys') || '')
     .split(',')
@@ -128,8 +119,7 @@ async function createBlueprintPack(formData: FormData) {
 
 async function toggleFlow(formData: FormData) {
   'use server';
-  const role = getRole();
-  if (!canAccess(role)) return;
+  await requirePermission('automation.manage');
 
   const id = String(formData.get('id') || '');
   const status = String(formData.get('status') || 'PAUSED');
@@ -143,8 +133,7 @@ async function toggleFlow(formData: FormData) {
 
 async function updateFlow(formData: FormData) {
   'use server';
-  const role = getRole();
-  if (!canAccess(role)) return;
+  await requirePermission('automation.manage');
 
   const id = String(formData.get('id') || '');
   if (!id) return;
@@ -181,8 +170,7 @@ async function updateFlow(formData: FormData) {
 
 async function duplicateFlow(formData: FormData) {
   'use server';
-  const role = getRole();
-  if (!canAccess(role)) return;
+  await requirePermission('automation.manage');
 
   const id = String(formData.get('id') || '');
   const flow = await prisma.automationFlow.findUnique({ where: { id } });
@@ -211,8 +199,8 @@ async function duplicateFlow(formData: FormData) {
 
 async function deleteFlow(formData: FormData) {
   'use server';
-  const role = getRole();
-  if (!['SUPER_ADMIN', 'ADMIN'].includes(role)) return;
+  const session = await requirePermission('automation.manage');
+  if (session.role !== 'SUPER_ADMIN' && session.role !== 'ADMIN') return;
 
   const id = String(formData.get('id') || '');
   if (!id) return;
@@ -222,14 +210,11 @@ async function deleteFlow(formData: FormData) {
 
 async function testFlow(formData: FormData) {
   'use server';
-  const role = getRole();
-  if (!canAccess(role)) return;
+  const session = await requirePermission('automation.manage');
 
   const id = String(formData.get('id') || '');
-  const cookieUserId = cookies().get('auth_userId')?.value || undefined;
   const flow = await prisma.automationFlow.findUnique({ where: { id } });
   if (!flow) return;
-  const user = cookieUserId ? await prisma.user.findUnique({ where: { id: cookieUserId }, select: { id: true } }) : null;
 
   const output = {
     trigger: flow.triggerType,
@@ -249,7 +234,7 @@ async function testFlow(formData: FormData) {
         summary: `测试命中: ${flow.name}`,
         input: { source: 'manual_test', sampleText: 'Hello, I need laser rangefinder details.' },
         output,
-        userId: user?.id,
+        userId: session.userId,
       },
     }),
     prisma.automationFlow.update({
@@ -267,13 +252,11 @@ async function testFlow(formData: FormData) {
 
 async function replayRun(formData: FormData) {
   'use server';
-  const role = getRole();
-  if (!canAccess(role)) return;
+  const session = await requirePermission('automation.manage');
 
   const runId = String(formData.get('runId') || '');
   if (!runId) return;
-  const cookieUserId = cookies().get('auth_userId')?.value || undefined;
-  const result = await replayAutomationRun(runId, { userId: cookieUserId });
+  const result = await replayAutomationRun(runId, { userId: session.userId });
   const url = new URL('/automation', 'http://local');
   url.searchParams.set('replay', result.ok ? 'ok' : 'failed');
   if (result.flowId) url.searchParams.set('flow', result.flowId);
@@ -284,12 +267,10 @@ async function replayRun(formData: FormData) {
 
 async function bulkReplayFailedRuns(formData: FormData) {
   'use server';
-  const role = getRole();
-  if (!canAccess(role)) return;
+  const session = await requirePermission('automation.manage');
 
   const limit = Number(formData.get('limit') || 10);
-  const cookieUserId = cookies().get('auth_userId')?.value || undefined;
-  const result = await bulkReplayFailedAutomationRuns({ limit, userId: cookieUserId });
+  const result = await bulkReplayFailedAutomationRuns({ limit, userId: session.userId });
   const url = new URL('/automation', 'http://local');
   url.searchParams.set('bulkReplay', 'ok');
   url.searchParams.set('replayed', String(result.replayed));
@@ -300,8 +281,8 @@ async function bulkReplayFailedRuns(formData: FormData) {
 }
 
 export default async function AutomationPage(props: any) {
-  const role = getRole();
-  if (!canAccess(role)) redirect('/dashboard?error=unauthorized');
+  const session = await requirePermission('automation.manage');
+  const role = session.role;
 
   const sp = props.searchParams || {};
   const q = String(sp.q || '').trim();

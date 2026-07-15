@@ -1,12 +1,13 @@
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { buildSalesRadar } from '@/lib/sales-radar';
 import { buildCustomerHealthRow } from '@/lib/customer-health';
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
+import { companyAccessWhere } from '@/lib/data-access';
 
 export const dynamic = 'force-dynamic';
 
-const ALLOWED_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SALES']);
 const ACTIVE_CUSTOMER_TYPES = ['INQUIRY', 'QUOTED', 'CONTRACT_SENT', 'PROSPECT', 'NEW'];
 const HEALTH_CUSTOMER_TYPES = ['INQUIRY', 'QUOTED', 'CONTRACT_SENT', 'DEAL_WON', 'KEY_ACCOUNT', 'PROSPECT', 'NEW', 'EXISTING'];
 
@@ -19,30 +20,20 @@ export async function POST(req: Request) {
   const ids = parseIds(form.get('ids'));
   if (ids.length === 0) return redirectBack(req, 'empty', 0);
 
-  const result = await createNextActionTasks(ids, auth.user.id, action);
+  const result = await createNextActionTasks(ids, auth.user.id, action, auth.session);
   return redirectBack(req, bulkResultKey(action), result.created, result.updated, result.skipped);
 }
 
 async function requireSalesUser() {
-  const cookieStore = cookies();
-  const role = (cookieStore.get('auth_role')?.value || '').toUpperCase();
-  const email = cookieStore.get('auth_email')?.value || '';
-  const userId = cookieStore.get('auth_userId')?.value || '';
-  if (!ALLOWED_ROLES.has(role)) return null;
-
-  const user = userId
-    ? await prisma.user.findUnique({ where: { id: userId } })
-    : email
-    ? await prisma.user.findUnique({ where: { email } })
-    : null;
-  if (!user || !user.isActive) return null;
-  return { user, role };
+  const session = await getSession();
+  if (!session || !can(session.role, 'sales.manage')) return null;
+  return { user: { id: session.userId, email: session.email, name: session.name }, role: session.role, session };
 }
 
-async function createNextActionTasks(ids: string[], currentUserId: string, action: string) {
+async function createNextActionTasks(ids: string[], currentUserId: string, action: string, session: NonNullable<Awaited<ReturnType<typeof getSession>>>) {
   const typeScope = action === 'customer_health_repair' ? HEALTH_CUSTOMER_TYPES : ACTIVE_CUSTOMER_TYPES;
   const companies = await prisma.company.findMany({
-    where: { id: { in: ids }, type: { in: typeScope as any } },
+    where: { ...companyAccessWhere(session), id: { in: ids }, type: { in: typeScope as any } },
     include: {
       owner: true,
       contacts: { take: 3, orderBy: { createdAt: 'asc' } },

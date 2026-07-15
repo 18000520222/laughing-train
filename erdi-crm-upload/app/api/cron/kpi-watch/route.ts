@@ -8,7 +8,7 @@ export const maxDuration = 60;
 const KPI_WATCH_KEY = process.env.KPI_WATCH_KEY || process.env.TASK_REMINDER_KEY || process.env.MAIL_CRON_KEY;
 
 export async function GET(req: NextRequest) {
-  if (!isCronAuthorized(req, [KPI_WATCH_KEY], ['erdi-mail-2026'])) {
+  if (!isCronAuthorized(req, [KPI_WATCH_KEY])) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

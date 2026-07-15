@@ -1,41 +1,39 @@
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import type { InboxStatus, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { buildOmniboxEffectivenessReport } from '@/lib/omnibox-insights';
 import OmniboxClient from './OmniboxClient';
+import { requirePermission } from '@/lib/permissions';
+import { inboxAccessWhere } from '@/lib/data-access';
 
 export const dynamic = 'force-dynamic';
 
 export default async function OmniboxPage({
-  searchParams = {},
+  searchParams,
 }: {
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const role = cookies().get('auth_role')?.value;
-  if (!role || !['SUPER_ADMIN', 'ADMIN', 'SALES'].includes(role)) {
-    redirect('/dashboard?error=unauthorized');
-  }
+  const session = await requirePermission('inbox.manage');
+  const query = searchParams ? await searchParams : {};
 
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
   const [messages, slaMessages, omniboxTasks, settings] = await Promise.all([
     prisma.inboxMessage.findMany({
-      where: { direction: 'IN' },
+      where: { ...inboxAccessWhere(session), direction: 'IN' },
       orderBy: { createdAt: 'desc' },
       take: 100,
       include: { company: { select: { id: true, name: true, country: true, customerCode: true, owner: { select: { name: true, email: true } } } } },
     }),
     prisma.inboxMessage.findMany({
-      where: { direction: 'IN' },
+      where: { ...inboxAccessWhere(session), direction: 'IN' },
       orderBy: { createdAt: 'desc' },
       take: 500,
       include: { company: { select: { id: true, name: true, country: true, customerCode: true, owner: { select: { name: true, email: true } } } } },
     }),
     prisma.salesTask.findMany({
-      where: { source: 'OMNIBOX_BULK', createdAt: { gte: thirtyDaysAgo } },
+      where: { source: 'OMNIBOX_BULK', createdAt: { gte: thirtyDaysAgo }, ...(session.role === 'SALES' ? { ownerId: session.userId } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 500,
       include: { company: { select: { id: true, name: true } }, owner: { select: { name: true, email: true } } },
@@ -52,9 +50,9 @@ export default async function OmniboxPage({
   const sla = buildInboxSlaReport(slaMessages);
   const effectiveness = buildOmniboxEffectivenessReport({ messages: slaMessages, tasks: omniboxTasks });
   const bulkResult = {
-    bulk: firstParam(searchParams.bulk),
-    count: firstParam(searchParams.count),
-    skipped: firstParam(searchParams.skipped),
+    bulk: firstParam(query.bulk),
+    count: firstParam(query.count),
+    skipped: firstParam(query.skipped),
   };
 
   return (

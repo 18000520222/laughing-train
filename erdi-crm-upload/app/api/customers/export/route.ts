@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
 import { toCsv } from '@/lib/csv';
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
+import { companyAccessWhere } from '@/lib/data-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,15 +12,14 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 export async function GET(req: Request) {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (!role) return new Response('unauthorized', { status: 401 });
+  const session = await getSession();
+  if (!session || !can(session.role, 'customers.export')) return new Response('forbidden', { status: 403 });
 
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get('q') || '').trim();
 
-  const where: any = q
-    ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { customerCode: { contains: q, mode: 'insensitive' } }, { country: { contains: q, mode: 'insensitive' } }] }
-    : {};
+  const where: any = companyAccessWhere(session);
+  if (q) where.AND = [{ OR: [{ name: { contains: q, mode: 'insensitive' } }, { customerCode: { contains: q, mode: 'insensitive' } }, { country: { contains: q, mode: 'insensitive' } }] }];
 
   const companies = await prisma.company.findMany({
     where,

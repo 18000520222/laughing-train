@@ -1,11 +1,12 @@
 import { prisma } from '@/lib/prisma';
 import { chat, isLLMAvailable } from '@/lib/llm';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { sendSalesTaskReminders } from '@/lib/sales-task-reminders';
 import { escalateOverdueSalesTasks, getSalesTaskEscalationPolicies } from '@/lib/sales-task-escalations';
 import { createTaskCalendarToken, taskCalendarUrl } from '@/lib/sales-task-calendar';
+import { requirePermission } from '@/lib/permissions';
+import { companyAccessWhere, companyIsAccessible, opportunityAccessWhere } from '@/lib/data-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,12 +36,8 @@ const PRIORITY_WEIGHT: Record<string, number> = {
 };
 
 async function currentUser() {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  const email = cookies().get('auth_email')?.value || '';
-  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN' && role !== 'SALES') redirect('/dashboard');
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) redirect('/dashboard');
-  return { user, role };
+  const session = await requirePermission('sales.manage');
+  return { user: { id: session.userId, email: session.email, name: session.name }, role: session.role, session };
 }
 
 async function completeTask(formData: FormData) {
@@ -155,13 +152,14 @@ Return JSON:
 
 async function createManualTask(formData: FormData) {
   'use server';
-  const { user, role } = await currentUser();
+  const { user, role, session } = await currentUser();
   const companyId = String(formData.get('companyId') || '');
   const title = String(formData.get('title') || '').trim();
   if (!companyId || !title) return;
 
   const company = await prisma.company.findUnique({ where: { id: companyId } });
   if (!company) return;
+  if (role === 'SALES' && !companyIsAccessible(session, company)) return;
 
   const ownerIdFromForm = String(formData.get('ownerId') || '');
   const ownerId = role === 'SALES' ? user.id : ownerIdFromForm || company.ownerId || user.id;
@@ -333,7 +331,7 @@ async function bulkUpdateTasks(formData: FormData) {
 }
 
 export default async function TasksPage(props: any) {
-  const { user, role } = await currentUser();
+  const { user, role, session } = await currentUser();
   const canSeeAll = role === 'SUPER_ADMIN' || role === 'ADMIN';
   const sp = props.searchParams || {};
   const view = String(sp.view || 'todo');
@@ -382,9 +380,9 @@ export default async function TasksPage(props: any) {
     prisma.salesTask.count({ where: { ...baseWhere, status: 'TODO', dueAt: null } }),
     prisma.salesTask.count({ where: { ...baseWhere, status: 'TODO', escalatedAt: { not: null } } }),
     prisma.user.findMany({ where: { role: { in: ['SUPER_ADMIN', 'ADMIN', 'SALES'] as any }, isActive: true }, orderBy: [{ role: 'asc' }, { createdAt: 'asc' }] }),
-    prisma.company.findMany({ orderBy: { updatedAt: 'desc' }, take: 120, select: { id: true, name: true, ownerId: true } }),
+    prisma.company.findMany({ where: companyAccessWhere(session), orderBy: { updatedAt: 'desc' }, take: 120, select: { id: true, name: true, ownerId: true } }),
     prisma.opportunity.findMany({
-      where: { stage: { notIn: ['CLOSED_WON', 'CLOSED_LOST'] as any } },
+      where: { AND: [opportunityAccessWhere(session), { stage: { notIn: ['CLOSED_WON', 'CLOSED_LOST'] as any } }] },
       orderBy: { updatedAt: 'desc' },
       take: 120,
       select: { id: true, title: true, companyId: true },
@@ -395,8 +393,8 @@ export default async function TasksPage(props: any) {
       include: { owner: true, company: true },
       take: 80,
     }),
-    prisma.salesTask.groupBy({ by: ['ownerId'], where: { status: 'TODO' }, _count: { _all: true } }),
-    prisma.salesTask.groupBy({ by: ['ownerId'], where: { status: 'DONE', completedAt: { gte: weekAgo } }, _count: { _all: true } }),
+    canSeeAll ? prisma.salesTask.groupBy({ by: ['ownerId'], where: { status: 'TODO' }, _count: { _all: true } }) : Promise.resolve([]),
+    canSeeAll ? prisma.salesTask.groupBy({ by: ['ownerId'], where: { status: 'DONE', completedAt: { gte: weekAgo } }, _count: { _all: true } }) : Promise.resolve([]),
     prisma.salesTask.findMany({
       where: { ...baseWhere, status: 'DONE', completedAt: { gte: reportStart } },
       orderBy: { completedAt: 'asc' },

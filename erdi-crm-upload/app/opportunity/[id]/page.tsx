@@ -1,9 +1,11 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import nodemailer from 'nodemailer';
 import { translateText } from '@/lib/translate';
+import { requirePermission } from '@/lib/permissions';
+import { companyAccessWhere, opportunityAccessWhere } from '@/lib/data-access';
+import { writeAuditLog } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +23,7 @@ const STAGE_LABEL: Record<string, string> = {
 // 动作 1：常规业务保存 (改金额、改公司、改阶段)
 async function updateOpportunity(formData: FormData) {
   'use server';
+  const session = await requirePermission('sales.manage');
   const oppId = String(formData.get('oppId'));
   const amount = Number(formData.get('amount')) || 0;
   const companyId = String(formData.get('companyId')) || '';
@@ -34,14 +37,15 @@ async function updateOpportunity(formData: FormData) {
   if (!STAGE_LABEL[stage]) return;
   const existing = await prisma.opportunity.findUnique({
     where: { id: oppId },
-    select: { stage: true, stageChangedAt: true, updatedAt: true },
+    select: { stage: true, stageChangedAt: true, updatedAt: true, ownerId: true, company: { select: { ownerId: true, isPublic: true } } },
   });
   if (!existing) return;
+  if (session.role === 'SALES' && existing.ownerId !== session.userId && existing.company.ownerId !== session.userId && !existing.company.isPublic) return;
+  const targetCompany = await prisma.company.findFirst({ where: { ...companyAccessWhere(session), id: companyId }, select: { id: true } });
+  if (!targetCompany) return;
 
   const changedAt = new Date();
   const stageChanged = existing.stage !== stage;
-  const email = cookies().get('auth_email')?.value || '';
-  const actor = email ? await prisma.user.findUnique({ where: { email }, select: { id: true } }) : null;
   const updateData = {
     amountUSD: amount,
     companyId,
@@ -71,7 +75,7 @@ async function updateOpportunity(formData: FormData) {
           durationDays,
           amountUSD: amount,
           note: nextStep || lostDetail || null,
-          changedById: actor?.id || null,
+          changedById: session.userId,
           changedAt,
         },
       }),
@@ -82,12 +86,18 @@ async function updateOpportunity(formData: FormData) {
       data: updateData,
     });
   }
+  await writeAuditLog(session, {
+    action: 'OPPORTUNITY_UPDATED', entityType: 'Opportunity', entityId: oppId,
+    summary: stageChanged ? `商机阶段 ${existing.stage} → ${stage}` : '更新商机资料',
+    metadata: { stage, amountUSD: amount, stageChanged },
+  });
   redirect(`/opportunity/${oppId}`);
 }
 
 // 动作 2：发送邮件并记录到 CRM 历史
 async function sendEmailReply(formData: FormData) {
   'use server';
+  const session = await requirePermission('sales.manage');
   const oppId = String(formData.get('oppId'));
   const customerEmail = String(formData.get('customerEmail'));
   const replyContent = String(formData.get('replyContent'));
@@ -95,6 +105,8 @@ async function sendEmailReply(formData: FormData) {
   const oppTitle = String(formData.get('oppTitle'));
 
   if (!oppId || !replyContent || !customerEmail) return;
+  const accessible = await prisma.opportunity.findFirst({ where: { ...opportunityAccessWhere(session), id: oppId }, select: { id: true } });
+  if (!accessible) return;
 
   // 1. 智能提取干净的客户邮箱地址
   let cleanEmail = customerEmail;
@@ -138,6 +150,10 @@ async function sendEmailReply(formData: FormData) {
       where: { id: oppId },
       data: { description: newDescription }
     });
+    await writeAuditLog(session, {
+      action: 'OPPORTUNITY_EMAIL_SENT', entityType: 'Opportunity', entityId: oppId,
+      summary: '从商机页面向客户发送邮件',
+    });
 
   } catch (error) {
     console.error("邮件发送失败:", error);
@@ -148,6 +164,7 @@ async function sendEmailReply(formData: FormData) {
 }
 
 export default async function OpportunityDetail({ params }: { params: Promise<{ id: string }> }) {
+  const session = await requirePermission('customers.read');
   const resolvedParams = await params;
   const oppId = resolvedParams?.id;
 
@@ -155,10 +172,10 @@ export default async function OpportunityDetail({ params }: { params: Promise<{ 
 
   const [products, companies] = await Promise.all([
     prisma.product.findMany({ where: { isActive: true }, orderBy: { sku: 'asc' } }),
-    prisma.company.findMany({ orderBy: { updatedAt: 'desc' }, take: 500, select: { id: true, name: true, customerCode: true, country: true } }),
+    prisma.company.findMany({ where: companyAccessWhere(session), orderBy: { updatedAt: 'desc' }, take: 500, select: { id: true, name: true, customerCode: true, country: true } }),
   ]);
-  const opp = await prisma.opportunity.findUnique({
-    where: { id: String(oppId) },
+  const opp = await prisma.opportunity.findFirst({
+    where: { ...opportunityAccessWhere(session), id: String(oppId) },
     include: {
       product: true,
       company: true,

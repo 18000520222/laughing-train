@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { canonicalOrigin } from '@/lib/site-url';
+import { consumeOAuthState } from '@/lib/oauth-state';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,8 @@ const LWA_TOKEN_URL = 'https://api.amazon.com/auth/o2/token';
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const origin = canonicalOrigin();
+  const oauthState = await consumeOAuthState('AMAZON', searchParams.get('state'));
+  if (!oauthState) return NextResponse.redirect(new URL('/settings/channels?error=invalid_oauth_state', origin));
   // SP-API 授权回调参数：spapi_oauth_code、selling_partner_id
   const code = searchParams.get('spapi_oauth_code') || searchParams.get('code');
   const sellerId = searchParams.get('selling_partner_id');
@@ -50,6 +53,7 @@ export async function GET(req: Request) {
         ...(sellerId ? { amazonSellerId: sellerId } : {}),
       },
     });
+    await prisma.auditLog.create({ data: { actorId: oauthState.userId, action: 'channel.oauth_connect', entityType: 'Channel', entityId: 'AMAZON', summary: 'Amazon SP-API 授权完成' } });
     return NextResponse.redirect(new URL('/settings/channels?connected=amazon', origin));
   } catch (e: any) {
     return NextResponse.redirect(

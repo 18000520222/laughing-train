@@ -25,7 +25,7 @@ function timeoutAfter(ms: number, channel: string): Promise<never> {
 }
 
 export async function GET(req: NextRequest) {
-  if (!isCronAuthorized(req, [POLL_KEY], ['erdi-channel-2026'])) {
+  if (!isCronAuthorized(req, [POLL_KEY])) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

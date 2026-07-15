@@ -1,7 +1,8 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { requirePermission } from '@/lib/permissions';
+import { writeAuditLog } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,10 +25,8 @@ const SECRET_FIELDS = new Set([
 
 
 export default async function SettingsPage(props: any) {
-  const role = cookies().get('auth_role')?.value;
-  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN' && role !== 'SALES') {
-    redirect('/');
-  }
+  const session = await requirePermission('settings.manage');
+  const role = session.role;
 
   let settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
   if (!settings) {
@@ -42,8 +41,7 @@ export default async function SettingsPage(props: any) {
 
   async function saveSettings(formData: FormData) {
     'use server';
-    const r = cookies().get('auth_role')?.value;
-    if (r !== 'SUPER_ADMIN' && r !== 'ADMIN' && r !== 'SALES') return;
+    const actor = await requirePermission('settings.manage');
     const rate = parseFloat(formData.get('usdToCnyRate') as string);
     const companyName = formData.get('companyName') as string;
     const bankFields = {
@@ -75,13 +73,13 @@ export default async function SettingsPage(props: any) {
         else await prisma.bankAccount.create({ data });
       }
     }
+    await writeAuditLog(actor, { action: 'SETTINGS_UPDATED', entityType: 'SystemSettings', entityId: 'default', summary: '更新公司基础设置或收款账户' });
     redirect('/settings');
   }
 
   async function saveIntegrations(formData: FormData) {
     'use server';
-    const r = cookies().get('auth_role')?.value;
-    if (r !== 'SUPER_ADMIN' && r !== 'ADMIN') return;
+    const actor = await requirePermission('channels.configure');
     const g = (key: string, fallback?: string | null) => {
       const value = String(formData.get(key) || '').trim();
       if (!value) return SECRET_FIELDS.has(key) ? undefined : fallback ?? null;
@@ -125,13 +123,13 @@ export default async function SettingsPage(props: any) {
       update: data,
       create: { id: 'default', ...data } as any,
     });
+    await writeAuditLog(actor, { action: 'INTEGRATION_SETTINGS_UPDATED', entityType: 'SystemSettings', entityId: 'default', summary: '更新第三方集成配置（不记录密钥值）' });
     redirect('/settings');
   }
 
   async function updateEmailConfig(formData: FormData) {
     'use server';
-    const r = cookies().get('auth_role')?.value;
-    if (r !== 'SUPER_ADMIN' && r !== 'ADMIN') return;
+    await requirePermission('channels.configure');
     const id = formData.get('id') as string;
     const pwd = String(formData.get('password') || '').trim();
     const host = formData.get('imapHost') as string;
@@ -159,8 +157,7 @@ export default async function SettingsPage(props: any) {
 
   async function addBankAccount(formData: FormData) {
     'use server';
-    const r = cookies().get('auth_role')?.value;
-    if (r !== 'SUPER_ADMIN' && r !== 'ADMIN') return;
+    await requirePermission('finance.manage');
     const label = String(formData.get('label') || '').trim();
     const bankName = String(formData.get('bankName') || '').trim();
     if (!label || !bankName) return;
@@ -185,8 +182,7 @@ export default async function SettingsPage(props: any) {
 
   async function testEmailConnection(formData: FormData) {
     'use server';
-    const r = cookies().get('auth_role')?.value;
-    if (r !== 'SUPER_ADMIN' && r !== 'ADMIN') return;
+    await requirePermission('channels.configure');
     const id = String(formData.get('id') || '');
     const { testEmailAccountConnection } = await import('@/lib/email-sync');
     const result = await testEmailAccountConnection(id);

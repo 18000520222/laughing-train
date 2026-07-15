@@ -1,20 +1,25 @@
 // app/api/search/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
+import { companyAccessWhere, opportunityAccessWhere } from '@/lib/data-access';
 
 
 
 export async function GET(req: Request) {
+  const session = await getSession();
+  if (!session || !can(session.role, 'dashboard.read')) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   const q = new URL(req.url).searchParams.get('q')?.trim();
   if (!q || q.length < 1) return NextResponse.json({ results: [] });
 
   const [companies, opps, products, shipments] = await Promise.all([
     prisma.company.findMany({
-      where: { OR: [{ name: { contains: q, mode: 'insensitive' } }, { country: { contains: q, mode: 'insensitive' } }] },
+      where: { ...companyAccessWhere(session), AND: [{ OR: [{ name: { contains: q, mode: 'insensitive' } }, { country: { contains: q, mode: 'insensitive' } }] }] },
       take: 5,
     }),
     prisma.opportunity.findMany({
-      where: { OR: [{ title: { contains: q, mode: 'insensitive' } }, { opportunityCode: { contains: q, mode: 'insensitive' } }] },
+      where: { ...opportunityAccessWhere(session), AND: [{ OR: [{ title: { contains: q, mode: 'insensitive' } }, { opportunityCode: { contains: q, mode: 'insensitive' } }] }] },
       take: 5,
     }),
     prisma.product.findMany({

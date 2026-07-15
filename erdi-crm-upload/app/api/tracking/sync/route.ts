@@ -1,9 +1,12 @@
 // app/api/tracking/sync/route.ts
 // 每日定时同步全部活跃发货的物流信息 (AfterShip)
 import { NextResponse } from 'next/server';
+import { timingSafeEqual } from 'crypto';
+import { headers } from 'next/headers';
 import { prisma } from '@/lib/prisma';
-
-
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
+import { writeAuditLog } from '@/lib/audit';
 
 export async function GET() {
   return handle();
@@ -12,7 +15,24 @@ export async function POST() {
   return handle();
 }
 
+function safeTokenMatch(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 async function handle() {
+  const session = await getSession();
+  const requestHeaders = await headers();
+  const authorization = requestHeaders.get('authorization') || '';
+  const expectedCronToken = process.env.CRON_SECRET || '';
+  const providedCronToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  const cronAuthorized = Boolean(expectedCronToken && safeTokenMatch(providedCronToken, expectedCronToken));
+
+  if ((!session || !can(session.role, 'logistics.manage')) && !cronAuthorized) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
   const apiKey = settings?.aftershipApiKey || process.env.AFTERSHIP_API_KEY;
   if (!apiKey) {
@@ -62,6 +82,13 @@ async function handle() {
       console.error('[tracking-sync]', s.id, e);
     }
   }
+
+  await writeAuditLog(session, {
+    action: 'shipment.tracking_sync',
+    entityType: 'Shipment',
+    summary: `同步 ${updated} 个活跃运单`,
+    metadata: { updated, source: cronAuthorized ? 'CRON' : 'MANUAL' },
+  });
 
   return NextResponse.json({ ok: true, updated });
 }

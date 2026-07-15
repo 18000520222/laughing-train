@@ -1,5 +1,4 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createDefaultSalesAssignmentRules, executeSalesAssignmentRules } from '@/lib/sales-assignment';
@@ -15,6 +14,7 @@ import { buildMorningBriefingClosureReport } from '@/lib/sales-morning-briefing-
 import { buildSalesActionClosureReport } from '@/lib/sales-action-closure';
 import { buildSalesCompletionEvidenceReport } from '@/lib/sales-completion-evidence';
 import { buildCompletionEvidenceEscalationReport } from '@/lib/sales-completion-evidence-escalation';
+import { requirePermission } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,17 +70,14 @@ function csvFromForm(formData: FormData, key: string) {
 }
 
 async function requireAdminUser() {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  const email = cookies().get('auth_email')?.value || '';
-  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN') redirect('/dashboard');
-  return prisma.user.findUnique({ where: { email } });
+  const session = await requirePermission('sales.manage');
+  if (session.role !== 'SUPER_ADMIN' && session.role !== 'ADMIN') redirect('/dashboard');
+  return { id: session.userId, email: session.email, name: session.name };
 }
 
 async function requireSalesUser() {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  const email = cookies().get('auth_email')?.value || '';
-  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN' && role !== 'SALES') redirect('/dashboard');
-  return prisma.user.findUnique({ where: { email } });
+  const session = await requirePermission('sales.manage');
+  return { id: session.userId, email: session.email, name: session.name, role: session.role };
 }
 
 async function createRule(formData: FormData) {
@@ -247,7 +244,7 @@ async function completeSalesTask(formData: FormData) {
   'use server';
   const user = await requireSalesUser();
   if (!user) return;
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
+  const role = user.role;
   const id = String(formData.get('id') || '');
   if (!id) return;
   const task = await prisma.salesTask.findUnique({ where: { id }, include: { company: true } });
@@ -270,71 +267,73 @@ async function completeSalesTask(formData: FormData) {
 }
 
 export default async function SalesCommandPage({
-  searchParams = {},
+  searchParams,
 }: {
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN' && role !== 'SALES') redirect('/dashboard');
+  const session = await requirePermission('sales.manage');
+  const query = searchParams ? await searchParams : {};
+  const role = session.role;
+  if (role === 'SALES') redirect('/tasks/focus');
   const canManage = role === 'SUPER_ADMIN' || role === 'ADMIN';
   const emailBulkResult = {
-    bulk: firstParam(searchParams.emailBulk),
-    created: firstParam(searchParams.created),
-    cleared: firstParam(searchParams.cleared),
-    skipped: firstParam(searchParams.skipped),
+    bulk: firstParam(query.emailBulk),
+    created: firstParam(query.created),
+    cleared: firstParam(query.cleared),
+    skipped: firstParam(query.skipped),
   };
   const emailAutoResult = {
-    status: firstParam(searchParams.emailAuto),
-    taskCandidates: firstParam(searchParams.taskCandidates),
-    noiseCandidates: firstParam(searchParams.noiseCandidates),
-    created: firstParam(searchParams.created),
-    cleared: firstParam(searchParams.cleared),
-    skipped: firstParam(searchParams.skipped),
+    status: firstParam(query.emailAuto),
+    taskCandidates: firstParam(query.taskCandidates),
+    noiseCandidates: firstParam(query.noiseCandidates),
+    created: firstParam(query.created),
+    cleared: firstParam(query.cleared),
+    skipped: firstParam(query.skipped),
   };
   const emailLabelPlanResult = {
-    status: firstParam(searchParams.emailLabelPlan),
-    planKey: firstParam(searchParams.labelPlanKey),
-    candidates: firstParam(searchParams.labelCandidates),
-    tagged: firstParam(searchParams.labelTagged),
-    created: firstParam(searchParams.labelCreated),
-    cleared: firstParam(searchParams.labelCleared),
-    skipped: firstParam(searchParams.labelSkipped),
+    status: firstParam(query.emailLabelPlan),
+    planKey: firstParam(query.labelPlanKey),
+    candidates: firstParam(query.labelCandidates),
+    tagged: firstParam(query.labelTagged),
+    created: firstParam(query.labelCreated),
+    cleared: firstParam(query.labelCleared),
+    skipped: firstParam(query.labelSkipped),
   };
   const emailSecurityResult = {
-    status: firstParam(searchParams.emailSecurity),
-    staleCandidates: firstParam(searchParams.staleCandidates),
-    freshPending: firstParam(searchParams.freshPending),
-    archived: firstParam(searchParams.archived),
-    notified: firstParam(searchParams.notified),
-    skippedDuplicates: firstParam(searchParams.skippedDuplicates),
+    status: firstParam(query.emailSecurity),
+    staleCandidates: firstParam(query.staleCandidates),
+    freshPending: firstParam(query.freshPending),
+    archived: firstParam(query.archived),
+    notified: firstParam(query.notified),
+    skippedDuplicates: firstParam(query.skippedDuplicates),
   };
   const nextBulkResult = {
-    bulk: firstParam(searchParams.nextBulk),
-    created: firstParam(searchParams.created),
-    updated: firstParam(searchParams.updated),
-    skipped: firstParam(searchParams.skipped),
+    bulk: firstParam(query.nextBulk),
+    created: firstParam(query.created),
+    updated: firstParam(query.updated),
+    skipped: firstParam(query.skipped),
   };
   const oppBulkResult = {
-    bulk: firstParam(searchParams.oppBulk),
-    created: firstParam(searchParams.created),
-    updated: firstParam(searchParams.updated),
-    skipped: firstParam(searchParams.skipped),
+    bulk: firstParam(query.oppBulk),
+    created: firstParam(query.created),
+    updated: firstParam(query.updated),
+    skipped: firstParam(query.skipped),
   };
   const priorityActionResult = {
-    status: firstParam(searchParams.priorityAction),
-    created: firstParam(searchParams.priorityCreated),
-    notified: firstParam(searchParams.priorityNotified),
-    skipped: firstParam(searchParams.prioritySkipped),
+    status: firstParam(query.priorityAction),
+    created: firstParam(query.priorityCreated),
+    notified: firstParam(query.priorityNotified),
+    skipped: firstParam(query.prioritySkipped),
   };
   const morningNotifyResult = {
-    status: firstParam(searchParams.morningNotify),
-    notified: firstParam(searchParams.morningNotified),
-    skipped: firstParam(searchParams.morningSkipped),
+    status: firstParam(query.morningNotify),
+    notified: firstParam(query.morningNotified),
+    skipped: firstParam(query.morningSkipped),
   };
   const completionEvidenceResult = {
-    status: firstParam(searchParams.completionEvidence),
-    created: firstParam(searchParams.completionCreated),
-    skipped: firstParam(searchParams.completionSkipped),
+    status: firstParam(query.completionEvidence),
+    created: firstParam(query.completionCreated),
+    skipped: firstParam(query.completionSkipped),
   };
 
   const sevenDaysAgo = new Date();

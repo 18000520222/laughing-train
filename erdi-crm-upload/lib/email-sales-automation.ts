@@ -344,7 +344,7 @@ function oppStageRank(stage: string) {
 }
 
 function nextStepForStage(stage: CustomerSalesStage) {
-  if (stage === 'DEAL_WON') return '核对收款、备货和出运资料';
+  if (stage === 'DEAL_WON') return '财务复核收款凭证后安排备货和出运';
   if (stage === 'CONTRACT_SENT') return '核对合同/PO并跟进付款';
   if (stage === 'QUOTED') return '跟进报价反馈和成交条件';
   return '确认产品规格、数量和报价要求';
@@ -392,33 +392,57 @@ async function upsertEmailLineItem(opportunityId: string, emailId: string, analy
 
 async function upsertEmailPayment(companyId: string, opportunityId: string, emailId: string, analysis: SalesEmailAnalysis, paidAt: Date, body: string) {
   const bankAccountId = await matchBankAccount(body);
-  await prisma.paymentRecord.upsert({
-    where: { sourceRef: `email:${emailId}` },
-    update: {
-      amount: analysis.amount,
-      currency: analysis.currency || 'USD',
-      status: 'CONFIRMED',
-      method: analysis.paymentMethod,
-      reference: analysis.paymentReference,
-      paidAt,
-      bankAccountId,
-    },
-    create: {
-      companyId,
-      opportunityId,
-      emailMessageId: emailId,
-      bankAccountId,
-      amount: analysis.amount,
-      currency: analysis.currency || 'USD',
-      status: 'CONFIRMED',
-      method: analysis.paymentMethod,
-      reference: analysis.paymentReference,
-      paidAt,
-      source: 'EMAIL',
-      sourceRef: `email:${emailId}`,
-      note: `邮件自动识别: ${analysis.reason}`,
-    },
-  });
+  const sourceRef = `email:${emailId}`;
+  const existing = await prisma.paymentRecord.findUnique({ where: { sourceRef } });
+  const payment = existing
+    ? await prisma.paymentRecord.update({
+      where: { id: existing.id },
+      data: {
+        amount: analysis.amount,
+        currency: analysis.currency || 'USD',
+        method: analysis.paymentMethod,
+        reference: analysis.paymentReference,
+        bankAccountId,
+        note: existing.status === 'CONFIRMED'
+          ? existing.note
+          : `邮件自动识别付款凭证，待财务复核；邮件日期 ${paidAt.toISOString()}`,
+      },
+    })
+    : await prisma.paymentRecord.create({
+      data: {
+        companyId,
+        opportunityId,
+        emailMessageId: emailId,
+        bankAccountId,
+        amount: analysis.amount,
+        currency: analysis.currency || 'USD',
+        status: 'PENDING',
+        method: analysis.paymentMethod,
+        reference: analysis.paymentReference,
+        source: 'EMAIL',
+        sourceRef,
+        note: `邮件自动识别付款凭证，待财务复核；邮件日期 ${paidAt.toISOString()}`,
+      },
+    });
+
+  if (!existing) {
+    const financeUsers = await prisma.user.findMany({
+      where: { isActive: true, role: { in: ['SUPER_ADMIN', 'ADMIN', 'FINANCE'] } },
+      select: { id: true },
+    });
+    if (financeUsers.length) {
+      await prisma.notification.createMany({
+        data: financeUsers.map((user) => ({
+          userId: user.id,
+          type: 'SYSTEM' as const,
+          title: '邮件识别到待复核收款',
+          body: `${analysis.currency || 'USD'} ${analysis.amount || '金额待核对'} · ${analysis.paymentReference || '参考号待核对'}`,
+          link: '/finance',
+        })),
+      });
+    }
+  }
+  return payment;
 }
 
 async function matchBankAccount(text: string) {

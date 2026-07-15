@@ -1,16 +1,14 @@
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import ImportPanel from './ImportPanel';
+import { requirePermission } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 
 const CUSTOMER_TEMPLATE = '客户编号,公司名称,客户类型,国家,行业,官网,联系人名,联系人姓,职位,邮箱,电话\n,示例科技有限公司,潜在客户,中国,激光光电,https://example.com,三,张,采购经理,buyer@example.com,+86 138...\n';
 const PRODUCT_TEMPLATE = 'SKU,中文品名,英文品名,分类,售价USD,HS编码,规格型号,波长,材质,用途,品牌,产地,单位\nLR20M3,激光测距模块,Laser Rangefinder Module,激光测距,199,9013801000,量程20km,1550nm,光学玻璃,军用/测绘,ERDI,中国,台\n';
 
-export default function ImportPage() {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (!role) redirect('/');
+export default async function ImportPage() {
+  await requirePermission('customers.write');
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">

@@ -28,6 +28,16 @@ export interface EmailClassification {
 
 const OWN_DOMAINS = ['erdicn.com', 'erdimail.com', 'erditechs.com', 'erdicrm.com'];
 const FREE_MAIL = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com', 'qq.com', '163.com', '126.com', 'mail.ru'];
+const SYSTEM_SERVICE_DOMAINS = [
+  'vercel.com',
+  'github.com',
+  'supabase.com',
+  'cloudflare.com',
+  'slack.com',
+  'dhl.com',
+  'fedex.com',
+  'ups.com',
+];
 
 const CATEGORY_RULES: Array<{
   category: EmailCategory;
@@ -204,6 +214,11 @@ export function classifyEmail(input: { from?: string | null; subject?: string | 
     return result('AUTH_SECURITY', `auth-ops:${authOpsHit}`, 88, true, false, ['安全验证码', '运维授权']);
   }
 
+  const systemSender = automatedServiceSender(from, domain);
+  if (systemSender && !hasEmbeddedCustomerLead(text) && !hasStrongCustomerTransaction(text)) {
+    return result('PLATFORM_ALERT', `automated-service:${systemSender}`, 94, false, false, ['平台通知', '自动归档']);
+  }
+
   const settlementHit = settlementSignal(text);
   if (settlementHit) {
     return result('PAYMENT_FINANCE', `settlement:${settlementHit}`, 92, true, false, ['付款财务']);
@@ -355,6 +370,27 @@ function hasDirectBusinessIntent(text: string) {
     'rangefinder',
     'lrf',
   ].some((k) => text.includes(k));
+}
+
+function hasEmbeddedCustomerLead(text: string) {
+  const platformLead = /new (?:quote|inquiry|enquiry)|received a new quote|新询盘|新的报价请求/i.test(text);
+  const embeddedCustomer = /customer\s*(?:e-?mail|邮箱)\s*[:：]\s*[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(text);
+  return platformLead && embeddedCustomer;
+}
+
+function hasStrongCustomerTransaction(text: string) {
+  return [
+    /\b(?:request for quotation|rfq|purchase order|proforma invoice|signed contract)\b/i,
+    /\b(?:payment|funds?) (?:has|have|was|were) (?:received|credited)\b/i,
+    /\b(?:laser rangefinder|1535nm|905nm|1064nm|erbium glass laser)\b/i,
+    /询盘|请报价|采购订单|已签合同|款项已到账/i,
+  ].some((pattern) => pattern.test(text));
+}
+
+function automatedServiceSender(from: string, domain: string | null) {
+  if (domain && SYSTEM_SERVICE_DOMAINS.some((item) => domain === item || domain.endsWith(`.${item}`))) return domain;
+  if (/\b(?:no-?reply|notifications?|mailer-daemon)\b/i.test(from)) return 'automated-sender';
+  return null;
 }
 
 function settlementSignal(text: string) {

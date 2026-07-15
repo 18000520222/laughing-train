@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { aliSign } from '@/lib/channels/oauth-tokens';
 import { canonicalOrigin } from '@/lib/site-url';
+import { consumeOAuthState } from '@/lib/oauth-state';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +12,8 @@ const ALIBABA_GATEWAY = 'https://openapi-api.alibaba.com/rest';
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const origin = canonicalOrigin();
+  const oauthState = await consumeOAuthState('ALIBABA', searchParams.get('state'));
+  if (!oauthState) return NextResponse.redirect(new URL('/settings/channels?error=invalid_oauth_state', origin));
   const code = searchParams.get('code');
   if (!code) return NextResponse.redirect(new URL('/settings/channels?error=no_code', origin));
 
@@ -52,6 +55,7 @@ export async function GET(req: Request) {
         alibabaTokenExpiresAt: new Date(Date.now() + expiresInSec * 1000),
       },
     });
+    await prisma.auditLog.create({ data: { actorId: oauthState.userId, action: 'channel.oauth_connect', entityType: 'Channel', entityId: 'ALIBABA', summary: 'Alibaba OAuth 授权完成' } });
     return NextResponse.redirect(new URL('/settings/channels?connected=alibaba', origin));
   } catch (e: any) {
     return NextResponse.redirect(

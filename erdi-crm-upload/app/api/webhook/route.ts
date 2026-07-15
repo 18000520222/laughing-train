@@ -1,5 +1,8 @@
 import { prisma } from '@/lib/prisma';
 import { NextResponse } from 'next/server';
+import { isWebhookTokenAuthorized } from '@/lib/webhook-auth';
+import { ingestInbound } from '@/lib/inbox';
+import { createHash } from 'crypto';
 
 
 
@@ -18,11 +21,7 @@ export async function OPTIONS() {
 export async function POST(request: Request) {
   try {
     // 1. 安全锁：校验通关密语（优先读环境变量 WEBHOOK_TOKEN，未配置时回退旧值保持兼容）
-    const { searchParams } = new URL(request.url);
-    const token = searchParams.get('token');
-
-    const expectedToken = process.env.WEBHOOK_TOKEN || 'erdi2026';
-    if (token !== expectedToken) {
+    if (!isWebhookTokenAuthorized(request, [process.env.WEBHOOK_TOKEN])) {
       return NextResponse.json({ error: '安全拦截：Token 错误' }, { status: 401 });
     }
 
@@ -35,22 +34,43 @@ export async function POST(request: Request) {
     const message = data.message || data.content || data.description || '无留言内容';
     const source = data.source || '官方网站 (erdicn.com)';
 
-    // 4. 将数据直接写入 CRM 数据库的“新询盘”列
-    const newOpp = await prisma.opportunity.create({
-      data: {
-        title: `新询盘 来自 ${source}`,
-        stage: 'SPEC_CONFIRMING', // 默认进入“新询盘确认”阶段
-        company: { create: { name: customerName, source: source, type: 'INQUIRY' } },
-        description: `🌍 来源平台: ${source}\n👤 客户姓名: ${customerName}\n📧 联系邮箱: ${customerEmail}\n\n📝 留言内容:\n${message}\n\n---\n系统自动接收于: ${new Date().toLocaleString()}`,
-        amountUSD: 0,
-      }
+    if (!String(customerEmail).includes('@')) {
+      return NextResponse.json({ error: '必须提供有效客户邮箱' }, { status: 400 });
+    }
+    const externalId = String(data.id || data.externalId || createHash('sha256').update(`${source}|${customerEmail}|${message}`).digest('hex'));
+    const ingested = await ingestInbound({
+      channel: 'EMAIL',
+      direction: 'IN',
+      externalId: `website:${externalId}`,
+      threadId: `website:${customerEmail}`,
+      senderId: String(customerEmail).trim().toLowerCase(),
+      senderName: String(customerName),
+      text: `Website inquiry from ${source}\n\n${message}`,
+      sentAt: new Date(),
     });
+    let opportunityId: string | null = null;
+    if (ingested.created && ingested.inboxId) {
+      const inbox = await prisma.inboxMessage.findUnique({ where: { id: ingested.inboxId }, select: { companyId: true, company: { select: { ownerId: true } } } });
+      if (inbox?.companyId) {
+        const opportunity = await prisma.opportunity.create({
+          data: {
+            title: `网站询盘 · ${source}`,
+            stage: 'UNPROCESSED',
+            companyId: inbox.companyId,
+            ownerId: inbox.company?.ownerId || null,
+            description: String(message),
+          },
+        });
+        opportunityId = opportunity.id;
+      }
+    }
 
     // 5. 告诉发送方：接收成功！
     return NextResponse.json({
       success: true,
       message: '成功存入 CRM',
-      id: newOpp.id
+      id: opportunityId,
+      duplicate: !ingested.created,
     }, {
       headers: {
         'Access-Control-Allow-Origin': '*',

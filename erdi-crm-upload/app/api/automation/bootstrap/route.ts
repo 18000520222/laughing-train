@@ -25,7 +25,7 @@ function parseStatus(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  if (!isCronAuthorized(req, [AUTOMATION_BOOTSTRAP_KEY], ['erdi-mail-2026'])) {
+  if (!isCronAuthorized(req, [AUTOMATION_BOOTSTRAP_KEY])) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

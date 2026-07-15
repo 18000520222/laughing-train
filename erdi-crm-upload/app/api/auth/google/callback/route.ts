@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { canonicalOrigin } from '@/lib/site-url';
+import { consumeOAuthState } from '@/lib/oauth-state';
 
 function settingsUrl(params: Record<string, string>) {
   const url = new URL('/settings/channels', canonicalOrigin());
@@ -10,6 +11,8 @@ function settingsUrl(params: Record<string, string>) {
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
+  const oauthState = await consumeOAuthState('GOOGLE', searchParams.get('state'));
+  if (!oauthState) return NextResponse.redirect(settingsUrl({ error: 'invalid_oauth_state' }));
   const code = searchParams.get('code');
   const oauthError = searchParams.get('error');
   if (oauthError) {
@@ -86,6 +89,7 @@ export async function GET(req: Request) {
       isSecure: true,
     },
   });
+  await prisma.auditLog.create({ data: { actorId: oauthState.userId, action: 'channel.oauth_connect', entityType: 'EmailAccount', entityId: email, summary: 'Google Gmail OAuth 授权完成' } });
 
   return NextResponse.redirect(settingsUrl({ connected: 'google', email }));
 }

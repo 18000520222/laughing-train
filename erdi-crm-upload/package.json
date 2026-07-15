@@ -3,19 +3,23 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "next dev",
-    "build": "NODE_ENV=production prisma generate && NODE_ENV=production prisma db push && NODE_ENV=production next build",
+    "build": "NODE_ENV=production prisma generate && NODE_ENV=production next build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "db:generate": "prisma generate",
+    "db:deploy:incremental": "prisma db execute --file prisma/manual-migrations/20260715_email_sales_automation.sql --schema prisma/schema.prisma && prisma db execute --file prisma/manual-migrations/20260715_company_crm_foundation.sql --schema prisma/schema.prisma",
     "start": "next start",
     "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^5.14.0",
     "bcryptjs": "^3.0.3",
-    "imapflow": "^1.3.3",
+    "imapflow": "^1.4.7",
     "jose": "^6.2.3",
     "lucide-react": "^0.378.0",
-    "mailparser": "^3.9.8",
-    "next": "14.2.3",
-    "nodemailer": "^6.9.13",
+    "mailparser": "^3.9.14",
+    "next": "^15.5.20",
+    "nodemailer": "^9.0.3",
     "react": "^18",
     "react-dom": "^18",
     "recharts": "^3.8.1"
@@ -23,14 +27,17 @@
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
     "@types/mailparser": "^3.4.6",
-    "@types/node": "^20",
-    "@types/nodemailer": "^6.4.14",
-    "@types/react": "^18",
+    "@types/node": "^20.19.43",
+    "@types/nodemailer": "^8.0.1",
+    "@types/react": "^18.3.31",
     "@types/react-dom": "^18",
-    "autoprefixer": "^10.0.1",
-    "postcss": "^8",
+    "autoprefixer": "^10.5.3",
+    "postcss": "^8.5.19",
     "prisma": "^5.14.0",
     "tailwindcss": "^3.4.1",
     "typescript": "^5"
+  },
+  "overrides": {
+    "postcss": "$postcss"
   }
 }

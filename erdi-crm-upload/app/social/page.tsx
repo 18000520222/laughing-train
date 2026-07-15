@@ -1,14 +1,13 @@
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { prisma } from '@/lib/prisma';
+import { requirePermission } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 
 
-export default async function SocialPage({ searchParams }: { searchParams: Record<string, string> }) {
-  const role = cookies().get('auth_role')?.value;
-  if (!role) redirect('/?error=1');
+export default async function SocialPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
+  await requirePermission('channels.use');
+  const query = await searchParams;
 
   const accounts = await prisma.socialAccount.findMany();
   const fbAccounts = accounts.filter(a => a.platform === 'FACEBOOK');
@@ -30,14 +29,14 @@ export default async function SocialPage({ searchParams }: { searchParams: Recor
         <Link href="/dashboard" className="px-5 py-2.5 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200">返回看板</Link>
       </header>
 
-      {searchParams?.connected && (
+      {query.connected && (
         <div className="bg-green-50 border border-green-200 text-green-700 p-3 rounded-lg mb-6">
-          ✅ {searchParams.connected.toUpperCase()} 授权成功！
+          ✅ {query.connected.toUpperCase()} 授权成功！
         </div>
       )}
-      {searchParams?.error && (
+      {query.error && (
         <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg mb-6 text-xs break-all">
-          ❌ 错误：{searchParams.error}
+          ❌ 错误：{query.error}
         </div>
       )}
 

@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { authCookieDomain, createSession, normalizeRole } from '@/lib/auth';
+import { createSession, normalizeRole } from '@/lib/auth';
 import bcrypt from 'bcryptjs';
 
 
@@ -11,6 +11,10 @@ export default async function LoginPage(props: any) {
     'use server';
     const email = String(formData.get('email')).trim().toLowerCase();
     const pwd = String(formData.get('password'));
+    const requestHeaders = await headers();
+    const ipAddress = requestHeaders.get('x-forwarded-for')?.split(',')[0]?.trim()
+      || requestHeaders.get('x-real-ip')
+      || null;
 
     // 去数据库核实账号密码
     const user = await prisma.user.findUnique({
@@ -18,7 +22,10 @@ export default async function LoginPage(props: any) {
     });
 
     // 账号必须存在且激活(未离职)
-    if (!user || !user.isActive) {
+    if (!user || !user.isActive || (user.lockedUntil && user.lockedUntil > new Date())) {
+      await prisma.loginAttempt.create({
+        data: { email, ipAddress, success: false, reason: user?.lockedUntil ? 'LOCKED' : 'INVALID_ACCOUNT' },
+      });
       redirect('/?error=1');
     }
 
@@ -39,8 +46,42 @@ export default async function LoginPage(props: any) {
       }
     }
     if (!ok) {
+      const nextFailures = user.failedLoginCount + 1;
+      await prisma.$transaction([
+        prisma.user.update({
+          where: { id: user.id },
+          data: {
+            failedLoginCount: nextFailures >= 5 ? 0 : nextFailures,
+            lockedUntil: nextFailures >= 5 ? new Date(Date.now() + 15 * 60 * 1000) : null,
+          },
+        }),
+        prisma.loginAttempt.create({
+          data: { email, ipAddress, success: false, reason: nextFailures >= 5 ? 'RATE_LIMITED' : 'INVALID_PASSWORD' },
+        }),
+      ]);
       redirect('/?error=1');
     }
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginCount: 0, lockedUntil: null, lastLoginAt: new Date() },
+      }),
+      prisma.loginAttempt.create({ data: { email, ipAddress, success: true, reason: 'SUCCESS' } }),
+      prisma.auditLog.create({
+        data: {
+          actorId: user.id,
+          actorEmail: user.email,
+          actorRole: String(user.role),
+          action: 'AUTH_LOGIN',
+          entityType: 'User',
+          entityId: user.id,
+          summary: '员工登录 CRM',
+          ipAddress,
+          userAgent: requestHeaders.get('user-agent')?.slice(0, 500) || null,
+        },
+      }),
+    ]);
 
     // 签发签名 JWT 会话(httpOnly)，与 middleware 校验打通。
     // JWT 内部存规范化(大写)角色，供未来统一鉴权使用。
@@ -49,19 +90,14 @@ export default async function LoginPage(props: any) {
       email: user.email,
       name: user.name || '未知',
       role: normalizeRole(user.role as string),
+      sessionVersion: user.sessionVersion,
+      mustChangePassword: user.mustChangePassword,
     });
 
-    // auth_role 写数据库原始值，保持与现有各页面角色判断的向后兼容
-    // (历史页面对 sales/SALES、finance/FINANCE 大小写判断不一致，不可改写其值)。
-    const rawRole = (user.role as string) || 'SALES';
-    const cookieOptions = { path: '/', domain: authCookieDomain() };
-    cookies().set('auth_userId', user.id, cookieOptions);
-    cookies().set('auth_role', rawRole, cookieOptions);
-    cookies().set('auth_email', user.email, cookieOptions);
-    cookies().set('auth_name', user.name || '未知', cookieOptions);
+    if (user.mustChangePassword) redirect('/account/password');
 
     // 财务去财务室，业务去看板
-    if (rawRole.toUpperCase() === 'FINANCE') {
+    if (normalizeRole(user.role) === 'FINANCE') {
       redirect('/finance');
     }
     redirect('/dashboard');

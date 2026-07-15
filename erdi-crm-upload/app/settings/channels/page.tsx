@@ -1,8 +1,9 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import type { InboxChannel, SocialPlatform } from '@prisma/client';
+import { requirePermission } from '@/lib/permissions';
+import { writeAuditLog } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,13 +53,13 @@ type RuntimeChannelConfig = {
 export default async function ChannelSettingsPage({
   searchParams,
 }: {
-  searchParams?: { connected?: string; error?: string; saved?: string };
+  searchParams?: Promise<{ connected?: string; error?: string; saved?: string }>;
 }) {
-  const role = cookies().get('auth_role')?.value?.toUpperCase();
-  if (!role || !ADMIN_ROLES.includes(role)) redirect('/');
+  await requirePermission('channels.configure');
+  const query = searchParams ? await searchParams : {};
 
-  const connected = searchParams?.connected;
-  const authError = searchParams?.error;
+  const connected = query.connected;
+  const authError = query.error;
 
   let s = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
   if (!s) s = { id: 'default', usdToCnyRate: 7.2, companyName: 'ERDI TECH LTD', updatedAt: new Date() } as any;
@@ -112,8 +113,7 @@ export default async function ChannelSettingsPage({
 
   async function save(formData: FormData) {
     'use server';
-    const r = cookies().get('auth_role')?.value?.toUpperCase();
-    if (!r || !ADMIN_ROLES.includes(r)) return;
+    const actor = await requirePermission('channels.configure');
     const g = (k: string) => {
       const v = formData.get(k);
       const value = v === null ? '' : String(v).trim();
@@ -174,6 +174,7 @@ export default async function ChannelSettingsPage({
       update: data,
       create: { id: 'default', usdToCnyRate: 7.2, companyName: 'ERDI TECH LTD', ...data },
     });
+    await writeAuditLog(actor, { action: 'CHANNEL_SETTINGS_UPDATED', entityType: 'SystemSettings', entityId: 'default', summary: '更新渠道接入配置（不记录密钥值）' });
     redirect('/settings/channels?saved=1');
   }
 

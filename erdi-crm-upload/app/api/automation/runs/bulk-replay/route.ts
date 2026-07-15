@@ -20,7 +20,7 @@ function readParams(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  if (!isCronAuthorized(req, [AUTOMATION_REPLAY_KEY], ['erdi-mail-2026'])) {
+  if (!isCronAuthorized(req, [AUTOMATION_REPLAY_KEY])) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  if (!isCronAuthorized(req, [AUTOMATION_REPLAY_KEY], ['erdi-mail-2026'])) {
+  if (!isCronAuthorized(req, [AUTOMATION_REPLAY_KEY])) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

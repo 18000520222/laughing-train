@@ -8,7 +8,7 @@ export const maxDuration = 60;
 const EMAIL_SECURITY_KEY = process.env.EMAIL_SECURITY_WATCH_KEY || process.env.MAIL_CRON_KEY;
 
 export async function GET(req: NextRequest) {
-  if (!isCronAuthorized(req, [EMAIL_SECURITY_KEY], ['erdi-mail-2026'])) {
+  if (!isCronAuthorized(req, [EMAIL_SECURITY_KEY])) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

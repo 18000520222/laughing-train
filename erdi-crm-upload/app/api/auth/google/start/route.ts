@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { canonicalOrigin } from '@/lib/site-url';
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
+import { createOAuthState } from '@/lib/oauth-state';
 
 export async function GET() {
+  const session = await getSession();
+  if (!session || !can(session.role, 'channels.configure')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
   const clientId = settings?.googleClientId || process.env.GOOGLE_CLIENT_ID;
   if (!clientId) {
@@ -10,7 +15,7 @@ export async function GET() {
   }
 
   const redirectUri = `${canonicalOrigin()}/api/auth/google/callback`;
-  const state = Math.random().toString(36).slice(2);
+  const state = await createOAuthState('GOOGLE', session);
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,

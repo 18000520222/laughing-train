@@ -3,10 +3,14 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { ingestInbound } from '@/lib/inbox';
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
 
 
 
 export async function POST(req: Request) {
+  const session = await getSession();
+  if (!session || !can(session.role, 'channels.use')) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const accounts = await prisma.socialAccount.findMany({ where: { platform: 'LINKEDIN' } });
   let imported = 0;
   const errors: Array<{ accountId: string; status?: number; message: string }> = [];
@@ -50,28 +54,6 @@ export async function POST(req: Request) {
           senderName: name,
           text: `LinkedIn Lead Gen 表单提交\n姓名: ${name}\n公司: ${company}\n邮箱: ${email || '-'}\n电话: ${answers['PHONE_NUMBER'] || '-'}\n国家: ${answers['COUNTRY'] || '-'}\n原始字段: ${JSON.stringify(answers)}`,
           sentAt: lead.submittedAt ? new Date(lead.submittedAt) : undefined,
-        });
-        if (!email) continue;
-
-        const existing = await prisma.contact.findUnique({ where: { email } });
-        if (existing) continue;
-
-        const newCompany = await prisma.company.create({
-          data: {
-            name: company,
-            country: answers['COUNTRY'] || null,
-            source: 'LINKEDIN',
-            type: 'INQUIRY',
-          },
-        });
-        await prisma.contact.create({
-          data: {
-            firstName: name.split(' ')[0],
-            lastName: name.split(' ').slice(1).join(' ') || null,
-            email,
-            phone: answers['PHONE_NUMBER'] || null,
-            companyId: newCompany.id,
-          },
         });
         imported++;
       }

@@ -2,11 +2,13 @@
 import { NextResponse } from 'next/server';
 import { translateText } from '@/lib/translate';
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/auth';
 
 
 
 export async function POST(req: Request) {
   try {
+    if (!(await getSession())) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
     const body = await req.json();
     const { text, target = 'zh', source = 'auto' } = body;
 

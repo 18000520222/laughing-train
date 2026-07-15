@@ -2,11 +2,15 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
+import type { Permission } from '@/lib/permissions-shared';
+import { can } from '@/lib/permissions-shared';
+import type { Role } from '@/lib/auth';
 
 interface NavItem {
   href: string;
   label: string;
   icon: string;
+  permission: Permission;
 }
 
 interface NavGroup {
@@ -18,49 +22,51 @@ const GROUPS: NavGroup[] = [
   {
     title: '工作台',
     items: [
-      { href: '/dashboard', label: '业务看板', icon: '📊' },
-      { href: '/analytics', label: '数据分析', icon: '📈' },
+      { href: '/dashboard', label: '业务看板', icon: '📊', permission: 'dashboard.read' },
+      { href: '/analytics', label: '数据分析', icon: '📈', permission: 'analytics.read' },
     ],
   },
   {
     title: '客户与商机',
     items: [
-      { href: '/customers', label: '客户管理', icon: '👥' },
-      { href: '/sales-command', label: '销售指挥台', icon: '🎯' },
-      { href: '/sales-kpi', label: '销售KPI', icon: '🏁' },
-      { href: '/tasks', label: '销售任务', icon: '✅' },
-      { href: '/omnibox', label: '统一收件箱', icon: '📥' },
-      { href: '/automation', label: '自动化流程', icon: '🤖' },
-      { href: '/products', label: '产品库', icon: '🛒' },
-      { href: '/suppliers', label: '供应商', icon: '🏭' },
+      { href: '/customers', label: '客户管理', icon: '👥', permission: 'customers.read' },
+      { href: '/sales-command', label: '销售指挥台', icon: '🎯', permission: 'sales.manage' },
+      { href: '/sales-kpi', label: '销售KPI', icon: '🏁', permission: 'sales.manage' },
+      { href: '/tasks', label: '销售任务', icon: '✅', permission: 'sales.manage' },
+      { href: '/omnibox', label: '统一收件箱', icon: '📥', permission: 'inbox.manage' },
+      { href: '/automation', label: '自动化流程', icon: '🤖', permission: 'automation.manage' },
+      { href: '/products', label: '产品库', icon: '🛒', permission: 'products.read' },
+      { href: '/suppliers', label: '供应商', icon: '🏭', permission: 'suppliers.manage' },
     ],
   },
   {
     title: '单据与履约',
     items: [
-      { href: '/documents', label: '单据中心', icon: '📄' },
-      { href: '/logistics', label: '物流中心', icon: '🚚' },
-      { href: '/finance', label: '财务中心', icon: '💰' },
+      { href: '/documents', label: '单据中心', icon: '📄', permission: 'documents.read' },
+      { href: '/logistics', label: '物流中心', icon: '🚚', permission: 'logistics.manage' },
+      { href: '/finance', label: '财务中心', icon: '💰', permission: 'finance.read' },
     ],
   },
   {
     title: '渠道',
     items: [
-      { href: '/whatsapp', label: 'WhatsApp', icon: '💬' },
-      { href: '/social', label: '社媒消息', icon: '📱' },
-      { href: '/settings/channels', label: '渠道接入', icon: '🔌' },
+      { href: '/whatsapp', label: 'WhatsApp', icon: '💬', permission: 'channels.use' },
+      { href: '/social', label: '社媒消息', icon: '📱', permission: 'channels.use' },
+      { href: '/settings/channels', label: '渠道接入', icon: '🔌', permission: 'channels.configure' },
     ],
   },
   {
     title: '系统',
     items: [
-      { href: '/users', label: '员工管理', icon: '🪪' },
-      { href: '/settings', label: '系统设置', icon: '⚙️' },
+      { href: '/users', label: '员工管理', icon: '🪪', permission: 'users.manage' },
+      { href: '/audit', label: '审计日志', icon: '🛡️', permission: 'audit.read' },
+      { href: '/readiness', label: '上线检查', icon: '🚦', permission: 'settings.manage' },
+      { href: '/settings', label: '系统设置', icon: '⚙️', permission: 'settings.manage' },
     ],
   },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ role }: { role: Role }) {
   const pathname = usePathname() || '';
   const [collapsed, setCollapsed] = useState(false);
 
@@ -91,7 +97,9 @@ export default function Sidebar() {
 
       {/* 导航 */}
       <nav className="flex-1 overflow-y-auto py-4">
-        {GROUPS.map((g) => (
+        {GROUPS.map((g) => ({ ...g, items: g.items.filter((item) => can(role, item.permission)) }))
+          .filter((g) => g.items.length > 0)
+          .map((g) => (
           <div key={g.title} className="mb-4">
             {!collapsed && (
               <div className="px-4 mb-1 text-[10px] font-bold uppercase tracking-widest text-gray-600">

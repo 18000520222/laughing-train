@@ -1,7 +1,9 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { parseCsv, rowsToObjects } from '@/lib/csv';
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
+import { writeAuditLog } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,8 +18,8 @@ function toNum(v: string): number | null {
 }
 
 export async function POST(req: Request) {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (!role) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  const session = await getSession();
+  if (!session || !can(session.role, 'products.write')) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const form = await req.formData();
   const file = form.get('file') as File | null;
@@ -34,7 +36,7 @@ export async function POST(req: Request) {
     const o = objs[i];
     const rowNo = i + 2;
     try {
-      const sku = pick(o, 'SKU', 'sku', '编号');
+      const sku = pick(o, 'SKU', 'sku', '编号').toUpperCase();
       const name = pick(o, '中文品名', '品名', 'name');
       const category = pick(o, '分类', 'category') || '未分类';
       if (!sku) { errors.push({ row: rowNo, reason: '缺少 SKU' }); continue; }
@@ -69,6 +71,11 @@ export async function POST(req: Request) {
       errors.push({ row: rowNo, reason: String(e?.message || e).slice(0, 120) });
     }
   }
+
+  await writeAuditLog(session, {
+    action: 'PRODUCTS_IMPORTED', entityType: 'Product', summary: '批量导入产品',
+    metadata: { total: objs.length, created, updated, skipped, errorCount: errors.length },
+  });
 
   return NextResponse.json({ ok: true, total: objs.length, created, updated, skipped, errorCount: errors.length, errors });
 }

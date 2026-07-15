@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { whatsappAdapter } from '@/lib/channels/whatsapp';
 import { ingestInbound, markReplied } from '@/lib/inbox';
+import { verifyMetaWebhookSignature } from '@/lib/meta-webhook';
 
 // GET = Meta 平台对 Webhook URL 的校验请求
 export async function GET(req: Request) {
@@ -17,9 +18,9 @@ export async function GET(req: Request) {
   const challenge = searchParams.get('hub.challenge');
 
   const settings = await prisma.systemSettings.findUnique({ where: { id: 'default' } });
-  const expected = settings?.whatsappVerifyToken || process.env.WHATSAPP_VERIFY_TOKEN || 'erdi-verify-2026';
+  const expected = settings?.whatsappVerifyToken || process.env.WHATSAPP_VERIFY_TOKEN || '';
 
-  if (mode === 'subscribe' && token === expected) {
+  if (expected && mode === 'subscribe' && token === expected) {
     return new Response(challenge, { status: 200 });
   }
   return new Response('forbidden', { status: 403 });
@@ -28,7 +29,11 @@ export async function GET(req: Request) {
 // POST = 接收用户消息
 export async function POST(req: Request) {
   try {
-    const payload = await req.json();
+    const rawBody = await req.text();
+    if (!(await verifyMetaWebhookSignature(rawBody, req.headers.get('x-hub-signature-256')))) {
+      return NextResponse.json({ error: 'Invalid Meta webhook signature' }, { status: 401 });
+    }
+    const payload = JSON.parse(rawBody);
 
     // 1. 适配器解析为标准消息
     const messages = await whatsappAdapter.parseInbound(payload);

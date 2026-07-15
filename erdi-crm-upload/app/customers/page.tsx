@@ -1,9 +1,10 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { ensureCustomerCode } from '@/lib/customer-code';
 import { buildCustomerHealthReport } from '@/lib/customer-health';
+import { requirePermission } from '@/lib/permissions';
+import { companyAccessWhere } from '@/lib/data-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,8 +44,7 @@ const CUSTOMER_SEGMENTS = [
 
 async function addCustomer(formData: FormData) {
   'use server';
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
+  const session = await requirePermission('customers.write');
 
   const s = (k: string) => {
     const v = formData.get(k);
@@ -66,6 +66,7 @@ async function addCustomer(formData: FormData) {
       industry: s('industry'),
       website: s('website'),
       source: 'MANUAL',
+      ownerId: session.role === 'SALES' ? session.userId : null,
     },
   });
 
@@ -92,10 +93,7 @@ async function addCustomer(formData: FormData) {
 }
 
 export default async function CustomersPage(props: any) {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  if (role !== 'SALES' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
-    redirect('/');
-  }
+  const session = await requirePermission('customers.read');
 
   const sp = props.searchParams || {};
   const q = String(sp.q || '').trim();
@@ -103,16 +101,18 @@ export default async function CustomersPage(props: any) {
   const page = Math.max(1, parseInt(String(sp.page || '1'), 10) || 1);
   const activeSegment = CUSTOMER_SEGMENTS.find((item) => item.key === segment);
 
-  const where: any = {};
+  const where: any = companyAccessWhere(session);
   if (q) {
-    where.OR = [
-      { name: { contains: q, mode: 'insensitive' as const } },
-      { customerCode: { contains: q, mode: 'insensitive' as const } },
-      { country: { contains: q, mode: 'insensitive' as const } },
-      { source: { contains: q, mode: 'insensitive' as const } },
-      { owner: { email: { contains: q, mode: 'insensitive' as const } } },
-      { contacts: { some: { email: { contains: q, mode: 'insensitive' as const } } } },
-    ];
+    where.AND = [{
+      OR: [
+        { name: { contains: q, mode: 'insensitive' as const } },
+        { customerCode: { contains: q, mode: 'insensitive' as const } },
+        { country: { contains: q, mode: 'insensitive' as const } },
+        { source: { contains: q, mode: 'insensitive' as const } },
+        { owner: { email: { contains: q, mode: 'insensitive' as const } } },
+        { contacts: { some: { email: { contains: q, mode: 'insensitive' as const } } } },
+      ],
+    }];
   }
   if (activeSegment) where.type = { in: activeSegment.types as any };
 
@@ -126,7 +126,7 @@ export default async function CustomersPage(props: any) {
       take: PAGE_SIZE,
     }),
     prisma.company.groupBy({ by: ['type'], _count: { _all: true } }),
-    prisma.company.count({ where: { ownerId: null } }),
+    prisma.company.count({ where: { ...companyAccessWhere(session), ownerId: null } }),
     prisma.company.findMany({
       where,
       orderBy: { updatedAt: 'desc' },

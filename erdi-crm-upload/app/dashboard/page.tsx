@@ -1,15 +1,16 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { clearSession } from '@/lib/auth';
+import { requirePermission } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 
 
 export default async function Dashboard() {
-  const cookieStore = cookies();
-  const role = cookieStore.get('auth_role')?.value;
-  const currentUser = cookieStore.get('auth_email')?.value || '未知账号';
+  const session = await requirePermission('dashboard.read');
+  const role = session.role;
+  const currentUser = session.email;
   const roleMap: Record<string, string> = {
     'SUPER_ADMIN': '超级管理员',
     'ADMIN': '管理员',
@@ -18,8 +19,6 @@ export default async function Dashboard() {
     'PURCHASING': '采购'
   };
   const currentTitle = roleMap[role || 'SALES'] || '业务人员';
-
-  if (!role) redirect('/');
 
   const monthStart = new Date();
   monthStart.setDate(1);
@@ -139,9 +138,7 @@ export default async function Dashboard() {
 
   async function logout() {
     'use server';
-    cookies().delete('auth_role');
-    cookies().delete('auth_email');
-    cookies().delete('auth_title');
+    await clearSession();
     redirect('/');
   }
 

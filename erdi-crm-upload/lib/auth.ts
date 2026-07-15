@@ -1,17 +1,31 @@
 import { cookies } from 'next/headers';
-import { SignJWT, jwtVerify } from 'jose';
+import { SignJWT } from 'jose/jwt/sign';
+import { jwtVerify } from 'jose/jwt/verify';
+import { prisma } from '@/lib/prisma';
 
-export type Role = 'SUPER_ADMIN' | 'SALES' | 'FINANCE';
+export const ROLES = [
+  'SUPER_ADMIN',
+  'ADMIN',
+  'SALES',
+  'PURCHASING',
+  'FINANCE',
+  'DOCUMENT',
+  'OPERATIONS',
+] as const;
+
+export type Role = (typeof ROLES)[number];
 
 export interface SessionPayload {
   userId: string;
   email: string;
   name: string;
   role: Role;
+  sessionVersion: number;
+  mustChangePassword: boolean;
 }
 
 const SESSION_COOKIE = 'erdi_session';
-const MAX_AGE_SECONDS = 60 * 60 * 12; // 12h
+const MAX_AGE_SECONDS = 60 * 60 * 12;
 
 export function authCookieDomain(): string | undefined {
   return process.env.AUTH_COOKIE_DOMAIN?.trim() || undefined;
@@ -19,21 +33,17 @@ export function authCookieDomain(): string | undefined {
 
 function getSecret(): Uint8Array {
   const secret = process.env.AUTH_SECRET;
-  if (!secret || secret.length < 16) {
-    throw new Error('AUTH_SECRET is missing or too short (need >=16 chars). Set it in env.');
+  if (!secret || secret.length < 32) {
+    throw new Error('AUTH_SECRET is missing or too short (need >=32 chars).');
   }
   return new TextEncoder().encode(secret);
 }
 
-/** Normalize legacy/mixed-case role strings to canonical Role. */
 export function normalizeRole(raw: string | undefined | null): Role {
-  const r = (raw || '').toUpperCase();
-  if (r === 'SUPER_ADMIN' || r === 'ADMIN') return 'SUPER_ADMIN';
-  if (r === 'FINANCE') return 'FINANCE';
-  return 'SALES';
+  const role = (raw || '').toUpperCase();
+  return ROLES.includes(role as Role) ? (role as Role) : 'SALES';
 }
 
-/** Create a signed session JWT and set it as an httpOnly cookie. */
 export async function createSession(payload: SessionPayload): Promise<void> {
   const token = await new SignJWT({ ...payload })
     .setProtectedHeader({ alg: 'HS256' })
@@ -41,7 +51,8 @@ export async function createSession(payload: SessionPayload): Promise<void> {
     .setExpirationTime(`${MAX_AGE_SECONDS}s`)
     .sign(getSecret());
 
-  cookies().set(SESSION_COOKIE, token, {
+  const cookieStore = await cookies();
+  cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
@@ -51,40 +62,59 @@ export async function createSession(payload: SessionPayload): Promise<void> {
   });
 }
 
-/** Read & verify the signed session. Returns null if missing/invalid/expired. */
-export async function getSession(): Promise<SessionPayload | null> {
-  const token = cookies().get(SESSION_COOKIE)?.value;
-  if (!token) return null;
+async function decodeToken(token: string): Promise<SessionPayload | null> {
   try {
     const { payload } = await jwtVerify(token, getSecret());
-    return {
+    const session = {
       userId: String(payload.userId || ''),
-      email: String(payload.email || ''),
+      email: String(payload.email || '').toLowerCase(),
       name: String(payload.name || ''),
       role: normalizeRole(payload.role as string),
+      sessionVersion: Number(payload.sessionVersion || 0),
+      mustChangePassword: Boolean(payload.mustChangePassword),
     };
+    return session.userId && session.email ? session : null;
   } catch {
     return null;
   }
 }
 
-/** Verify a raw token string (for middleware on edge runtime). */
+/**
+ * Verify both the JWT and the current database account state. This makes role
+ * changes, password resets and employee deactivation take effect immediately.
+ */
 export async function verifyToken(token: string): Promise<SessionPayload | null> {
-  try {
-    const { payload } = await jwtVerify(token, getSecret());
-    return {
-      userId: String(payload.userId || ''),
-      email: String(payload.email || ''),
-      name: String(payload.name || ''),
-      role: normalizeRole(payload.role as string),
-    };
-  } catch {
-    return null;
-  }
+  const signed = await decodeToken(token);
+  if (!signed) return null;
+
+  const user = await prisma.user.findUnique({
+    where: { id: signed.userId },
+    select: { id: true, email: true, name: true, role: true, isActive: true, sessionVersion: true, mustChangePassword: true },
+  });
+  if (!user || !user.isActive || user.email.toLowerCase() !== signed.email) return null;
+  if (user.sessionVersion !== signed.sessionVersion) return null;
+
+  return {
+    userId: user.id,
+    email: user.email.toLowerCase(),
+    name: user.name || user.email,
+    role: normalizeRole(user.role),
+    sessionVersion: user.sessionVersion,
+    mustChangePassword: user.mustChangePassword,
+  };
 }
 
-export function clearSession(): void {
-  cookies().delete(SESSION_COOKIE);
+export async function getSession(): Promise<SessionPayload | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+  return token ? verifyToken(token) : null;
+}
+
+export async function clearSession(): Promise<void> {
+  const domain = authCookieDomain();
+  const cookieStore = await cookies();
+  cookieStore.set(SESSION_COOKIE, '', { path: '/', maxAge: 0 });
+  if (domain) cookieStore.set(SESSION_COOKIE, '', { path: '/', domain, maxAge: 0 });
 }
 
 export const SESSION_COOKIE_NAME = SESSION_COOKIE;

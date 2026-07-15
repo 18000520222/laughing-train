@@ -1,5 +1,4 @@
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -13,6 +12,7 @@ import {
   parseMonth,
   progress,
 } from '@/lib/sales-kpi-watch';
+import { requirePermission } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,12 +25,8 @@ const KPI_RECOVERY_LABEL: Record<string, string> = {
 };
 
 async function currentUser() {
-  const role = (cookies().get('auth_role')?.value || '').toUpperCase();
-  const email = cookies().get('auth_email')?.value || '';
-  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN' && role !== 'SALES') redirect('/dashboard');
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) redirect('/dashboard');
-  return { user, role };
+  const session = await requirePermission('sales.manage');
+  return { user: { id: session.userId, email: session.email, name: session.name }, role: session.role };
 }
 
 async function saveKpiTarget(formData: FormData) {

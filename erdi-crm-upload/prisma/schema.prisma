@@ -11,12 +11,18 @@ datasource db {
 // --- 模块一：账号与权限 ---
 
 model User {
-  id       String  @id @default(cuid())
-  email    String  @unique
-  password String
-  name     String?
-  role     Role    @default(SALES)
-  isActive Boolean @default(true)
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  password           String
+  name               String?
+  role               Role      @default(SALES)
+  isActive           Boolean   @default(true)
+  mustChangePassword Boolean   @default(false)
+  failedLoginCount   Int       @default(0)
+  lockedUntil        DateTime?
+  lastLoginAt        DateTime?
+  passwordChangedAt  DateTime?
+  sessionVersion     Int       @default(0)
 
   customers               Company[]
   opportunities           Opportunity[]
@@ -33,9 +39,45 @@ model User {
   createdSalesTasks       SalesTask[]               @relation("SalesTaskCreatedBy")
   salesKpiTargets         SalesKpiTarget[]
   opportunityStageChanges OpportunityStageHistory[] @relation("OpportunityStageChangedBy")
+  auditLogs               AuditLog[]                @relation("AuditLogActor")
+  issuedTradeDocuments    TradeDocument[]           @relation("TradeDocumentIssuedBy")
+  purchaseOrdersCreated   PurchaseOrder[]           @relation("PurchaseOrderCreatedBy")
+  purchaseOrdersApproved  PurchaseOrder[]           @relation("PurchaseOrderApprovedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorEmail String?
+  actorRole  String?
+  action     String
+  entityType String?
+  entityId   String?
+  summary    String?  @db.Text
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId, createdAt])
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  email     String
+  ipAddress String?
+  success   Boolean  @default(false)
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([ipAddress, createdAt])
 }
 
 enum Role {
@@ -231,8 +273,9 @@ model Product {
 
   isActive Boolean @default(true)
 
-  opportunities Opportunity[]
-  lineItems     OpportunityLineItem[]
+  opportunities      Opportunity[]
+  lineItems          OpportunityLineItem[]
+  purchaseOrderItems PurchaseOrderLineItem[]
 }
 
 // --- 模块四：商商机 ---
@@ -270,11 +313,48 @@ model Opportunity {
   stageHistory   OpportunityStageHistory[]
   lineItems      OpportunityLineItem[]
   payments       PaymentRecord[]
+  tradeDocuments TradeDocument[]
+  purchaseOrders PurchaseOrder[]
   carrier        String?
   trackingNumber String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+enum TradeDocumentType {
+  PI
+  CI
+  PL
+  CONTRACT
+  CUSTOMS
+}
+
+enum TradeDocumentStatus {
+  ISSUED
+  SUPERSEDED
+  VOID
+}
+
+model TradeDocument {
+  id             String              @id @default(cuid())
+  type           TradeDocumentType
+  status         TradeDocumentStatus @default(ISSUED)
+  documentNumber String              @unique
+  version        Int                 @default(1)
+  data           Json
+  opportunityId  String
+  opportunity    Opportunity         @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  issuedById     String?
+  issuedBy       User?               @relation("TradeDocumentIssuedBy", fields: [issuedById], references: [id], onDelete: SetNull)
+  issuedAt       DateTime            @default(now())
+  voidedAt       DateTime?
+  voidReason     String?             @db.Text
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@unique([opportunityId, type, version])
+  @@index([opportunityId, type, status, issuedAt])
 }
 
 model OpportunityLineItem {
@@ -405,16 +485,49 @@ model Supplier {
 }
 
 model PurchaseOrder {
-  id             String   @id @default(cuid())
-  poNumber       String   @unique
+  id             String                  @id @default(cuid())
+  poNumber       String                  @unique
   supplierId     String
-  supplier       Supplier @relation(fields: [supplierId], references: [id])
+  supplier       Supplier                @relation(fields: [supplierId], references: [id])
+  opportunityId  String?
+  opportunity    Opportunity?            @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
   totalAmountCNY Float
-  status         String   @default("PENDING")
+  status         String                  @default("PENDING")
   orderDetails   Json
+  paymentTerms   String?
+  expectedAt     DateTime?
+  approvedAt     DateTime?
+  createdById    String?
+  createdBy      User?                   @relation("PurchaseOrderCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedById   String?
+  approvedBy     User?                   @relation("PurchaseOrderApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  lineItems      PurchaseOrderLineItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([supplierId, status, createdAt])
+  @@index([opportunityId])
+}
+
+model PurchaseOrderLineItem {
+  id              String        @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId       String?
+  product         Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName     String
+  sku             String?
+  quantity        Float         @default(1)
+  unitPriceCNY    Float
+  totalAmountCNY  Float
+  note            String?       @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([purchaseOrderId])
+  @@index([productId])
 }
 
 // --- 模块十：邮箱聚合 ---
@@ -720,6 +833,16 @@ model Shipment {
 
   shippedAt        DateTime?
   estimatedArrival DateTime?
+  packages         Int?
+  grossWeightKg    Float?
+  netWeightKg      Float?
+  lengthCm         Float?
+  widthCm          Float?
+  heightCm         Float?
+  incoterm         String?
+  originCountry    String?
+  shippingAddress  Json?
+  notes            String?   @db.Text
 
   trackingEvents TrackingEvent[]
 

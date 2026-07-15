@@ -1,14 +1,14 @@
 // app/api/notifications/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
+import { getSession } from '@/lib/auth';
 
 
 
 async function currentUser() {
-  const email = cookies().get('auth_email')?.value;
-  if (!email) return null;
-  return prisma.user.findUnique({ where: { email } });
+  const session = await getSession();
+  if (!session) return null;
+  return prisma.user.findUnique({ where: { id: session.userId } });
 }
 
 export async function GET() {

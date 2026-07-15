@@ -9,9 +9,13 @@ import { prisma } from '@/lib/prisma';
 import { whatsappAdapter } from '@/lib/channels/whatsapp';
 import { translateReply } from '@/lib/translate';
 import { markReplied } from '@/lib/inbox';
+import { getSession } from '@/lib/auth';
+import { can } from '@/lib/permissions';
 
 export async function POST(req: Request) {
   try {
+    const session = await getSession();
+    if (!session || !can(session.role, 'channels.use')) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
     const { to, text, companyId, translateTo, inboxId } = await req.json();
     if (!to || !text) {
       return NextResponse.json({ error: 'to & text required' }, { status: 400 });
