@@ -8,6 +8,8 @@ export function stripQuotedHistory(body: string): string {
     /^\s*On .{1,250} wrote:\s*$/im,
     /^\s*在.{1,250}写道[：:]\s*$/im,
     /^\s*From:\s*.{0,250}<[^>]+@[^>]+>\s*$/im,
+    /^\s*(?:From|发件人|От|Von|De):[^\n]{1,250}\n(?:[^\n]*\n){0,3}\s*(?:Sent|Date|发送时间|Отправлено|Gesendet|Envoyé):/im,
+    /^\s*.{1,250}<[^>]+@[^>]+>\s+(?:wrote|写道|пише|написал|написала|schrieb|a écrit|escribió)[：:]?\s*$/im,
   ];
 
   let result = body.replace(/\r\n/g, '\n');

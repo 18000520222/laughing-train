@@ -62,6 +62,16 @@ const cases = [
     input: { direction: 'IN', subject: 'Payment', textBody: 'Please send the PI. Payment will follow soon.' },
   },
   {
+    name: 'initiated future wire is not won',
+    notStage: 'DEAL_WON',
+    input: { direction: 'IN', subject: 'Payment confirmation', textBody: 'A wire payment of USD 9,600 has been initiated and will be sent from our account on Monday.' },
+  },
+  {
+    name: 'scheduled payment is not won',
+    notStage: 'DEAL_WON',
+    input: { direction: 'IN', subject: 'Re: Payment confirmation', textBody: 'The payment was scheduled to leave our account today. It can take two or three days to be deposited.' },
+  },
+  {
     name: 'refund is not won',
     stage: null,
     input: { direction: 'IN', subject: 'Refund for down payment', textBody: 'Please arrange the refund for the down payment of USD 2,000.' },
@@ -73,6 +83,15 @@ const cases = [
       direction: 'IN',
       subject: 'Re: Signed contract',
       textBody: 'We cannot move forward with this project.\n\nOn Monday, sales@erdicn.com wrote:\nPlease find the signed contract and payment confirmation.',
+    },
+  },
+  {
+    name: 'outlook quoted payment history is ignored',
+    stage: null,
+    input: {
+      direction: 'IN',
+      subject: 'Re: PO shipping address',
+      textBody: 'Please use the corrected ship-to address.\n\nFrom: Buyer Name\nSent: Friday, April 3, 2026 8:04 AM\nTo: Sales\nSubject: Re: PO\nPayment made, please ship the order.',
     },
   },
 ];

@@ -49,6 +49,9 @@ const REFUND_OR_FAILURE = [
   /\bpayment (?:is )?(?:pending|overdue|outstanding)\b/i,
   /\bawaiting (?:your )?payment\b/i,
   /\bpayment (?:will|would|shall|should) (?:follow|be made|be sent)\b/i,
+  /\b(?:wire )?payment.{0,80}\b(?:initiated|scheduled)\b/i,
+  /\b(?:payment|funds?).{0,80}\bwill (?:be sent|leave|arrive|be deposited)\b/i,
+  /\bpayment.{0,100}\bcan take.{0,40}\bdays?.{0,40}\b(?:deposit|credit|arrive)/i,
   /\bneed (?:a |the )?(?:pi|proforma invoice) (?:before|for) payment\b/i,
   /退款|退回|撤回汇款|付款失败|尚未付款|等待付款|待付款/i,
 ];
