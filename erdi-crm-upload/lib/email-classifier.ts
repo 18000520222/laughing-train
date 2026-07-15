@@ -38,6 +38,7 @@ const SYSTEM_SERVICE_DOMAINS = [
   'fedex.com',
   'ups.com',
 ];
+const CARRIER_DOMAINS = ['dhl.com', 'fedex.com', 'ups.com'];
 
 const CATEGORY_RULES: Array<{
   category: EmailCategory;
@@ -216,6 +217,9 @@ export function classifyEmail(input: { from?: string | null; subject?: string | 
 
   const systemSender = automatedServiceSender(from, domain);
   if (systemSender && !hasPlatformCustomerLead(text) && !hasStrongCustomerTransaction(text)) {
+    if (domain && CARRIER_DOMAINS.some((item) => domain === item || domain.endsWith(`.${item}`))) {
+      return result('LOGISTICS', `carrier-notice:${domain}`, 90, true, false, ['物流', '承运商通知']);
+    }
     return result('PLATFORM_ALERT', `automated-service:${systemSender}`, 94, false, false, ['平台通知', '自动归档']);
   }
 

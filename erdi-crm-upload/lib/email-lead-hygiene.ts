@@ -6,6 +6,7 @@ const NON_SALES_CATEGORIES = new Set([
   'MARKETING_NEWSLETTER',
   'SEO_SPAM',
   'INTERNAL',
+  'LOGISTICS',
 ]);
 
 const SYSTEM_SERVICE_DOMAINS = [
@@ -58,6 +59,7 @@ export async function auditAndRepairEmailLeadHygiene(options: { apply: boolean; 
     if (!email || email.direction !== 'IN' || hasDownstreamEvidence(opportunity)) return [];
     const classification = classifyEmail(email);
     if (classification.isLead || !NON_SALES_CATEGORIES.has(classification.category)) return [];
+    if (classification.category === 'LOGISTICS' && !opportunity.company.contacts.every((contact) => isCarrierAddress(contact.email))) return [];
     return [{ opportunity, email, classification }];
   });
 
@@ -86,6 +88,7 @@ export async function auditAndRepairEmailLeadHygiene(options: { apply: boolean; 
   let inboxArchived = 0;
   let companiesMarkedLost = 0;
   for (const { opportunity, email, classification } of candidates) {
+    const preserveOperationalInbox = classification.category === 'LOGISTICS';
     const shouldMarkCompanyLost = opportunity.company.source === 'EMAIL'
       && opportunity.company.payments.length === 0
       && opportunity.company.opportunities.every((item) => item.id === opportunity.id || item.stage === 'CLOSED_LOST')
@@ -99,18 +102,20 @@ export async function auditAndRepairEmailLeadHygiene(options: { apply: boolean; 
           category: classification.category,
           categoryReason: classification.categoryReason,
           classificationScore: classification.classificationScore,
-          actionRequired: false,
+          actionRequired: preserveOperationalInbox ? classification.actionRequired : false,
           isLead: false,
           classificationTags: Array.from(new Set([...classification.classificationTags, '历史误判已修复'])),
           classifiedAt: new Date(),
-          processingState: 'IGNORED',
+          processingState: preserveOperationalInbox ? 'INGESTED' : 'IGNORED',
         },
       });
-      const archived = await tx.inboxMessage.updateMany({
-        where: { channel: 'EMAIL', externalId: email.messageId, status: { in: ['NEW', 'AI_DRAFTED'] } },
-        data: { status: 'ARCHIVED' },
-      });
-      inboxArchived += archived.count;
+      if (!preserveOperationalInbox) {
+        const archived = await tx.inboxMessage.updateMany({
+          where: { channel: 'EMAIL', externalId: email.messageId, status: { in: ['NEW', 'AI_DRAFTED'] } },
+          data: { status: 'ARCHIVED' },
+        });
+        inboxArchived += archived.count;
+      }
       await tx.opportunity.update({
         where: { id: opportunity.id },
         data: {
@@ -178,4 +183,9 @@ function isAutomatedServiceAddress(value: string | null) {
   const domain = email.split('@')[1] || '';
   return /^(?:no-?reply|notifications?|mailer-daemon)@/i.test(email)
     || SYSTEM_SERVICE_DOMAINS.some((item) => domain === item || domain.endsWith(`.${item}`));
+}
+
+function isCarrierAddress(value: string | null) {
+  const domain = String(value || '').toLowerCase().split('@')[1] || '';
+  return ['dhl.com', 'fedex.com', 'ups.com'].some((item) => domain === item || domain.endsWith(`.${item}`));
 }

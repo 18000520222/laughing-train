@@ -81,9 +81,11 @@ test('system service notifications cannot enter the sales lead pipeline', () => 
   assert.match(classifier, /automated-service:/);
   assert.match(classifier, /vercel\.com/);
   assert.match(classifier, /dhl\.com/);
+  assert.match(classifier, /carrier-notice:/);
   assert.match(sync, /NOISE_CATEGORIES[^\n]+PLATFORM_ALERT/);
   assert.match(hygiene, /stage:\s*'CLOSED_LOST'/);
-  assert.match(hygiene, /processingState:\s*'IGNORED'/);
+  assert.match(hygiene, /processingState:\s*preserveOperationalInbox\s*\?\s*'INGESTED'\s*:\s*'IGNORED'/);
   assert.match(hygiene, /status:\s*'ARCHIVED'/);
+  assert.match(hygiene, /preserveOperationalInbox/);
   assert.doesNotMatch(hygiene, /\.delete(?:Many)?\(/);
 });
