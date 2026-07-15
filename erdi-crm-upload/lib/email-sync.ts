@@ -161,13 +161,15 @@ async function syncMailbox(client: ImapFlow, account: EmailAccount, mailbox: str
         seen++;
         report.fetched++;
         const uid = Number(message.uid || 0);
-        maxUid = Math.max(maxUid, uid);
-        oldestUid = Math.min(oldestUid, uid);
         const saved = await persistFetchedEmail(account, mailbox, direction, message).catch((error) => {
-          report.errors.push(safeError(error));
+          report.errors.push(`uid ${uid}: ${safeError(error)}`);
           return null;
         });
-        if (saved) applyPersistResult(report, saved);
+        // 不越过失败 UID；下次从同一位置重试，避免单封异常邮件永久丢失。
+        if (!saved) break;
+        maxUid = Math.max(maxUid, uid);
+        oldestUid = Math.min(oldestUid, uid);
+        applyPersistResult(report, saved);
       }
     }
 
@@ -179,18 +181,28 @@ async function syncMailbox(client: ImapFlow, account: EmailAccount, mailbox: str
       if (selected.length === 0) {
         historyComplete = true;
       } else {
+        let failedHistoryUid: number | null = null;
         for await (const message of client.fetch(selected.join(','), { source: true, uid: true }, { uid: true })) {
           report.fetched++;
           report.historyFetched++;
           const uid = Number(message.uid || 0);
-          oldestUid = Math.min(oldestUid, uid);
           const saved = await persistFetchedEmail(account, mailbox, direction, message).catch((error) => {
-            report.errors.push(safeError(error));
+            report.errors.push(`uid ${uid}: ${safeError(error)}`);
             return null;
           });
-          if (saved) applyPersistResult(report, saved);
+          if (!saved) {
+            failedHistoryUid = uid;
+            break;
+          }
+          oldestUid = Math.min(oldestUid, uid);
+          applyPersistResult(report, saved);
         }
-        historyComplete = selected.length < historyBatch || oldestUid <= 1;
+        if (failedHistoryUid !== null) {
+          oldestUid = Math.max(oldestUid, failedHistoryUid + 1);
+          historyComplete = false;
+        } else {
+          historyComplete = selected.length < historyBatch || oldestUid <= 1;
+        }
       }
     }
 
@@ -226,11 +238,11 @@ async function persistFetchedEmail(
   message: { source?: Buffer | Uint8Array | null; uid?: number | false },
 ) {
   const parsed: any = await simpleParser(message.source as any);
-  const messageId = String(parsed.messageId || `imap-${account.id}-${mailbox}-${message.uid}`);
-  const from = String(parsed.from?.text || parsed.from?.value?.[0]?.address || 'unknown');
-  const subject = String(parsed.subject || '(无主题)');
-  const textBody = String(parsed.text || '');
-  const htmlBody = typeof parsed.html === 'string' ? parsed.html : '';
+  const messageId = cleanDbText(parsed.messageId || `imap-${account.id}-${mailbox}-${message.uid}`);
+  const from = cleanDbText(parsed.from?.text || parsed.from?.value?.[0]?.address || 'unknown');
+  const subject = cleanDbText(parsed.subject || '(无主题)');
+  const textBody = cleanDbText(parsed.text || '');
+  const htmlBody = typeof parsed.html === 'string' ? cleanDbText(parsed.html) : '';
   const classification = classifyEmail({ from, subject, textBody, htmlBody });
   const disposition = classifyEmailDisposition({ from, subject, textBody, classification, headers: parsed.headers, direction });
   const existing = await prisma.emailMessage.findUnique({ where: { messageId }, select: { id: true, processingState: true } });
@@ -241,7 +253,7 @@ async function persistFetchedEmail(
     direction,
     subject,
     from,
-    to: String(parsed.to?.text || account.email),
+    to: cleanDbText(parsed.to?.text || account.email),
     date: parsed.date || new Date(),
     textBody,
     htmlBody,
@@ -428,5 +440,9 @@ async function markFolderSuccess(
 
 function safeError(error: unknown) {
   const raw = error instanceof Error ? error.message : String(error);
-  return raw.replace(/(?:password|token|secret|authorization)\s*[=:]\s*[^\s,;]+/gi, '$1=[redacted]').slice(0, 800);
+  return raw.replace(/\u0000/g, '').replace(/(?:password|token|secret|authorization)\s*[=:]\s*[^\s,;]+/gi, '$1=[redacted]').slice(0, 800);
+}
+
+function cleanDbText(value: unknown) {
+  return String(value ?? '').replace(/\u0000/g, '');
 }
