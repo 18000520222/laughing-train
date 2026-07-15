@@ -13,6 +13,7 @@ const PUBLIC_PREFIXES = [
   '/api/webhook',      // 通用 webhook(自带签名校验)
   '/api/webhooks/',    // Meta unified webhook 等复数形式
   '/api/shopline',     // SHOPLINE webhook
+  '/api/agent/',       // Codex/WeChat bridge API (Bearer token protected)
   '/api/whatsapp/webhook',
   '/api/facebook/webhook',
   '/api/alibaba/webhook',  // 阿里国际站消息推送

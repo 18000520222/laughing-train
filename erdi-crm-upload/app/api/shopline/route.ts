@@ -1,53 +1,54 @@
-import { prisma } from '@/lib/prisma';
+import { isAgentAuthorized } from '@/lib/agent-auth';
+import { importShoplineOrder, verifyShoplineWebhook } from '@/lib/shopline-orders';
 import { NextResponse } from 'next/server';
 
-
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 export async function OPTIONS() {
-  return NextResponse.json({}, {
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    },
-  });
+  return new NextResponse(null, { status: 204 });
 }
 
 export async function POST(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const expectedToken = process.env.WEBHOOK_TOKEN || 'erdi2026';
-    if (searchParams.get('token') !== expectedToken) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const rawBody = await request.text();
+  const signature = request.headers.get('x-shopline-hmac-sha256') || '';
+  const topic = request.headers.get('x-shopline-topic') || '';
+
+  if (signature) {
+    const secret = process.env.SHOPLINE_APP_SECRET || '';
+    if (!secret) {
+      return NextResponse.json({ error: 'SHOPLINE webhook is not configured.' }, { status: 503 });
     }
+    if (!verifyShoplineWebhook(rawBody, signature, secret)) {
+      return NextResponse.json({ error: 'Invalid SHOPLINE signature.' }, { status: 401 });
+    }
+    if (topic && !topic.startsWith('orders/')) {
+      return NextResponse.json({ error: `Unsupported SHOPLINE topic: ${topic}` }, { status: 400 });
+    }
+  } else if (!isAgentAuthorized(request)) {
+    return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+  }
 
-    const payload = await request.json();
-    console.log("收到 SHOPLINE 推送数据:", JSON.stringify(payload).substring(0, 200));
+  let payload: unknown;
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON payload.' }, { status: 400 });
+  }
 
-    const customerEmail = payload.email || payload.customer?.email || '未提供邮箱';
-    const customerName = payload.first_name || payload.customer?.first_name || 'SHOPLINE 官网访客';
-    const phone = payload.phone || payload.customer?.phone || '未提供电话';
-    
-    const note = payload.note || payload.message || '官网访客触发了事件，但未提取到具体留言内容。';
-
-    const newOpp = await prisma.opportunity.create({
-      data: {
-        title: `官网新询盘 (Shopline)`,
-        stage: 'SPEC_CONFIRMING' as any,
-        company: { create: { name: customerName, source: 'SHOPLINE', type: 'INQUIRY' } },
-        description: `🌍 来源平台: SHOPLINE (erdicn.com)\n👤 客户姓名: ${customerName}\n📧 联系邮箱: ${customerEmail}\n📞 联系电话: ${phone}\n\n📝 备注/留言:\n${note}\n\n---\n接收时间: ${new Date().toLocaleString()}`,
-        amountUSD: 0
-      }
+  try {
+    const result = await importShoplineOrder(payload);
+    console.info('SHOPLINE order import', {
+      orderNumber: result.orderNumber,
+      status: result.status,
+      topic: topic || 'agent-import',
     });
-
-    return NextResponse.json({ success: true, message: 'Shopline data stored', id: newOpp.id }, {
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-      }
+    return NextResponse.json({ success: true, ...result }, {
+      headers: { 'Cache-Control': 'no-store' },
     });
-
-  } catch (error: any) {
-    console.error('Shopline Webhook Error:', error);
-    return NextResponse.json({ error: 'Server Error' }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown import error.';
+    console.error('SHOPLINE order import failed', { topic: topic || 'agent-import', message });
+    return NextResponse.json({ error: message }, { status: 422 });
   }
 }
