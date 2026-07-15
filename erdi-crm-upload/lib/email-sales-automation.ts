@@ -66,11 +66,11 @@ const DEAL_REJECTED = [
 
 const PAYMENT_CONFIRMED = [
   /\b(?:we|i) (?:have )?(?:made|sent|completed) (?:the )?(?:full |down )?payment\b/i,
+  /\b(?:we|i) (?:have )?(?:made|sent|completed) (?:the )?(?:bank|wire) transfer\b/i,
   /\bpayment (?:has been |was )?(?:made|sent|completed|received|credited)\b/i,
   /\bfunds? (?:has|have) been (?:received|credited)\b/i,
   /\b(?:bank|wire) transfer (?:has been |was )?(?:made|completed|sent)\b/i,
   /\battached (?:is |please find )?(?:the )?(?:payment|bank|wire).{0,30}(?:receipt|slip|copy|proof)\b/i,
-  /\bpayment confirmation\b/i,
   /已付款|付款完成|款项已到账|已经汇款|汇款凭证|付款水单|银行水单/i,
 ];
 
@@ -120,6 +120,7 @@ const INQUIRY_SIGNAL = [
 export function analyzeSalesEmail(input: SalesEmailInput): SalesEmailAnalysis {
   const latestBody = stripQuotedHistory(String(input.textBody || ''));
   const subject = String(input.subject || '');
+  const latestText = latestBody.replace(/\s+/g, ' ').trim();
   const text = `${subject}\n${latestBody}`.replace(/\s+/g, ' ').trim();
   const isRefundOrFailure = REFUND_OR_FAILURE.some((pattern) => pattern.test(text));
   const isDealRejected = DEAL_REJECTED.some((pattern) => pattern.test(text));
@@ -129,6 +130,8 @@ export function analyzeSalesEmail(input: SalesEmailInput): SalesEmailAnalysis {
   const productName = extractProductName(`${subject}\n${latestBody}`);
   const paymentMethod = extractPaymentMethod(text);
   const paymentReference = extractPaymentReference(text);
+  const paymentAttachmentSubject = !/^\s*(?:re|fw|fwd)\s*:/i.test(subject)
+    && /(?:\bpayment confirmation\b.{0,60}\battach(?:ed|ment)\b|\battach(?:ed|ment)\b.{0,60}\bpayment confirmation\b)/i.test(subject);
 
   const base = {
     amount: amountInfo.amount,
@@ -145,8 +148,8 @@ export function analyzeSalesEmail(input: SalesEmailInput): SalesEmailAnalysis {
     return { ...base, stage: null, confidence: 95, reason: 'deal-rejected-or-cancelled' };
   }
 
-  if (input.direction !== 'OUT' && !isRefundOrFailure && PAYMENT_CONFIRMED.some((pattern) => pattern.test(text))) {
-    return { ...base, stage: 'DEAL_WON', confidence: 96, reason: 'confirmed-payment' };
+  if (input.direction !== 'OUT' && !isRefundOrFailure && (paymentAttachmentSubject || PAYMENT_CONFIRMED.some((pattern) => pattern.test(latestText)))) {
+    return { ...base, stage: 'DEAL_WON', confidence: 96, reason: paymentAttachmentSubject ? 'payment-proof-attached' : 'confirmed-payment' };
   }
   if (input.direction === 'OUT' && OUTBOUND_CONTRACT.some((pattern) => pattern.test(text))) {
     return { ...base, stage: 'CONTRACT_SENT', confidence: 91, reason: 'outbound-contract-sent' };

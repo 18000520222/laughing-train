@@ -4,6 +4,7 @@ export function stripQuotedHistory(body: string): string {
   const markers = [
     /^-+\s*Original Message\s*-+\s*$/im,
     /^-+\s*原始邮件\s*-+\s*$/im,
+    /^-{8,}\s*\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4}[,\s]/m,
     /^_{8,}\s*$/m,
     /^\s*On .{1,250} wrote:\s*$/im,
     /^\s*在.{1,250}写道[：:]\s*$/im,

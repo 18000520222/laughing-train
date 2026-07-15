@@ -72,6 +72,21 @@ const cases = [
     input: { direction: 'IN', subject: 'Re: Payment confirmation', textBody: 'The payment was scheduled to leave our account today. It can take two or three days to be deposited.' },
   },
   {
+    name: 'reply subject alone is not payment proof',
+    notStage: 'DEAL_WON',
+    input: { direction: 'IN', subject: 'Re: Payment Confirmation and Shipping Arrangements', textBody: 'Could you recommend a spare parts supplier after the warranty period?' },
+  },
+  {
+    name: 'reply payment sent subject with logistics body is not won',
+    notStage: 'DEAL_WON',
+    input: { direction: 'IN', subject: 'Re: Payment Sent', textBody: 'Thank you. I handed the shipping documents to the carrier.\n---------------- 25.11.2024, 14:49, "Sales" <sales@example.com>: Subject: Payment Sent;' },
+  },
+  {
+    name: 'new payment confirmation attachment is won',
+    stage: 'DEAL_WON',
+    input: { direction: 'IN', subject: 'Payment confirmation for invoice LRF250409 attached', textBody: 'Please see attachment.' },
+  },
+  {
     name: 'refund is not won',
     stage: null,
     input: { direction: 'IN', subject: 'Refund for down payment', textBody: 'Please arrange the refund for the down payment of USD 2,000.' },
